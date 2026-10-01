@@ -15,7 +15,8 @@ import { addTable, connectManyToMany, connectTables, removeRelation, removeTable
 import { useStore } from '../store';
 import { TableNode, type TableNodeType } from './TableNode';
 import { RelationEdge } from './RelationEdge';
-import { buildEdges, buildNodes } from '../lib/graph';
+import { buildCompareGraph, buildEdges, buildNodes } from '../lib/graph';
+import { getDialect, type DialectId } from '@erd/core';
 
 const nodeTypes = { table: TableNode };
 const edgeTypes = { relation: RelationEdge };
@@ -26,6 +27,8 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const viewMode = useStore((s) => s.viewMode);
   const selection = useStore((s) => s.selection);
   const peers = useStore((s) => s.peers);
+  const compare = useStore((s) => s.compare);
+  const dialectId = useStore((s) => s.meta.dialect);
   const synced = useStore((s) => s.synced);
   const { edit, select, setCursor } = useStore.getState();
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -42,10 +45,21 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const selectedRelation = selection?.type === 'relation' ? selection.id : null;
 
   const [nodes, setNodes] = useState<TableNodeType[]>(() => buildNodes(schema, viewMode, selectedTable));
+  const compareGraph = useMemo(
+    () => (compare ? buildCompareGraph(compare.schema, schema, getDialect((dialectId || 'mysql') as DialectId), viewMode) : null),
+    [compare, schema, dialectId, viewMode],
+  );
   useEffect(() => {
-    setNodes((prev) => buildNodes(schema, viewMode, selectedTable, prev, peers));
-  }, [schema, viewMode, selectedTable, peers]);
-  const edges = useMemo(() => buildEdges(schema, selectedRelation), [schema, selectedRelation]);
+    setNodes((prev) => {
+      if (compareGraph) {
+        const measured = new Map(prev.map((n) => [n.id, n.measured]));
+        return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
+      }
+      return buildNodes(schema, viewMode, selectedTable, prev, peers);
+    });
+  }, [schema, viewMode, selectedTable, peers, compareGraph]);
+  const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
+  const readOnly = Boolean(compare);
 
   const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
     // 선택은 스토어가 관리하므로 select 변경은 무시한다.
@@ -80,7 +94,9 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
-      onConnect={onConnect}
+      onConnect={readOnly ? undefined : onConnect}
+      nodesDraggable={!readOnly}
+      nodesConnectable={!readOnly}
       connectionMode={ConnectionMode.Loose}
       onNodeClick={(_, node) => select({ type: 'table', id: node.id })}
       onEdgeClick={(_, edge) => select({ type: 'relation', id: edge.id })}
@@ -104,7 +120,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         });
       }}
       onDoubleClick={(e) => {
-        if (!(e.target as HTMLElement).classList.contains('react-flow__pane')) return;
+        if (readOnly || !(e.target as HTMLElement).classList.contains('react-flow__pane')) return;
         const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
         edit((draft) => {
           const table = addTable(draft, { position });
@@ -113,7 +129,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       }}
       onNodesDelete={(deleted) => edit((draft) => deleted.forEach((n) => removeTable(draft, n.id)))}
       onEdgesDelete={(deleted) => edit((draft) => deleted.forEach((e) => removeRelation(draft, e.id)))}
-      deleteKeyCode={['Delete']}
+      deleteKeyCode={readOnly ? null : ['Delete']}
       zoomOnDoubleClick={false}
       minZoom={0.1}
       maxZoom={2}

@@ -11,11 +11,13 @@ export type TableNodeData = {
   highlight?: 'added' | 'changed' | 'removed';
   /** 이 테이블을 선택한 다른 사람들 */
   peers?: { name: string; color: string }[];
+  /** 비교 화면: 컬럼별 추가/변경/삭제 표시 */
+  columnMarks?: Record<string, 'added' | 'changed' | 'removed'>;
 };
 export type TableNodeType = Node<TableNodeData, 'table'>;
 
 function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
-  const { table, fkIds, viewMode, highlight, peers = [] } = data;
+  const { table, fkIds, viewMode, highlight, peers = [], columnMarks } = data;
   const connection = useConnection();
   const isTarget = connection.inProgress && connection.fromNode.id !== id;
   const fk = new Set(fkIds);
@@ -38,6 +40,7 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
         </div>
       )}
       <div className="table-node__header">
+        {highlight && <span className={`hl-tag hl-tag-${highlight}`}>{{ added: '추가', changed: '변경', removed: '삭제' }[highlight]}</span>}
         <span className="table-node__title">{title}</span>
         {subtitle && <span className="table-node__subtitle">{subtitle}</span>}
       </div>
@@ -46,7 +49,7 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
         {table.columns.map((c) => {
           const name = viewMode === 'logical' ? c.logicalName || c.name : c.name;
           return (
-            <div key={c.id} className={`table-node__column${c.primaryKey ? ' pk' : ''}`}>
+            <div key={c.id} className={`table-node__column${c.primaryKey ? ' pk' : ''}${columnMarks?.[c.id] ? ` col-${columnMarks[c.id]}` : ''}`}>
               <span className="table-node__key">
                 {c.primaryKey && <span className="badge badge-pk" title="기본키">PK</span>}
                 {fk.has(c.id) && <span className="badge badge-fk" title="외래키">FK</span>}

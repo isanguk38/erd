@@ -1,7 +1,7 @@
 import { BaseEdge, getSmoothStepPath, Position, useInternalNode, type Edge, type EdgeProps, type InternalNode } from '@xyflow/react';
 import type { Cardinality } from '@erd/core';
 
-export type RelationEdgeData = { cardinality: Cardinality; highlight?: 'added' | 'removed' };
+export type RelationEdgeData = { cardinality: Cardinality; highlight?: 'added' | 'changed' | 'removed' };
 export type RelationEdgeType = Edge<RelationEdgeData, 'relation'>;
 
 interface Anchor {

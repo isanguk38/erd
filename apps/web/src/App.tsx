@@ -12,6 +12,7 @@ import { DefinitionDialog } from './components/DefinitionDialog';
 import { AiBanner, AiDialog, ProposalsDialog } from './components/AiPanels';
 import { ProjectsPage } from './components/ProjectsPage';
 import { refreshDbStatus } from './lib/hooks';
+import { CompareBanner, ComparePanel } from './components/ComparePanel';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -41,6 +42,7 @@ function Editor({ projectId }: { projectId: string }) {
   const [fitRequest, setFitRequest] = useState(0);
   const synced = useStore((s) => s.synced);
   const status = useStore((s) => s.status);
+  const comparing = useStore((s) => Boolean(s.compare));
 
   useEffect(() => {
     useStore.getState().open(projectId);
@@ -75,7 +77,7 @@ function Editor({ projectId }: { projectId: string }) {
         <Toolbar onOpen={setDialog} />
         <main className="workspace">
           <div className="canvas">
-            <AiBanner onOpenProposals={() => setDialog('proposals')} />
+            {comparing ? <CompareBanner /> : <AiBanner onOpenProposals={() => setDialog('proposals')} />}
             {!synced && (
               <div className="sync-overlay">
                 {status === 'disconnected' ? 'ERD 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요. (다시 연결 중…)' : '프로젝트를 불러오는 중…'}
@@ -83,7 +85,7 @@ function Editor({ projectId }: { projectId: string }) {
             )}
             <Canvas fitRequest={fitRequest} />
           </div>
-          <Inspector />
+          {comparing ? <ComparePanel /> : <Inspector />}
         </main>
         {dialog === 'sql' && <SqlDialog onClose={close} />}
         {dialog === 'versions' && <VersionsDialog onClose={close} />}

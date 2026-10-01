@@ -40,7 +40,10 @@ interface State extends LocalPrefs {
   peers: Peer[];
   canUndo: boolean;
   canRedo: boolean;
+  /** 버전 비교 중이면 기준 버전 (편집은 잠긴다) */
+  compare: { name: string; createdAt: string; schema: Schema } | null;
 
+  setCompare: (compare: State['compare']) => void;
   open: (projectId: string) => void;
   close: () => void;
   /** 스키마를 바꾼다. 바뀐 부분만 문서에 기록되어 다른 사람에게 바로 보인다. */
@@ -96,6 +99,9 @@ export const useStore = create<State>()(
         peers: [],
         canUndo: false,
         canRedo: false,
+        compare: null,
+
+        setCompare: (compare) => set({ compare, selection: null }),
 
         open(projectId) {
           if (get().projectId === projectId) return;
@@ -142,12 +148,12 @@ export const useStore = create<State>()(
           provider = null;
           undoManager = null;
           doc = null;
-          set({ projectId: null, peers: [], synced: false });
+          set({ projectId: null, peers: [], synced: false, compare: null });
         },
 
         edit(fn) {
-          // 서버 문서를 받기 전에 쓰면 최상위 맵이 겹쳐 서버 내용이 사라질 수 있으므로 막는다
-          if (!doc || !get().synced) return;
+          // 서버 문서를 받기 전에 쓰면 최상위 맵이 겹쳐 서버 내용이 사라질 수 있으므로 막는다. 비교 중에는 편집하지 않는다.
+          if (!doc || !get().synced || get().compare) return;
           const draft = cloneSchema(get().schema);
           try {
             fn(draft);

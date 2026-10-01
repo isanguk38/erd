@@ -372,3 +372,24 @@ label.btn { display: inline-flex; align-items: center; }
 .db-badge { position: absolute; top: -7px; right: -7px; font-size: 10px; border-radius: 9px; padding: 0 5px; line-height: 16px; color: #fff; background: #0891b2; }
 .db-badge.erd { background: #8b5cf6; }
 .btn-with-badge { position: relative; }
+
+/* 버전 비교 */
+.table-node.hl-changed { box-shadow: 0 0 0 3px #f59e0b; }
+.table-node.hl-removed .table-node__title { text-decoration: line-through; }
+.hl-tag { font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 3px; background: #fff; line-height: 15px; }
+.hl-tag-added { color: var(--create); }
+.hl-tag-changed { color: #b45309; }
+.hl-tag-removed { color: var(--drop); }
+.table-node__column.col-added { background: color-mix(in srgb, var(--create) 16%, transparent); }
+.table-node__column.col-changed { background: color-mix(in srgb, #f59e0b 20%, transparent); }
+.table-node__column.col-removed { background: color-mix(in srgb, var(--drop) 12%, transparent); }
+.table-node__column.col-removed .table-node__name, .table-node__column.col-removed .table-node__type { text-decoration: line-through; color: var(--drop); }
+.relation-edge.hl-changed .react-flow__edge-path, .relation-edge.hl-changed .relation-edge__symbol { stroke: #f59e0b; }
+.compare-banner {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 16; display: flex; align-items: center; gap: 10px;
+  background: var(--panel); border: 2px solid #f59e0b; border-radius: 10px; padding: 8px 12px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12); white-space: nowrap;
+}
+.compare-count { font-size: 12px; font-weight: 600; }
+.compare-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.compare-list li button { all: unset; cursor: pointer; display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px; width: 100%; box-sizing: border-box; }
+.compare-list li button:hover { background: var(--border); }

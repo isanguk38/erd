@@ -48,6 +48,16 @@ export function VersionsDialog({ onClose }: { onClose: () => void }) {
             </div>
             <div className="btn-row">
               <button
+                className="btn btn-sm btn-primary"
+                onClick={async () => {
+                  const full = await projectApi.version(projectId, v.id);
+                  useStore.getState().setCompare({ name: v.name, createdAt: v.createdAt, schema: full.schema });
+                  onClose();
+                }}
+              >
+                지금과 비교
+              </button>
+              <button
                 className="btn btn-sm"
                 onClick={async () => {
                   if (!confirm(`"${v.name}" 버전으로 되돌릴까요? 지금 상태는 자동으로 버전에 저장됩니다.`)) return;
