@@ -16,23 +16,39 @@ import { buildApp } from './app';
 import { FileStorage, PostgresStorage, type Storage } from './storage';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const env = process.env;
+// 대시보드에 붙여넣을 때 섞이는 앞뒤 공백·줄바꿈을 지운다
+const env: Record<string, string | undefined> = Object.fromEntries(
+  Object.entries(process.env).map(([k, v]) => [k, v?.trim() || undefined]),
+);
 
 const github = env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } : undefined;
 const devLogin = env.ERD_DEV_LOGIN === '1' && env.NODE_ENV !== 'production';
 const authEnabled = Boolean(github || devLogin);
-const publicUrl = env.ERD_PUBLIC_URL || env.ERD_WEB_URL || 'http://localhost:5173';
+const publicUrl = (env.ERD_PUBLIC_URL || env.ERD_WEB_URL || 'http://localhost:5173').replace(/\/+$/, '');
+
+/** 설정 값이 들어왔는지만 보여준다 (값 자체는 절대 출력하지 않는다) */
+function settingsReport(): string {
+  const keys = ['NODE_ENV', 'DATABASE_URL', 'ERD_SECRET', 'ERD_PUBLIC_URL', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'];
+  return keys.map((k) => `  ${k.padEnd(22)} ${env[k] ? (k === 'NODE_ENV' ? env[k] : '설정됨') : '없음'}`).join('\n');
+}
 
 function fail(message: string): never {
-  console.error(`\n[ERD 서버 설정 오류] ${message}\n`);
+  console.error(`\n[ERD 서버 설정 오류] ${message}\n\n서버가 받은 설정:\n${settingsReport()}\n`);
   process.exit(1);
 }
 
 if (env.NODE_ENV === 'production' && !authEnabled) {
-  fail('배포(NODE_ENV=production)에서는 로그인이 꼭 필요합니다. GITHUB_CLIENT_ID와 GITHUB_CLIENT_SECRET을 설정하세요.');
+  const missing = ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'].filter((k) => !env[k]);
+  fail(
+    `배포(NODE_ENV=production)에서는 로그인이 꼭 필요합니다. ${missing.join(', ')} 값이 서버에 전달되지 않았습니다.\n` +
+      'Render라면 서비스의 Environment 탭에 값을 넣고 "Save, rebuild, and deploy"(또는 Manual Deploy)로 다시 배포하세요.',
+  );
 }
 if ((authEnabled || env.DATABASE_URL) && !env.ERD_SECRET) {
   fail('로그인 모드나 DATABASE_URL을 쓸 때는 ERD_SECRET(긴 임의 문자열)을 꼭 설정해야 합니다.');
+}
+if (env.NODE_ENV === 'production' && !env.ERD_PUBLIC_URL) {
+  fail('ERD_PUBLIC_URL(서비스 주소, 예: https://erd-xxxx.onrender.com)을 설정하세요. GitHub 로그인 콜백과 초대 링크에 쓰입니다.');
 }
 
 async function openStorage(): Promise<Storage> {
