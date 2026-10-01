@@ -3,7 +3,7 @@ import { useReactFlow } from '@xyflow/react';
 import { addTable, dialectList, type DialectId } from '@erd/core';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { exportDiagram } from '../lib/exportImage';
-import { downloadDataUrl, safeFileName } from '../lib/download';
+import { downloadBlob, safeFileName } from '../lib/download';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
 
@@ -142,8 +142,8 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const exportImage = async (format: 'png' | 'svg') => {
     setExporting(true);
     try {
-      const url = await exportDiagram(getNodes(), getNodesBounds, format);
-      downloadDataUrl(url, `${safeFileName(projectName)}.${format}`);
+      const blob = await exportDiagram(getNodes(), getNodesBounds, format);
+      downloadBlob(blob, `${safeFileName(projectName)}.${format}`);
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
     } finally {
