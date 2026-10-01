@@ -236,13 +236,34 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
     setTimeout(() => setCopied(''), 1500);
   };
 
-  // 로그인 모드: 로컬 MCP도 서버 주소 + 개인 토큰으로 연결한다
-  const token = info?.authEnabled ? newToken || '<개인 토큰>' : '';
-  const env: Record<string, string> = { ERD_SERVER_URL: info?.serverUrl ?? 'http://127.0.0.1:4000', ...(token ? { ERD_TOKEN: token } : {}) };
+  const remote = Boolean(info?.authEnabled);
+  const mcpUrl = info?.url ?? '';
+
+  // 배포(로그인) 모드: 코드를 내려받지 않고 주소 + 개인 토큰만으로 연결한다 (원격 MCP)
+  const tokenText = newToken || '<위에서 만든 토큰>';
+  const remoteClaudeCode = `claude mcp add --transport http erd ${mcpUrl} --header "Authorization: Bearer ${tokenText}"`;
+  const remoteCursor = JSON.stringify({ mcpServers: { erd: { url: mcpUrl, headers: { Authorization: `Bearer ${tokenText}` } } } }, null, 2);
+  // Claude Desktop 설정 파일은 원격 주소를 직접 못 받아서, npm의 mcp-remote가 대신 연결해 준다 (Node.js만 있으면 됨)
+  const remoteDesktop = JSON.stringify(
+    { mcpServers: { erd: { command: 'npx', args: ['-y', 'mcp-remote', mcpUrl, '--header', 'Authorization:${ERD_AUTH}'], env: { ERD_AUTH: `Bearer ${tokenText}` } } } },
+    null,
+    2,
+  );
+
+  // 로컬 모드: 이 PC에서 ERD를 실행 중이므로 저장소의 MCP 프로그램을 직접 실행한다
+  const localEnv: Record<string, string> = { ERD_SERVER_URL: info?.serverUrl ?? 'http://127.0.0.1:4000' };
   const [cmd, ...args] = info?.mcpCommand ?? ['node', '<ERD 폴더>/packages/mcp/bin/erd-mcp.mjs'];
-  const desktopConfig = JSON.stringify({ mcpServers: { erd: { command: cmd, args, env } } }, null, 2);
-  const claudeCode = `claude mcp add erd ${Object.entries(env).map(([k, v]) => `-e ${k}=${v}`).join(' ')} -- ${[cmd, ...args].map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}`;
-  const remoteHeader = info?.authEnabled ? `Authorization: Bearer ${newToken || '<개인 토큰>'}` : 'Authorization: Bearer <토큰>';
+  const localDesktop = JSON.stringify({ mcpServers: { erd: { command: cmd, args, env: localEnv } } }, null, 2);
+  const localClaudeCode = `claude mcp add erd ${Object.entries(localEnv).map(([k, v]) => `-e ${k}=${v}`).join(' ')} -- ${[cmd, ...args].map((x) => (x.includes(' ') ? `"${x}"` : x)).join(' ')}`;
+
+  const block = (key: string, title: string, code: string, note?: string) => (
+    <section className="ai-section" key={key}>
+      <h4>{title}</h4>
+      {note && <p className="muted small">{note}</p>}
+      <pre className="code-block">{code}</pre>
+      <button className="btn btn-sm" onClick={() => copy(key, code)}>{copied === key ? '복사됨' : '복사'}</button>
+    </section>
+  );
 
   return (
     <Modal title="AI 연결 (MCP)" onClose={onClose} wide>
@@ -283,31 +304,37 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
         </section>
       )}
 
-      <section className="ai-section">
-        <h4>Claude Code에 연결</h4>
-        <pre className="code-block">{claudeCode}</pre>
-        <button className="btn btn-sm" onClick={() => copy('cc', claudeCode)}>{copied === 'cc' ? '복사됨' : '복사'}</button>
-      </section>
-
-      <section className="ai-section">
-        <h4>Claude Desktop · Cursor 등 (설정 파일의 mcpServers에 추가)</h4>
-        <pre className="code-block">{desktopConfig}</pre>
-        <button className="btn btn-sm" onClick={() => copy('desktop', desktopConfig)}>{copied === 'desktop' ? '복사됨' : '복사'}</button>
-      </section>
-
-      <section className="ai-section">
-        <h4>원격 MCP (Streamable HTTP)</h4>
-        <p className="muted small">HTTP로 연결하는 MCP 클라이언트(커넥터)용입니다. 헤더에 <code>{remoteHeader}</code>을 넣습니다.</p>
-        <div className="kv"><span>주소</span><code>{info?.url ?? '…'}</code></div>
-        {info && !info.authEnabled && info.token && (
-          <div className="kv">
-            <span>토큰</span>
-            <code>{showToken ? info.token : `${info.token.slice(0, 8)}••••••••`}</code>
-            <button className="btn btn-sm" onClick={() => setShowToken(!showToken)}>{showToken ? '숨기기' : '보기'}</button>
-            <button className="btn btn-sm" onClick={() => copy('token', info.token!)}>{copied === 'token' ? '복사됨' : '복사'}</button>
-          </div>
-        )}
-      </section>
+      {remote ? (
+        <>
+          {!newToken && <div className="baseline-info none">먼저 위에서 <b>새 토큰 만들기</b>를 누르면 아래 설정에 토큰이 자동으로 들어갑니다.</div>}
+          {block('cc', 'Claude Code에 연결', remoteClaudeCode, '터미널에서 한 번 실행하면 됩니다. 프로그램을 따로 내려받을 필요가 없습니다.')}
+          {block('cursor', 'Cursor · VS Code 등 (mcp.json의 mcpServers에 추가)', remoteCursor)}
+          {block('desktop', 'Claude Desktop (claude_desktop_config.json에 추가)', remoteDesktop, 'Claude Desktop은 설정 파일로 원격 주소를 바로 연결하지 못해 mcp-remote가 중간에서 이어 줍니다. PC에 Node.js가 있어야 합니다.')}
+          <section className="ai-section">
+            <h4>그 밖의 MCP 클라이언트</h4>
+            <div className="kv"><span>주소</span><code>{mcpUrl}</code></div>
+            <div className="kv"><span>헤더</span><code>Authorization: Bearer {tokenText}</code></div>
+          </section>
+        </>
+      ) : (
+        <>
+          {block('cc', 'Claude Code에 연결', localClaudeCode)}
+          {block('desktop', 'Claude Desktop · Cursor 등 (설정 파일의 mcpServers에 추가)', localDesktop)}
+          <section className="ai-section">
+            <h4>원격 MCP (Streamable HTTP)</h4>
+            <p className="muted small">HTTP로 연결하는 MCP 클라이언트(커넥터)용입니다. 헤더에 <code>Authorization: Bearer &lt;토큰&gt;</code>을 넣습니다.</p>
+            <div className="kv"><span>주소</span><code>{mcpUrl || '…'}</code></div>
+            {info?.token && (
+              <div className="kv">
+                <span>토큰</span>
+                <code>{showToken ? info.token : `${info.token.slice(0, 8)}••••••••`}</code>
+                <button className="btn btn-sm" onClick={() => setShowToken(!showToken)}>{showToken ? '숨기기' : '보기'}</button>
+                <button className="btn btn-sm" onClick={() => copy('token', info.token!)}>{copied === 'token' ? '복사됨' : '복사'}</button>
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       <section className="ai-section">
         <h4>이렇게 말해 보세요</h4>

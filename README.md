@@ -51,13 +51,25 @@ npm run dev
 
 ## AI 연결 (MCP)
 
-화면 오른쪽 위 **AI** 버튼에 내 PC에 맞는 설정이 나옵니다.
+화면 오른쪽 위 **AI** 버튼 → **새 토큰 만들기**를 누르면, 토큰이 들어간 설정이 바로 나옵니다. **코드를 내려받을 필요가 없습니다.**
 
+**Claude Code**
 ```bash
-claude mcp add erd -e ERD_SERVER_URL=http://127.0.0.1:4000 -- node <ERD 폴더>/packages/mcp/bin/erd-mcp.mjs
+claude mcp add --transport http erd https://<서비스 주소>/mcp --header "Authorization: Bearer <개인 토큰>"
 ```
 
-배포한 서버에 연결할 때는 화면에서 만든 **개인 토큰**을 `ERD_TOKEN`으로 넣거나, 원격 MCP(`<서버>/mcp`, `Authorization: Bearer <토큰>`)를 씁니다.
+**Cursor · VS Code** (`mcp.json`)
+```json
+{ "mcpServers": { "erd": { "url": "https://<서비스 주소>/mcp", "headers": { "Authorization": "Bearer <개인 토큰>" } } } }
+```
+
+**Claude Desktop** (`claude_desktop_config.json`, Node.js 필요)
+```json
+{ "mcpServers": { "erd": { "command": "npx", "args": ["-y", "mcp-remote", "https://<서비스 주소>/mcp", "--header", "Authorization:${ERD_AUTH}"], "env": { "ERD_AUTH": "Bearer <개인 토큰>" } } } }
+```
+
+AI는 토큰 주인이 볼 수 있는 프로젝트만 다루고, 토큰은 화면에서 언제든 취소할 수 있습니다.
+로컬 모드(내 PC에서 `npm run dev`)에서는 저장소의 `packages/mcp/bin/erd-mcp.mjs`를 직접 실행하는 설정이 나옵니다.
 
 | 도구 | 하는 일 |
 |---|---|
