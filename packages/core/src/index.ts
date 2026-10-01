@@ -9,3 +9,4 @@ export { parseDdl, detectDialect, type DdlImportOptions, type DdlImportResult } 
 export * from './placement';
 export * from './commands';
 export * from './ydoc';
+export * from './syncPlan';

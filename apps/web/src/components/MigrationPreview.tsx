@@ -22,6 +22,7 @@ export function MigrationPreview({
   onSelectedChange,
   fileName,
   emptyMessage = '변경 사항이 없습니다. 기준과 지금 ERD가 같습니다.',
+  origins,
 }: {
   diff: DiffResult;
   dialect: Dialect;
@@ -29,6 +30,7 @@ export function MigrationPreview({
   onSelectedChange: (next: Set<string>) => void;
   fileName: string;
   emptyMessage?: string;
+  origins?: Record<string, import('@erd/core').ChangeOrigin>;
 }) {
   const [tab, setTab] = useState<SqlTab>('all');
   const [copied, setCopied] = useState(false);
@@ -43,7 +45,7 @@ export function MigrationPreview({
 
   return (
     <div className="migration">
-      <ChangeList changes={diff.changes} selected={selected} onSelectedChange={onSelectedChange} />
+      <ChangeList changes={diff.changes} selected={selected} onSelectedChange={onSelectedChange} origins={origins} />
       <div className="migration__sql">
         <div className="tabs">
           <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>전체 ({statements.length})</button>

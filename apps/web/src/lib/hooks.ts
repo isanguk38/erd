@@ -57,3 +57,49 @@ export function useVersionSchema(versionId: string | null) {
   }, [projectId, versionId]);
   return schema;
 }
+
+// ── DB 차이 알림 ─────────────────────────────
+
+const statusListeners = new Set<() => void>();
+/** 가져오기·내보내기 뒤 등에 DB 상태를 다시 확인하게 한다 */
+export function refreshDbStatus(): void {
+  statusListeners.forEach((fn) => fn());
+}
+
+const STATUS_INTERVAL = 3 * 60 * 1000;
+
+/** 프로젝트와 연결된 DB가 ERD와 얼마나 다른지 주기적으로 확인한다 */
+export function useDbStatus() {
+  const projectId = useStore((s) => s.projectId);
+  const dbConnectionId = useStore((s) => s.meta.dbConnectionId);
+  const [status, setStatus] = useState<import('./api').DbStatus | null>(null);
+  const [error, setError] = useState('');
+
+  const check = useCallback(async () => {
+    if (!projectId || !dbConnectionId) {
+      setStatus(null);
+      return;
+    }
+    try {
+      setStatus(await projectApi.dbStatus(projectId));
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [projectId, dbConnectionId]);
+
+  useEffect(() => {
+    check();
+    const timer = setInterval(check, STATUS_INTERVAL);
+    const onFocus = () => check();
+    window.addEventListener('focus', onFocus);
+    statusListeners.add(check);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      statusListeners.delete(check);
+    };
+  }, [check]);
+
+  return { status, error };
+}

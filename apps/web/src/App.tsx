@@ -11,6 +11,7 @@ import { DbPushDialog } from './components/DbPushDialog';
 import { DefinitionDialog } from './components/DefinitionDialog';
 import { AiBanner, AiDialog, ProposalsDialog } from './components/AiPanels';
 import { ProjectsPage } from './components/ProjectsPage';
+import { refreshDbStatus } from './lib/hooks';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -62,7 +63,11 @@ function Editor({ projectId }: { projectId: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const close = () => setDialog(null);
+  const close = () => {
+    // DB 가져오기·내보내기 뒤에는 차이 알림을 바로 다시 확인한다
+    if (dialog === 'dbPull' || dialog === 'dbPush') setTimeout(refreshDbStatus, 300);
+    setDialog(null);
+  };
 
   return (
     <ReactFlowProvider>

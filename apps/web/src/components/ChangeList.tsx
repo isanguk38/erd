@@ -1,4 +1,4 @@
-import type { Change, ChangeCategory } from '@erd/core';
+import { ORIGIN_LABEL, type Change, type ChangeCategory, type ChangeOrigin } from '@erd/core';
 
 export interface GroupLabel {
   title: string;
@@ -17,11 +17,14 @@ export function ChangeList({
   selected,
   onSelectedChange,
   groups = SQL_GROUPS,
+  origins,
 }: {
   changes: Change[];
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
   groups?: Record<ChangeCategory, GroupLabel>;
+  /** 3방향 비교 결과: 누가 바꿨는지 */
+  origins?: Record<string, ChangeOrigin>;
 }) {
   const toggle = (ids: string[], on: boolean) => {
     const next = new Set(selected);
@@ -48,6 +51,9 @@ export function ChangeList({
                   <label>
                     <input type="checkbox" checked={selected.has(c.id)} onChange={(e) => toggle([c.id], e.target.checked)} />
                     <span>{c.summary}</span>
+                    {origins?.[c.id] && origins[c.id] !== 'unknown' && (
+                      <span className={`origin origin-${origins[c.id]}`}>{ORIGIN_LABEL[origins[c.id]]}</span>
+                    )}
                   </label>
                   {c.warning && <div className="warning">⚠ {c.warning}</div>}
                 </li>

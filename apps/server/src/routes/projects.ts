@@ -2,7 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import {
-  alignToCurrent,
+  alignDb,
   applyChanges,
   applyCommands,
   CommandError,
@@ -13,11 +13,17 @@ import {
   getDialect,
   parseDdl,
   placeNewTables,
+  planPull,
+  planPush,
+  summarizePlan,
+  toLink,
   toScript,
   type ChangeCategory,
   type Command,
   type DialectId,
+  type RenameLink,
   type Schema,
+  type SyncPlan,
 } from '@erd/core';
 import { autoLayout } from '@erd/core/layout';
 import { buildDefinitionXlsx } from '@erd/core/excel';
@@ -99,6 +105,10 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     if (DIALECTS.includes(b.dialect as DialectId)) patch.dialect = b.dialect;
     if (b.aiMode === 'apply' || b.aiMode === 'propose') patch.aiMode = b.aiMode;
     if (typeof b.aiAllowDbExecute === 'boolean') patch.aiAllowDbExecute = b.aiAllowDbExecute;
+    if (b.dbConnectionId === null || typeof b.dbConnectionId === 'string') {
+      if (b.dbConnectionId) connections.get(b.dbConnectionId);
+      patch.dbConnectionId = b.dbConnectionId;
+    }
     return store.setMeta(req.params.id, patch);
   });
 
@@ -268,50 +278,125 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     },
   );
 
-  // ── DB 연동 (MCP용: 서버에서 비교·적용까지) ─────────────────────────────
+  // ── DB 연동 ─────────────────────────────
+  // 3방향 비교의 기준 시점(마지막으로 DB와 맞춘 상태)을 프로젝트·연결별로 저장해 두고, 비교할 때 쓴다.
 
-  /** DB → ERD. apply=false면 미리보기만 */
-  app.post<{ Params: { id: string }; Body: { connectionId: string; apply?: boolean; includeRemovals?: boolean; mode?: Mode; source?: Source } }>(
-    '/api/projects/:id/db/pull',
-    async (req) => {
-      const { id } = req.params;
-      const { connectionId, apply = false, includeRemovals = false, source = 'api' } = req.body ?? ({} as never);
-      const config = connections.config(connectionId);
-      const db = await getConnector(config.dialect).introspect(config);
-      const current = store.schema(id);
-      const diff = diffIncoming(current, db.schema, getDialect(config.dialect));
-      const selected = new Set(diff.changes.filter((c) => includeRemovals || c.category !== 'drop').map((c) => c.id));
-      if (!apply) return { serverVersion: db.serverVersion, changes: summarize(diff.changes), warnings: db.warnings };
-      const next = applyChanges(current, diff, selected);
-      if (current.tables.length === 0) {
-        const positions = await autoLayout(next);
-        for (const t of next.tables) t.position = positions.get(t.id) ?? t.position;
-      } else {
-        placeNewTables(next, diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
-      }
-      store.setMeta(id, { dialect: config.dialect });
-      const result = change(id, next, { mode: modeOf(id, req.body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
-      if (result.mode === 'apply') store.saveVersion(id, `DB 가져오기 · ${connections.get(connectionId).name}`, 'db');
-      return { ...result, warnings: db.warnings };
-    },
-  );
+  const STATUS_CACHE_MS = 60_000;
+  const statusCache = new Map<string, { at: number; name: string; database: string; dialect: ReturnType<typeof getDialect>; schema: Schema }>();
 
-  /** ERD → DB. execute=false면 실행할 SQL 미리보기 */
+  async function readDb(id: string, connectionId: string) {
+    const saved = connections.get(connectionId);
+    const config = connections.config(connectionId);
+    const db = await getConnector(config.dialect).introspect(config);
+    // 이 프로젝트가 어느 DB와 연결돼 있는지 기억한다 (다른 사람·AI·차이 알림이 같은 DB를 본다)
+    if (store.meta(id).dbConnectionId !== connectionId) store.setMeta(id, { dbConnectionId: connectionId });
+    return { saved, config, dialect: getDialect(config.dialect), db };
+  }
+
+  /** 지금 DB 상태를 기준 시점으로 저장한다 (가져오기·내보내기 직후) */
+  async function markSynced(id: string, connectionId: string) {
+    const { db } = await readDb(id, connectionId);
+    return store.setBaseline(id, connectionId, alignDb(db.schema, store.schema(id)));
+  }
+
+  /** 이름 변경 후보 중 받아들일 것: true면 전부, 배열이면 그 id만 */
+  function acceptedLinks(plan: SyncPlan, accept: boolean | string[] | undefined): RenameLink[] {
+    if (!accept) return [];
+    return plan.renames.filter((r) => accept === true || accept.includes(r.id)).map(toLink);
+  }
+
+  function describePlan(plan: SyncPlan) {
+    return {
+      hasBaseline: plan.hasBaseline,
+      summary: summarizePlan(plan),
+      changes: plan.diff.changes.map((c) => ({ ...summarize([c])[0], origin: plan.origins[c.id], selected: plan.defaultSelected.has(c.id) })),
+      renames: plan.renames.map(({ id, kind, tableName, dbName, erdName }) => ({ id, kind, tableName, dbName, erdName })),
+    };
+  }
+
+  app.get<{ Params: { id: string }; Querystring: { connectionId: string } }>('/api/projects/:id/db/baseline', async (req) => ({
+    baseline: store.baseline(req.params.id, req.query.connectionId),
+  }));
+
+  /** 기준 시점 저장. 화면은 자기가 본 DB 구조(ERD id로 맞춘 것)를 보낸다 — 화면 편집이 서버에 도착하기 전이어도 정확하도록 */
+  app.post<{ Params: { id: string }; Body: { connectionId: string; schema?: Schema } }>('/api/projects/:id/db/baseline', async (req) => {
+    const { id } = req.params;
+    const { connectionId, schema } = req.body ?? ({} as never);
+    connections.get(connectionId);
+    if (schema !== undefined && (!Array.isArray(schema?.tables) || !Array.isArray(schema?.relations))) throw badRequest('schema 형식이 올바르지 않습니다');
+    statusCache.delete(`${id}:${connectionId}`);
+    const b = schema ? store.setBaseline(id, connectionId, schema) : await markSynced(id, connectionId);
+    return { at: b.at };
+  });
+
+  /** DB와 얼마나 다른지 (차이 알림 배지용) */
+  app.get<{ Params: { id: string }; Querystring: { connectionId?: string } }>('/api/projects/:id/db/status', async (req) => {
+    const { id } = req.params;
+    const connectionId = req.query.connectionId || store.meta(id).dbConnectionId;
+    if (!connectionId) return { connected: false };
+    // 여러 사람이 같은 프로젝트를 열어도 DB를 자주 읽지 않도록 잠시 기억한다 (DB 구조만, ERD 비교는 매번 새로)
+    const key = `${id}:${connectionId}`;
+    let cached = statusCache.get(key);
+    if (!cached || Date.now() - cached.at > STATUS_CACHE_MS) {
+      const { saved, dialect, db } = await readDb(id, connectionId);
+      cached = { at: Date.now(), name: saved.name, database: saved.database, dialect, schema: db.schema };
+      statusCache.set(key, cached);
+    }
+    const baseline = store.baseline(id, connectionId);
+    const plan = planPull(store.schema(id), cached.schema, { dialect: cached.dialect, baseline: baseline?.schema });
+    return { connected: true, connection: cached.name, database: cached.database, checkedAt: new Date(cached.at).toISOString(), baselineAt: baseline?.at ?? null, ...summarizePlan(plan) };
+  });
+
+  /** DB → ERD. apply=false면 미리보기만. 기본으로 DB에서 바뀐 것만 반영하고, ERD에서만 바뀐 설계는 되돌리지 않는다 */
   app.post<{
     Params: { id: string };
-    Body: { connectionId: string; execute?: boolean; includeDrop?: boolean; confirmDatabase?: string; source?: Source };
+    Body: { connectionId: string; apply?: boolean; includeRemovals?: boolean; acceptRenames?: boolean | string[]; selected?: string[]; mode?: Mode; source?: Source };
+  }>('/api/projects/:id/db/pull', async (req) => {
+    const { id } = req.params;
+    const { connectionId, apply = false, includeRemovals = false, source = 'api' } = req.body ?? ({} as never);
+    const { saved, config, dialect, db } = await readDb(id, connectionId);
+    const current = store.schema(id);
+    const baseline = store.baseline(id, connectionId)?.schema;
+    const first = planPull(current, db.schema, { dialect, baseline });
+    const plan = planPull(current, db.schema, { dialect, baseline, links: acceptedLinks(first, req.body.acceptRenames) });
+    const selected = new Set(
+      req.body.selected ?? plan.diff.changes.filter((c) => plan.defaultSelected.has(c.id) || (includeRemovals && c.category === 'drop')).map((c) => c.id),
+    );
+    if (!apply) return { serverVersion: db.serverVersion, ...describePlan(plan), warnings: db.warnings };
+
+    const next = applyChanges(current, plan.diff, selected);
+    if (current.tables.length === 0) {
+      const positions = await autoLayout(next);
+      for (const t of next.tables) t.position = positions.get(t.id) ?? t.position;
+    } else {
+      placeNewTables(next, plan.diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
+    }
+    store.setMeta(id, { dialect: config.dialect });
+    const result = change(id, next, { mode: modeOf(id, req.body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
+    if (result.mode === 'apply') {
+      store.saveVersion(id, `DB 가져오기 · ${saved.name}`, 'db');
+      store.setBaseline(id, connectionId, alignDb(db.schema, store.schema(id)));
+    }
+    return { ...result, warnings: db.warnings };
+  });
+
+  /** ERD → DB. execute=false면 실행할 SQL 미리보기. 기본으로 ERD에서 바뀐 것만 실행하고, DB에서만 바뀐 것은 되돌리지 않는다 */
+  app.post<{
+    Params: { id: string };
+    Body: { connectionId: string; execute?: boolean; includeDrop?: boolean; acceptRenames?: boolean | string[]; selected?: string[]; confirmDatabase?: string; source?: Source };
   }>('/api/projects/:id/db/push', async (req) => {
     const { id } = req.params;
     const { connectionId, execute = false, includeDrop = false, confirmDatabase, source = 'api' } = req.body ?? ({} as never);
-    const saved = connections.get(connectionId);
-    const config = connections.config(connectionId);
-    const dialect = getDialect(config.dialect);
+    const { saved, config, dialect, db } = await readDb(id, connectionId);
     const schema = store.schema(id);
-    const db = await getConnector(config.dialect).introspect(config);
-    const diff = diffSchemas(alignToCurrent(db.schema, schema), schema, dialect);
-    const selected = new Set(diff.changes.filter((c) => includeDrop || c.category !== 'drop').map((c) => c.id));
-    const statements = generateStatements(diff, dialect, selected);
-    const preview = { serverVersion: db.serverVersion, database: saved.database, changes: summarize(diff.changes), statements, script: toScript(statements) };
+    const baseline = store.baseline(id, connectionId)?.schema;
+    const first = planPush(schema, db.schema, { dialect, baseline });
+    const plan = planPush(schema, db.schema, { dialect, baseline, links: acceptedLinks(first, req.body.acceptRenames) });
+    const selected = new Set(
+      req.body.selected ?? plan.diff.changes.filter((c) => plan.defaultSelected.has(c.id) || (includeDrop && c.category === 'drop')).map((c) => c.id),
+    );
+    const statements = generateStatements(plan.diff, dialect, selected);
+    const preview = { serverVersion: db.serverVersion, database: saved.database, ...describePlan(plan), statements, script: toScript(statements) };
     if (!execute) return preview;
     if (source === 'ai' && !store.meta(id).aiAllowDbExecute) {
       throw Object.assign(new Error('이 프로젝트는 AI가 DB에 실행하는 것을 허용하지 않습니다. 화면의 AI 설정에서 허용하거나, 사람이 "DB로 내보내기"로 실행하세요.'), { statusCode: 403 });
@@ -322,6 +407,8 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     const result = await getConnector(config.dialect).execute(config, statements.map((s) => s.sql));
     executeLog({ at: new Date().toISOString(), project: id, connection: saved.name, database: saved.database, source, ok: result.ok, results: result.results });
     if (result.ok) store.saveVersion(id, `DB 적용 · ${saved.name}`, 'db');
+    // 일부만 성공했어도 DB는 바뀌었으므로 지금 DB 상태를 기준 시점으로 다시 잡는다
+    if (result.appliedCount > 0) await markSynced(id, connectionId);
     return { ...preview, result };
   });
 }

@@ -173,6 +173,8 @@ export interface ProjectMeta {
   aiSession?: { versionId: string; startedAt: string; changeCount: number; lastAt: string } | null;
   /** 대기 중인 AI 제안 수 (서버가 갱신) */
   pendingProposals?: number;
+  /** 이 프로젝트와 연결한 DB (서버의 연결 id). 함께 작업하는 사람 모두가 같은 DB를 본다 */
+  dbConnectionId?: string | null;
 }
 
 export function readMeta(doc: Y.Doc): ProjectMeta {
@@ -184,6 +186,7 @@ export function readMeta(doc: Y.Doc): ProjectMeta {
     aiAllowDbExecute: Boolean(meta.get('aiAllowDbExecute')),
     aiSession: (meta.get('aiSession') as ProjectMeta['aiSession']) ?? null,
     pendingProposals: (meta.get('pendingProposals') as number) ?? 0,
+    dbConnectionId: (meta.get('dbConnectionId') as string) ?? null,
   };
 }
 

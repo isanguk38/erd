@@ -55,6 +55,12 @@ export interface Proposal {
   messages: string[];
 }
 
+/** 마지막으로 DB와 맞춘 시점의 DB 구조 (ERD id 기준). 3방향 비교의 기준. */
+export interface SyncBaseline {
+  at: string;
+  schema: Schema;
+}
+
 export interface LoadedProject {
   doc: Y.Doc;
   awareness: Awareness;
@@ -229,6 +235,21 @@ export class ProjectStore {
 
   deleteVersion(id: string, versionId: string): void {
     this.writeJson(this.path(id, 'versions.json'), this.versions(id).filter((v) => v.id !== versionId));
+  }
+
+  // ── DB 동기화 기준 시점 ─────────────────────────────
+
+  baseline(id: string, connectionId: string): SyncBaseline | null {
+    this.requireProject(id);
+    return this.readJson<Record<string, SyncBaseline>>(this.path(id, 'sync.json'), {})[connectionId] ?? null;
+  }
+
+  setBaseline(id: string, connectionId: string, schema: Schema): SyncBaseline {
+    this.requireProject(id);
+    const all = this.readJson<Record<string, SyncBaseline>>(this.path(id, 'sync.json'), {});
+    all[connectionId] = { at: new Date().toISOString(), schema };
+    this.writeJson(this.path(id, 'sync.json'), all);
+    return all[connectionId];
   }
 
   // ── 제안 (AI 제안 모드) ─────────────────────────────

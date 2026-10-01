@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { stabilizeIds } from './stableIds';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, StatementResult } from './types';
 
 export interface ColumnRow {
@@ -194,7 +195,7 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
     );
   }
 
-  return { schema, warnings };
+  return { schema: stabilizeIds(schema), warnings };
 }
 
 async function withConnection<T>(config: ConnectionConfig, fn: (conn: mysql.Connection) => Promise<T>): Promise<T> {

@@ -4,7 +4,7 @@ import { addTable, dialectList, type DialectId } from '@erd/core';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { exportDiagram } from '../lib/exportImage';
 import { downloadDataUrl, safeFileName } from '../lib/download';
-import { useDialect, useProjectName } from '../lib/hooks';
+import { useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { sampleSchema } from '../lib/sample';
 
 export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals';
@@ -76,6 +76,20 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
   const { getNodes, getNodesBounds, screenToFlowPosition, fitView } = useReactFlow();
   const [exporting, setExporting] = useState(false);
+  const { status: dbStatus, error: dbError } = useDbStatus();
+  const dbChanged = (dbStatus?.db ?? 0) + (dbStatus?.conflict ?? 0);
+  const erdPending = dbStatus?.erd ?? 0;
+  // 기준 시점이 없으면 누가 바꿨는지 몰라 전체 차이만 보여준다
+  const unknownDiff = dbStatus?.baselineAt ? 0 : dbStatus?.unknown ?? 0;
+  const dbTitle = dbError
+    ? `DB 상태 확인 실패: ${dbError}`
+    : dbStatus?.connected
+      ? `${dbStatus.connection} (${dbStatus.database}) · ${new Date(dbStatus.checkedAt!).toLocaleTimeString()} 확인
+` +
+        (dbStatus.baselineAt
+          ? `DB에서 바뀜 ${dbStatus.db} · ERD에서 바뀜(미적용) ${dbStatus.erd} · 둘 다 바뀜 ${dbStatus.conflict}`
+          : `ERD와 다른 곳 ${dbStatus.total}건 (처음 맞추기 전이라 누가 바꿨는지는 모름)`)
+      : '연결한 DB의 구조를 읽어 ERD를 만들거나 갱신합니다';
 
   useEffect(() => {
     document.title = `${projectName} · ERD`;
@@ -147,8 +161,14 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </button>
       )}
       <span className="spacer" />
-      <button className="btn" onClick={() => onOpen('dbPull')} title="연결한 DB의 구조를 읽어 ERD를 만들거나 갱신합니다">DB에서 가져오기</button>
-      <button className="btn btn-primary" disabled={isEmpty} onClick={() => onOpen('dbPush')} title="ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다">DB로 내보내기</button>
+      <button className="btn btn-with-badge" onClick={() => onOpen('dbPull')} title={dbTitle}>
+        DB에서 가져오기
+        {(dbChanged > 0 || unknownDiff > 0) && <span className="db-badge" title={dbTitle}>{dbChanged || unknownDiff}</span>}
+      </button>
+      <button className="btn btn-primary btn-with-badge" disabled={isEmpty} onClick={() => onOpen('dbPush')} title={dbStatus?.connected ? `ERD에서 바뀌고 아직 DB에 안 넣은 것 ${erdPending}건` : 'ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다'}>
+        DB로 내보내기
+        {erdPending > 0 && <span className="db-badge erd">{erdPending}</span>}
+      </button>
       <span className="divider" />
       <button className="btn" onClick={() => onOpen('versions')}>버전</button>
       <button className="btn" onClick={() => onOpen('sql')}>SQL 추출</button>

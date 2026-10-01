@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { stabilizeIds } from './stableIds';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 
 /** pg.Client, PGlite 등 query(sql, params)를 가진 무엇이든 */
@@ -205,7 +206,7 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
     if (same(pk) || table.indexes.some((i) => i.unique && same(i.columnIds))) r.cardinality = '1:1';
   }
 
-  return { schema, warnings };
+  return { schema: stabilizeIds(schema), warnings };
 }
 
 /** 문장을 하나의 트랜잭션으로 실행한다. 하나라도 실패하면 모두 되돌린다. */

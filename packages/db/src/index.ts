@@ -18,3 +18,4 @@ export function getConnector(dialect: DialectId): Connector {
   if (!connector) throw new Error(`지원하지 않는 DB입니다: ${dialect}`);
   return connector;
 }
+export { stabilizeIds } from './stableIds';

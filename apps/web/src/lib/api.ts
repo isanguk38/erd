@@ -125,5 +125,25 @@ export const projectApi = {
 
   undoAi: (id: string) => request<{ restoredVersion: string }>('POST', `/api/projects/${id}/ai/undo`),
   acceptAi: (id: string) => request('POST', `/api/projects/${id}/ai/accept`),
+  setDbConnection: (id: string, dbConnectionId: string | null) => request('PATCH', `/api/projects/${id}`, { dbConnectionId }),
+  baseline: async (id: string, connectionId: string) =>
+    (await request<{ baseline: { at: string; schema: Schema } | null }>('GET', `/api/projects/${id}/db/baseline?connectionId=${encodeURIComponent(connectionId)}`)).baseline,
+  /** schema: 화면이 본 DB 구조 (ERD id로 맞춘 것) */
+  saveBaseline: (id: string, connectionId: string, schema: Schema) => request<{ at: string }>('POST', `/api/projects/${id}/db/baseline`, { connectionId, schema }),
+  dbStatus: (id: string) => request<DbStatus>('GET', `/api/projects/${id}/db/status`),
   mcpInfo: () => request<{ url: string; token: string; serverUrl: string; mcpCommand: string[] }>('GET', '/api/mcp-info'),
 };
+
+export interface DbStatus {
+  connected: boolean;
+  connection?: string;
+  database?: string;
+  checkedAt?: string;
+  baselineAt?: string | null;
+  total?: number;
+  db?: number;
+  erd?: number;
+  conflict?: number;
+  unknown?: number;
+  renames?: number;
+}

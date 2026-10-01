@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react';
-import { alignToCurrent, diffSchemas, generateStatements, getDialect, type DiffResult } from '@erd/core';
-import { api, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { alignDb, generateStatements, getDialect, planPush, type RenameLink, type Schema } from '@erd/core';
+import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
 import { saveVersion, useDialect, useProjectName } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ConnectionPicker } from './ConnectionPicker';
 import { MigrationPreview } from './MigrationPreview';
+import { BaselineInfo, RenamePanel } from './SyncParts';
 
 type Step = 'compare' | 'confirm' | 'result';
 
@@ -16,6 +17,9 @@ type Step = 'compare' | 'confirm' | 'result';
  */
 export function DbPushDialog({ onClose }: { onClose: () => void }) {
   const schema = useStore((s) => s.schema);
+  const projectId = useStore((s) => s.projectId)!;
+  const [baseline, setBaseline] = useState<{ at: string; schema: Schema } | null>(null);
+  const [links, setLinks] = useState<RenameLink[]>([]);
   const projectName = useProjectName();
   const projectDialect = useDialect();
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -28,7 +32,13 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<ExecuteResult | null>(null);
 
   const dialect = getDialect(db?.dialect ?? projectDialect);
-  const diff: DiffResult | null = useMemo(() => (db ? diffSchemas(alignToCurrent(db.schema, schema), schema, dialect) : null), [db, schema, dialect]);
+  const plan = useMemo(() => (db ? planPush(schema, db.schema, { dialect, baseline: baseline?.schema, links }) : null), [db, schema, dialect, baseline, links]);
+  const diff = plan?.diff ?? null;
+  // 새로 비교하거나 이름 변경을 확정하면 기본 선택(ERD에서 바뀐 것, DROP 제외)을 다시 정한다
+  useEffect(() => {
+    if (plan) setSelected(new Set(plan.defaultSelected));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, links, baseline]);
   const statements = useMemo(() => (diff ? generateStatements(diff, dialect, selected) : []), [diff, dialect, selected]);
   const dropCount = statements.filter((s) => s.category === 'drop').length;
   const warningCount = statements.filter((s) => s.warning).length;
@@ -40,11 +50,10 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
     setResult(null);
     setStep('compare');
     try {
-      const r = await api.introspect(connection.id);
+      const [r, b] = await Promise.all([api.introspect(connection.id), projectApi.baseline(projectId, connection.id)]);
+      setLinks([]);
+      setBaseline(b);
       setDb(r);
-      const d = diffSchemas(alignToCurrent(r.schema, schema), schema, getDialect(r.dialect));
-      // 삭제는 기본으로 실행하지 않는다 (DB에만 있는 테이블을 지키기 위해)
-      setSelected(new Set(d.changes.filter((c) => c.category !== 'drop').map((c) => c.id)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -62,6 +71,11 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       setResult(r);
       setStep('result');
       if (r.ok) await saveVersion(`DB 적용 · ${connection.name} (${connection.database})`, 'db');
+      // 일부만 성공해도 DB는 바뀌었으므로 지금 DB를 다시 읽어 기준 시점으로 저장한다
+      if (r.appliedCount > 0) {
+        const after = await api.introspect(connection.id);
+        await projectApi.saveBaseline(projectId, connection.id, alignDb(after.schema, useStore.getState().schema, null, links));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -96,7 +110,16 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
         DB의 지금 구조를 읽어 ERD와 비교한 뒤, 바뀐 부분만 실행합니다. 새 테이블은 CREATE, 기존 테이블은 ALTER로 처리하고 인덱스·외래키도 함께 만듭니다.
         바뀌지 않은 테이블은 건드리지 않고, DB에만 있는 테이블의 삭제는 기본으로 실행하지 않습니다.
       </p>
-      {step !== 'result' && <ConnectionPicker onChange={(c) => { setConnection(c); setDb(null); setStep('compare'); }} />}
+      {step !== 'result' && (
+        <ConnectionPicker
+          onChange={(c) => {
+            setConnection(c);
+            setDb(null);
+            setStep('compare');
+            if (c) projectApi.setDbConnection(projectId, c.id).catch(() => {});
+          }}
+        />
+      )}
       {connection && step === 'compare' && (
         <div className="toolbar-row">
           <button className="btn btn-primary" disabled={busy} onClick={compare}>{busy ? '읽는 중…' : db ? '다시 비교' : 'DB와 비교'}</button>
@@ -108,8 +131,11 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       )}
       {error && <div className="error-box">{error}</div>}
 
+      {step === 'compare' && plan && plan.diff.changes.length > 0 && <BaselineInfo plan={plan} baselineAt={baseline?.at ?? null} direction="push" />}
+      {step === 'compare' && plan && <RenamePanel plan={plan} links={links} onChange={setLinks} />}
       {step === 'compare' && diff && (
         <MigrationPreview
+          origins={plan?.origins}
           diff={diff}
           dialect={dialect}
           selected={selected}
