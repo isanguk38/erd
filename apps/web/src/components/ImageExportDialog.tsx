@@ -52,7 +52,7 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
   }, [getNodes, getEdges, screenToFlowPosition, selectedTable]);
 
   const target = targets[range];
-  const size = target.nodes.length ? exportSize(target.nodes, getNodesBounds) : null;
+  const size = target.nodes.length ? exportSize(target, getNodesBounds) : null;
   const scale = size ? pngScale(size.width, size.height) : 1;
   const bigForPng = size !== null && scale < 2;
 
@@ -101,7 +101,7 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
       {size && (
         <div className="baseline-info">
           {format === 'png'
-            ? `PNG ${Math.round(size.width * scale).toLocaleString()} × ${Math.round(size.height * scale).toLocaleString()} px (화면 100% 대비 ${scale.toFixed(1)}배)`
+            ? `PNG ${Math.round(size.width * scale).toLocaleString()} × ${Math.round(size.height * scale).toLocaleString()} px (화면 100% 대비 ${scale.toFixed(scale < 1 ? 2 : 1)}배)`
             : `SVG ${size.width.toLocaleString()} × ${size.height.toLocaleString()} · 벡터라 아무리 확대해도 깨지지 않습니다`}
         </div>
       )}

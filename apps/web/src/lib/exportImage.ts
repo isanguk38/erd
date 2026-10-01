@@ -127,9 +127,28 @@ export interface ExportTarget {
   edgeIds: Set<string> | null;
 }
 
+/** 그림이 차지하는 영역: 테이블 + 관계선 (선이 테이블 밖으로 돌아가도 잘리지 않게). 테이블 수에 따라 늘어난다 */
+function contentBounds({ nodes, edgeIds }: ExportTarget, getNodesBounds: (nodes: Node[]) => Rect): Rect {
+  const b = getNodesBounds(nodes);
+  let [x1, y1, x2, y2] = [b.x, b.y, b.x + b.width, b.y + b.height];
+  for (const edgeEl of document.querySelectorAll<SVGGElement>('.react-flow__viewport .react-flow__edge')) {
+    const id = edgeEl.getAttribute('data-testid')?.replace(/^rf__edge-/, '') ?? '';
+    if (edgeIds && !edgeIds.has(id)) continue;
+    for (const path of edgeEl.querySelectorAll<SVGPathElement>('path:not(.react-flow__edge-interaction)')) {
+      const r = path.getBBox();
+      if (!r.width && !r.height) continue;
+      x1 = Math.min(x1, r.x);
+      y1 = Math.min(y1, r.y);
+      x2 = Math.max(x2, r.x + r.width);
+      y2 = Math.max(y2, r.y + r.height);
+    }
+  }
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+}
+
 /** 이미지 크기 (여백 포함, ERD 좌표 1 = 1px) */
-export function exportSize(nodes: Node[], getNodesBounds: (nodes: Node[]) => Rect): { width: number; height: number } {
-  const bounds = getNodesBounds(nodes);
+export function exportSize(target: ExportTarget, getNodesBounds: (nodes: Node[]) => Rect): { width: number; height: number } {
+  const bounds = contentBounds(target, getNodesBounds);
   return { width: Math.ceil(bounds.width + PADDING * 2), height: Math.ceil(bounds.height + PADDING * 2) };
 }
 
@@ -138,8 +157,9 @@ export function diagramToSvg({ nodes, edgeIds }: ExportTarget, getNodesBounds: (
   const viewportEl = document.querySelector<HTMLElement>('.react-flow__viewport');
   if (!viewportEl || nodes.length === 0) throw new Error('내보낼 테이블이 없습니다');
   const toFlow = flowMapper(viewportEl);
-  const bounds = getNodesBounds(nodes);
-  const { width, height } = exportSize(nodes, getNodesBounds);
+  const bounds = contentBounds({ nodes, edgeIds }, getNodesBounds);
+  const width = Math.ceil(bounds.width + PADDING * 2);
+  const height = Math.ceil(bounds.height + PADDING * 2);
   const background = getComputedStyle(document.body).getPropertyValue('--canvas-bg').trim() || '#ffffff';
   const ids = new Set(nodes.map((n) => n.id));
   const parts = [...viewportEl.querySelectorAll<HTMLElement>('.react-flow__node')]
@@ -152,9 +172,12 @@ export function diagramToSvg({ nodes, edgeIds }: ExportTarget, getNodesBounds: (
   return { svg, width, height };
 }
 
-/** 이 크기의 그림을 PNG로 얼마나 크게 그릴 수 있는지 */
+/**
+ * 이 크기의 그림을 PNG로 얼마나 크게 그릴 수 있는지. 작으면 최대 4배, 아주 크면 1배 아래로 줄여서라도
+ * 브라우저 캔버스 한계 안에 전체가 들어가게 한다 (잘리지 않음. 선명함이 필요하면 SVG).
+ */
 export function pngScale(width: number, height: number): number {
-  return Math.max(0.1, Math.min(MAX_SCALE, MAX_SIDE / width, MAX_SIDE / height, Math.sqrt(MAX_AREA / (width * height))));
+  return Math.min(MAX_SCALE, MAX_SIDE / width, MAX_SIDE / height, Math.sqrt(MAX_AREA / (width * height)));
 }
 
 /** ERD를 SVG 또는 고해상도 PNG 파일로 */
