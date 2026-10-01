@@ -51,6 +51,10 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 502 || res.status === 504) throw new Error('ERD 서버가 실행 중이 아닙니다. npm run dev로 서버를 함께 실행하세요.');
+    if (res.status === 401 && !url.startsWith('/auth/')) {
+      // 로그인이 풀렸으면 로그인 화면으로
+      window.dispatchEvent(new Event('erd:unauthorized'));
+    }
     throw new Error((data as { error?: string }).error ?? `요청 실패 (${res.status})`);
   }
   return data as T;
@@ -71,6 +75,8 @@ export const api = {
 
 export interface ProjectInfo {
   id: string;
+  /** 내 권한 (로그인 모드) */
+  role?: 'owner' | 'editor' | 'viewer' | null;
   name: string;
   dialect: DialectId;
   tableCount: number;
@@ -131,7 +137,7 @@ export const projectApi = {
   /** schema: 화면이 본 DB 구조 (ERD id로 맞춘 것) */
   saveBaseline: (id: string, connectionId: string, schema: Schema) => request<{ at: string }>('POST', `/api/projects/${id}/db/baseline`, { connectionId, schema }),
   dbStatus: (id: string) => request<DbStatus>('GET', `/api/projects/${id}/db/status`),
-  mcpInfo: () => request<{ url: string; token: string; serverUrl: string; mcpCommand: string[] }>('GET', '/api/mcp-info'),
+  mcpInfo: () => request<{ authEnabled: boolean; url: string; token: string | null; serverUrl: string; mcpCommand: string[]; user: string }>('GET', '/api/mcp-info'),
 };
 
 export interface DbStatus {
@@ -147,3 +153,49 @@ export interface DbStatus {
   unknown?: number;
   renames?: number;
 }
+
+// ── 로그인 · 공유 · 토큰 ─────────────────────────────
+
+export type Role = 'owner' | 'editor' | 'viewer';
+
+export interface Me {
+  authEnabled: boolean;
+  user: { id: string; login: string; name: string; avatarUrl?: string } | null;
+  loginMethods: ('github' | 'dev')[];
+}
+
+export interface Member {
+  user: { id: string; login: string; name: string; avatarUrl?: string } | null;
+  role: Role;
+}
+
+export interface ShareLink {
+  token: string;
+  role: 'editor' | 'viewer';
+  url: string;
+  createdAt: string;
+}
+
+export interface TokenInfo {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+export const authApi = {
+  me: () => request<Me>('GET', '/api/me'),
+  devLogin: (name: string) => request<{ user: Me['user'] }>('POST', '/auth/dev', { name }),
+  logout: () => request('POST', '/auth/logout'),
+  join: (token: string) => request<{ projectId: string; role: Role }>('POST', `/api/join/${token}`),
+  access: (projectId: string) => request<{ myRole: Role; members: Member[]; shares: ShareLink[] }>('GET', `/api/projects/${projectId}/access`),
+  createShare: (projectId: string, role: 'editor' | 'viewer') => request<ShareLink>('POST', `/api/projects/${projectId}/shares`, { role }),
+  removeShare: (projectId: string, token: string) => request('DELETE', `/api/projects/${projectId}/shares/${token}`),
+  setMemberRole: (projectId: string, userId: string, role: 'editor' | 'viewer') => request('PATCH', `/api/projects/${projectId}/members/${userId}`, { role }),
+  removeMember: (projectId: string, userId: string) => request('DELETE', `/api/projects/${projectId}/members/${userId}`),
+  tokens: () => request<TokenInfo[]>('GET', '/api/tokens'),
+  createToken: (name: string) => request<TokenInfo & { token: string }>('POST', '/api/tokens', { name }),
+  revokeToken: (id: string) => request('DELETE', `/api/tokens/${id}`),
+  project: (id: string) => request<{ role: Role }>('GET', `/api/projects/${id}`),
+};

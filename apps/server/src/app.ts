@@ -1,23 +1,41 @@
-import Fastify, { type FastifyInstance } from 'fastify';
-import { appendFileSync } from 'node:fs';
-import { join } from 'node:path';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import fastifyStatic from '@fastify/static';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import type { DialectId } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
 import { ProjectStore } from './projects';
 import { registerProjectRoutes } from './routes/projects';
+import { registerAuthRoutes, requiredRole } from './routes/auth';
 import { createSyncServer } from './ws';
 import { loadMcpToken, registerMcpRoute } from './mcp';
+import { atLeast, Auth, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
+import { FileStorage, type Storage } from './storage';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /** 요청한 사용자. 로그인이 필요한 API에서는 항상 있다 (로컬 모드는 local) */
+    user: User;
+  }
+}
 
 export interface AppOptions {
-  dataDir: string;
+  /** 파일 저장 위치 (storage를 주지 않으면 이 폴더에 저장) */
+  dataDir?: string;
+  storage?: Storage;
+  /** DB 비밀번호 암호화 키 (배포 시 필수) */
   secret?: string;
   logger?: boolean;
-  /** 원격 MCP 토큰. 없으면 dataDir/mcp-token에 만들어 둔다 */
+  /** 로컬 모드 원격 MCP 토큰. 없으면 저장소의 mcp-token을 쓰거나 만든다 */
   mcpToken?: string;
-  /** 화면 주소 (MCP 응답의 링크용) */
+  /** 화면 주소 (MCP 응답의 링크, 로그인 콜백, 초대 링크) */
   webUrl?: string;
+  /** 로그인 모드 설정. 없으면 로컬 모드 */
+  auth?: Omit<AuthOptions, 'publicUrl' | 'secret'> & { secret?: string };
+  /** 빌드한 화면 폴더 (배포 시 같은 서버에서 제공) */
+  staticDir?: string;
 }
 
 const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
@@ -67,17 +85,55 @@ export interface ErdApp {
   app: FastifyInstance;
   projects: ProjectStore;
   connections: ConnectionStore;
+  auth: Auth;
+  storage: Storage;
   sync: ReturnType<typeof createSyncServer>;
   mcpToken: string;
 }
 
+/** 로그인이 없어도 되는 경로 */
+const PUBLIC_PATHS = ['/api/health', '/api/me', '/auth/', '/mcp'];
+
 export function buildApp(options: AppOptions): ErdApp {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 20 * 1024 * 1024 });
-  const store = new ConnectionStore(options.dataDir, options.secret);
-  const projects = new ProjectStore(options.dataDir);
-  const sync = createSyncServer(projects);
-  const applyLog = join(options.dataDir, 'apply-log.jsonl');
-  const writeLog = (entry: object) => appendFileSync(applyLog, JSON.stringify(entry) + '\n');
+  const storage = options.storage ?? new FileStorage(options.dataDir ?? 'data');
+  const publicUrl = (options.webUrl ?? 'http://localhost:5173').replace(/\/$/, '');
+  const auth = new Auth(storage, {
+    enabled: options.auth?.enabled ?? false,
+    github: options.auth?.github,
+    devLogin: options.auth?.devLogin,
+    allowPrivateDb: options.auth?.allowPrivateDb,
+    publicUrl,
+    secret: options.auth?.secret ?? options.secret ?? randomBytes(32).toString('base64'),
+  });
+  const store = new ConnectionStore(storage, options.secret);
+  const projects = new ProjectStore(storage);
+  const mcpToken = loadMcpToken(storage, options.mcpToken);
+
+  /** 쿠키(화면) 또는 Bearer 토큰(MCP·API)으로 사용자를 찾는다 */
+  const userFrom = (headers: { cookie?: string; authorization?: string }, query?: URLSearchParams): User | null => {
+    const bearer = headers.authorization?.startsWith('Bearer ') ? headers.authorization.slice(7).trim() : query?.get('token') ?? '';
+    if (!auth.enabled) {
+      // 로컬 모드: 내 PC에서만 열려 있으므로 누구든 local 사용자. (토큰은 원격 MCP 확인용)
+      return LOCAL_USER;
+    }
+    if (bearer) {
+      const userId = auth.userFromToken(bearer);
+      return userId ? auth.user(userId) : null;
+    }
+    const userId = auth.verifySession(parseCookies(headers.cookie).erd_session);
+    return userId ? auth.user(userId) : null;
+  };
+
+  const sync = createSyncServer(projects, (req, projectId) => {
+    const url = new URL(req.url ?? '/', 'http://x');
+    const user = userFrom(req.headers, url.searchParams);
+    if (!user) return null;
+    const role = auth.role(projectId, user.id);
+    if (!role) return null;
+    return { readOnly: !atLeast(role, 'editor') };
+  });
+  const writeLog = (entry: object) => storage.append('apply-log.jsonl', JSON.stringify(entry));
   app.server.on('upgrade', sync.handleUpgrade);
 
   app.setErrorHandler((error: { statusCode?: number }, _req, reply) => {
@@ -85,28 +141,52 @@ export function buildApp(options: AppOptions): ErdApp {
     reply.status(status).send({ error: explainError(error) });
   });
 
+  // 사용자 확인 + 프로젝트 권한 확인
+  app.decorateRequest('user', null as unknown as User);
+  app.addHook('onRequest', async (req: FastifyRequest, reply) => {
+    const user = userFrom(req.headers);
+    if (user) req.user = user;
+    const path = req.url.split('?')[0];
+    const isApi = path.startsWith('/api/');
+    if (!user && isApi && !PUBLIC_PATHS.some((p) => path === p || path.startsWith(p))) {
+      return reply.status(401).send({ error: '로그인이 필요합니다' });
+    }
+  });
+  app.addHook('preHandler', async (req, reply) => {
+    const route = req.routeOptions.url ?? '';
+    const id = (req.params as { id?: string })?.id;
+    if (!route.startsWith('/api/projects/:id') || !id || !req.user) return;
+    if (!projects.exists(id)) return reply.status(404).send({ error: '프로젝트를 찾을 수 없습니다' });
+    const needed = requiredRole(req.method, route);
+    const role = auth.role(id, req.user.id);
+    if (!atLeast(role, needed)) {
+      return reply.status(role ? 403 : 404).send({ error: role ? '이 작업을 할 권한이 없습니다' : '프로젝트를 찾을 수 없습니다' });
+    }
+  });
+
   app.get('/api/health', async () => ({ ok: true }));
 
-  // ── 연결 관리 ──────────────────────────────
-  app.get('/api/connections', async () => store.list());
-  app.post('/api/connections', async (req) => store.create(validateInput(req.body)));
-  app.put<{ Params: { id: string } }>('/api/connections/:id', async (req) => store.update(req.params.id, validateInput(req.body)));
+  // ── DB 연결 관리 (연결은 만든 사람만 보고 쓸 수 있다) ──────────────────────────────
+  app.get('/api/connections', async (req) => store.list(req.user.id));
+  app.post('/api/connections', async (req) => store.create(validateInput(req.body), req.user.id));
+  app.put<{ Params: { id: string } }>('/api/connections/:id', async (req) => store.update(req.params.id, validateInput(req.body), req.user.id));
   app.delete<{ Params: { id: string } }>('/api/connections/:id', async (req) => {
-    store.remove(req.params.id);
+    store.remove(req.params.id, req.user.id);
     return { ok: true };
   });
 
   /** 저장 전 연결 확인. id를 주고 비밀번호를 비우면 저장된 비밀번호를 쓴다. */
   app.post<{ Body: Record<string, unknown> & { id?: string } }>('/api/connections/test', async (req) => {
     const input = validateInput(req.body);
-    const password = input.password || (req.body.id ? store.decrypt(store.get(req.body.id).passwordEnc) : '');
+    const password = input.password || (req.body.id ? store.decrypt(store.get(req.body.id, req.user.id).passwordEnc) : '');
     const config: ConnectionConfig = toConfig(input, password);
+    await auth.assertAllowedDbHost(config.host);
     return getConnector(config.dialect).test(config);
   });
 
-  // ── DB 읽기 / 실행 ──────────────────────────
   app.post<{ Params: { id: string }; Body: { commentAs?: 'logicalName' | 'comment' } }>('/api/connections/:id/introspect', async (req) => {
-    const config = store.config(req.params.id);
+    const config = store.config(req.params.id, req.user.id);
+    await auth.assertAllowedDbHost(config.host);
     const result = await getConnector(config.dialect).introspect(config, { commentAs: req.body?.commentAs });
     return { ...result, dialect: config.dialect };
   });
@@ -117,34 +197,54 @@ export function buildApp(options: AppOptions): ErdApp {
       throw Object.assign(new Error('실행할 SQL 문장 목록이 필요합니다'), { statusCode: 400 });
     }
     if (statements.length > MAX_STATEMENTS) throw Object.assign(new Error(`한 번에 ${MAX_STATEMENTS}개까지 실행할 수 있습니다`), { statusCode: 400 });
-    const saved = store.get(req.params.id);
-    const config = store.config(req.params.id);
+    const saved = store.get(req.params.id, req.user.id);
+    const config = store.config(req.params.id, req.user.id);
+    await auth.assertAllowedDbHost(config.host);
     const result = await getConnector(config.dialect).execute(config, statements);
-    // 무엇을 언제 실행했는지 기록을 남긴다
-    writeLog({ at: new Date().toISOString(), connection: saved.name, database: saved.database, source: 'user', ok: result.ok, results: result.results });
+    // 누가 무엇을 언제 실행했는지 기록을 남긴다
+    writeLog({ at: new Date().toISOString(), user: req.user.login, connection: saved.name, database: saved.database, source: 'user', ok: result.ok, results: result.results });
     return result;
   });
 
-  registerProjectRoutes(app, projects, store, writeLog);
-  const mcpToken = loadMcpToken(options.dataDir, options.mcpToken);
-  registerMcpRoute(app, mcpToken, options.webUrl);
+  registerAuthRoutes(app, auth, projects);
+  registerProjectRoutes(app, projects, store, writeLog, auth);
+  registerMcpRoute(app, { auth, localToken: mcpToken, webUrl: publicUrl });
 
-  /** 화면의 "AI 연결" 안내용. 서버가 내 PC(127.0.0.1)에서만 열려 있다는 전제다. */
-  app.get('/api/mcp-info', async () => {
+  /** 화면의 "AI 연결" 안내용 */
+  app.get('/api/mcp-info', async (req) => {
     const address = app.server.address();
     const port = typeof address === 'object' && address ? address.port : 4000;
-    const serverUrl = `http://127.0.0.1:${port}`;
+    const serverUrl = auth.enabled ? publicUrl : `http://127.0.0.1:${port}`;
     return {
+      authEnabled: auth.enabled,
       serverUrl,
       url: `${serverUrl}/mcp`,
-      token: mcpToken,
-      mcpCommand: ['node', fileURLToPath(new URL('../../../packages/mcp/bin/erd-mcp.mjs', import.meta.url))],
+      // 로컬 모드에서만 공용 토큰을 보여준다. 로그인 모드에서는 개인 토큰을 만들어 쓴다.
+      token: auth.enabled ? null : mcpToken,
+      user: req.user.login,
+      // 배포한 서버의 경로는 사용자 PC에 없으므로, 로그인 모드에서는 저장소를 받은 폴더 기준으로 안내한다
+      mcpCommand: ['node', auth.enabled ? '<ERD 저장소 폴더>/packages/mcp/bin/erd-mcp.mjs' : fileURLToPath(new URL('../../../packages/mcp/bin/erd-mcp.mjs', import.meta.url))],
     };
   });
+
+  // ── 배포: 빌드한 화면을 같은 서버에서 제공 ─────────────────────────────
+  if (options.staticDir && existsSync(options.staticDir)) {
+    // 시작 뒤에 새로 빌드한 파일도 제공하도록 요청마다 디스크에서 찾는다
+    app.register(fastifyStatic, { root: options.staticDir });
+    app.setNotFoundHandler((req, reply) => {
+      const path = req.url.split('?')[0];
+      if (req.method === 'GET' && !path.startsWith('/api/') && !path.startsWith('/auth/') && !path.startsWith('/ws/') && !path.includes('.')) {
+        return reply.sendFile('index.html');
+      }
+      reply.status(404).send({ error: '찾을 수 없습니다' });
+    });
+  }
+
   app.addHook('onClose', async () => {
     projects.flush();
     sync.close();
+    await storage.flush();
   });
 
-  return { app, projects, connections: store, sync, mcpToken };
+  return { app, projects, connections: store, auth, storage, sync, mcpToken };
 }

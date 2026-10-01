@@ -59,7 +59,8 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
     });
   }, [schema, viewMode, selectedTable, peers, compareGraph]);
   const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
-  const readOnly = Boolean(compare);
+  const role = useStore((s) => s.role);
+  const readOnly = Boolean(compare) || role === 'viewer';
 
   const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
     // 선택은 스토어가 관리하므로 select 변경은 무시한다.

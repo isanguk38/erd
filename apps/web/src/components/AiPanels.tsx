@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { projectApi, type ChangeSummary, type ProposalInfo } from '../lib/api';
+import { authApi, projectApi, type ChangeSummary, type ProposalInfo, type TokenInfo } from '../lib/api';
 import { Modal } from './Modal';
 
 /** AI가 바로 적용한 변경이 있으면 캔버스 위에 띄우는 알림 */
@@ -160,12 +160,70 @@ function ProposalChanges({ changes, chosen, onToggle }: { changes: ChangeSummary
   );
 }
 
+/** 개인 액세스 토큰 (로그인 모드). 만든 직후 한 번만 원문을 보여준다. */
+function TokenManager({ onCreated }: { onCreated: (token: string) => void }) {
+  const [tokens, setTokens] = useState<TokenInfo[]>([]);
+  const [name, setName] = useState('Claude');
+  const [fresh, setFresh] = useState('');
+  const load = () => authApi.tokens().then(setTokens).catch(() => setTokens([]));
+  useEffect(() => {
+    load();
+  }, []);
+  return (
+    <div className="token-manager">
+      <div className="toolbar-row">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="토큰 이름 (예: 회사 노트북 Claude)" />
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={async () => {
+            const t = await authApi.createToken(name);
+            setFresh(t.token);
+            onCreated(t.token);
+            load();
+          }}
+        >
+          새 토큰 만들기
+        </button>
+      </div>
+      {fresh && (
+        <div className="ok-box">
+          지금만 보여드립니다. 복사해 두세요: <code>{fresh}</code>
+          <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(fresh)}>복사</button>
+        </div>
+      )}
+      <ul className="token-list">
+        {tokens.map((t) => (
+          <li key={t.id}>
+            <b>{t.name}</b>
+            <code>{t.prefix}…</code>
+            <span className="muted small">
+              {new Date(t.createdAt).toLocaleDateString()} 생성{t.lastUsedAt ? ` · ${new Date(t.lastUsedAt).toLocaleDateString()} 사용` : ''}
+            </span>
+            <button
+              className="btn btn-sm btn-danger"
+              onClick={async () => {
+                if (!confirm(`"${t.name}" 토큰을 취소할까요? 이 토큰을 쓰는 AI는 더 이상 연결할 수 없습니다.`)) return;
+                await authApi.revokeToken(t.id);
+                load();
+              }}
+            >
+              취소
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** AI 연결 설정: 적용 방식, DB 실행 허용, MCP 연결 방법 */
 export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; onOpenProposals: () => void }) {
   const projectId = useStore((s) => s.projectId)!;
   const meta = useStore((s) => s.meta);
-  const [info, setInfo] = useState<{ url: string; token: string; serverUrl: string; mcpCommand: string[] } | null>(null);
+  const role = useStore((s) => s.role);
+  const [info, setInfo] = useState<{ authEnabled: boolean; url: string; token: string | null; serverUrl: string; mcpCommand: string[] } | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [newToken, setNewToken] = useState('');
   const [copied, setCopied] = useState('');
 
   useEffect(() => {
@@ -178,9 +236,13 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
     setTimeout(() => setCopied(''), 1500);
   };
 
+  // 로그인 모드: 로컬 MCP도 서버 주소 + 개인 토큰으로 연결한다
+  const token = info?.authEnabled ? newToken || '<개인 토큰>' : '';
+  const env: Record<string, string> = { ERD_SERVER_URL: info?.serverUrl ?? 'http://127.0.0.1:4000', ...(token ? { ERD_TOKEN: token } : {}) };
   const [cmd, ...args] = info?.mcpCommand ?? ['node', '<ERD 폴더>/packages/mcp/bin/erd-mcp.mjs'];
-  const desktopConfig = JSON.stringify({ mcpServers: { erd: { command: cmd, args, env: { ERD_SERVER_URL: info?.serverUrl ?? 'http://127.0.0.1:4000' } } } }, null, 2);
-  const claudeCode = `claude mcp add erd -e ERD_SERVER_URL=${info?.serverUrl ?? 'http://127.0.0.1:4000'} -- ${[cmd, ...args].map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}`;
+  const desktopConfig = JSON.stringify({ mcpServers: { erd: { command: cmd, args, env } } }, null, 2);
+  const claudeCode = `claude mcp add erd ${Object.entries(env).map(([k, v]) => `-e ${k}=${v}`).join(' ')} -- ${[cmd, ...args].map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}`;
+  const remoteHeader = info?.authEnabled ? `Authorization: Bearer ${newToken || '<개인 토큰>'}` : 'Authorization: Bearer <토큰>';
 
   return (
     <Modal title="AI 연결 (MCP)" onClose={onClose} wide>
@@ -188,23 +250,23 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
         <h4>AI가 ERD를 바꾸는 방식</h4>
         <div className="choice-list">
           <label className={`choice${meta.aiMode !== 'propose' ? ' active' : ''}`}>
-            <input type="radio" checked={meta.aiMode !== 'propose'} onChange={() => projectApi.update(projectId, { aiMode: 'apply' })} />
+            <input type="radio" disabled={role === 'viewer'} checked={meta.aiMode !== 'propose'} onChange={() => projectApi.update(projectId, { aiMode: 'apply' })} />
             <div>
               <b>바로 적용</b>
               <p className="muted small">AI가 고치면 화면에 바로 반영됩니다. 작업 전 상태가 자동 저장되어 "AI 변경 되돌리기"로 한 번에 되돌릴 수 있습니다.</p>
             </div>
           </label>
           <label className={`choice${meta.aiMode === 'propose' ? ' active' : ''}`}>
-            <input type="radio" checked={meta.aiMode === 'propose'} onChange={() => projectApi.update(projectId, { aiMode: 'propose' })} />
+            <input type="radio" disabled={role === 'viewer'} checked={meta.aiMode === 'propose'} onChange={() => projectApi.update(projectId, { aiMode: 'propose' })} />
             <div>
               <b>제안 모드</b>
               <p className="muted small">AI의 변경은 제안으로 쌓이고, 사람이 항목별로 골라 반영합니다. 그 사이 사람이 한 변경은 그대로 유지됩니다.</p>
             </div>
           </label>
         </div>
-        <label className="check">
-          <input type="checkbox" checked={Boolean(meta.aiAllowDbExecute)} onChange={(e) => projectApi.update(projectId, { aiAllowDbExecute: e.target.checked })} />
-          AI가 DB에 SQL을 실행하도록 허용 (기본: 끔 — 꺼져 있으면 AI는 SQL 미리보기까지만 할 수 있습니다)
+        <label className="check" title={role !== 'owner' ? '프로젝트 소유자만 바꿀 수 있습니다' : ''}>
+          <input type="checkbox" disabled={role !== 'owner'} checked={Boolean(meta.aiAllowDbExecute)} onChange={(e) => projectApi.update(projectId, { aiAllowDbExecute: e.target.checked })} />
+          AI가 DB에 SQL을 실행하도록 허용 (기본: 끔 — 꺼져 있으면 AI는 SQL 미리보기까지만 할 수 있습니다. 소유자만 변경)
         </label>
         {(meta.pendingProposals ?? 0) > 0 && (
           <button className="btn btn-primary btn-sm" onClick={() => { onClose(); onOpenProposals(); }}>
@@ -212,6 +274,14 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
           </button>
         )}
       </section>
+
+      {info?.authEnabled && (
+        <section className="ai-section">
+          <h4>내 개인 토큰</h4>
+          <p className="muted small">AI는 이 토큰의 주인(나)이 볼 수 있는 프로젝트만 다룹니다. 토큰마다 언제든 취소할 수 있습니다.</p>
+          <TokenManager onCreated={setNewToken} />
+        </section>
+      )}
 
       <section className="ai-section">
         <h4>Claude Code에 연결</h4>
@@ -227,14 +297,16 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
 
       <section className="ai-section">
         <h4>원격 MCP (Streamable HTTP)</h4>
-        <p className="muted small">HTTP로 연결하는 MCP 클라이언트용입니다. 헤더에 <code>Authorization: Bearer &lt;토큰&gt;</code>을 넣습니다.</p>
+        <p className="muted small">HTTP로 연결하는 MCP 클라이언트(커넥터)용입니다. 헤더에 <code>{remoteHeader}</code>을 넣습니다.</p>
         <div className="kv"><span>주소</span><code>{info?.url ?? '…'}</code></div>
-        <div className="kv">
-          <span>토큰</span>
-          <code>{info ? (showToken ? info.token : `${info.token.slice(0, 8)}••••••••`) : '…'}</code>
-          <button className="btn btn-sm" onClick={() => setShowToken(!showToken)}>{showToken ? '숨기기' : '보기'}</button>
-          {info && <button className="btn btn-sm" onClick={() => copy('token', info.token)}>{copied === 'token' ? '복사됨' : '복사'}</button>}
-        </div>
+        {info && !info.authEnabled && info.token && (
+          <div className="kv">
+            <span>토큰</span>
+            <code>{showToken ? info.token : `${info.token.slice(0, 8)}••••••••`}</code>
+            <button className="btn btn-sm" onClick={() => setShowToken(!showToken)}>{showToken ? '숨기기' : '보기'}</button>
+            <button className="btn btn-sm" onClick={() => copy('token', info.token!)}>{copied === 'token' ? '복사됨' : '복사'}</button>
+          </div>
+        )}
       </section>
 
       <section className="ai-section">

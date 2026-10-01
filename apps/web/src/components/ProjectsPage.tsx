@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { DialectId } from '@erd/core';
 import { projectApi, type ProjectInfo } from '../lib/api';
 import { clearLegacyProject, legacyProject, useStore } from '../store';
+import { UserMenu } from './Toolbar';
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
@@ -32,7 +33,10 @@ export function ProjectsPage() {
   return (
     <div className="projects-page">
       <header className="projects-page__head">
-        <h1>ERD</h1>
+        <div className="projects-page__title">
+          <h1>ERD</h1>
+          <UserMenu />
+        </div>
         <p className="muted">함께 그리고, DB와 바로 동기화하고, AI와 같이 설계하는 ERD</p>
         <label className="inline-field">
           내 이름 (함께 작업할 때 표시)
@@ -74,9 +78,10 @@ export function ProjectsPage() {
               <b>{p.name}</b>
               <span className="muted small">
                 {p.dialect === 'postgresql' ? 'PostgreSQL' : 'MySQL'} · 테이블 {p.tableCount ?? 0}개 · {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ''}
+                {p.role && p.role !== 'owner' && ` · ${p.role === 'editor' ? '편집' : '보기'} 권한으로 참여`}
               </span>
             </a>
-            <button
+            {(!p.role || p.role === 'owner') && <button
               className="icon-btn danger"
               title="삭제"
               onClick={async () => {
@@ -86,7 +91,7 @@ export function ProjectsPage() {
               }}
             >
               ×
-            </button>
+            </button>}
           </li>
         ))}
       </ul>

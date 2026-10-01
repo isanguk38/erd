@@ -3,8 +3,7 @@
 // - 버전과 AI 제안은 JSON 파일로 저장한다.
 // 화면(WebSocket), REST API, MCP가 모두 같은 Y.Doc을 바꾸므로 서로의 변경이 실시간으로 보인다.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { getJson, putJson, type Storage } from './storage';
 import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
@@ -72,33 +71,28 @@ export type Origin = 'user' | 'ai' | 'api' | 'db' | 'proposal' | 'restore';
 const SAVE_DELAY = 1000;
 
 export class ProjectStore {
-  private readonly dir: string;
   private readonly loaded = new Map<string, LoadedProject>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
 
-  constructor(dataDir: string) {
-    this.dir = join(dataDir, 'projects');
-    mkdirSync(this.dir, { recursive: true });
-  }
+  constructor(private readonly storage: Storage) {}
 
+  /** 저장 키: projects/<id>/<file> (파일 저장소에서는 그대로 경로가 된다) */
   private path(id: string, file: string): string {
     if (!/^[a-zA-Z0-9-]+$/.test(id)) throw Object.assign(new Error('잘못된 프로젝트 id'), { statusCode: 400 });
-    return join(this.dir, id, file);
+    return `projects/${id}/${file}`;
   }
 
-  private writeJson(path: string, value: unknown): void {
-    const tmp = `${path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(value));
-    renameSync(tmp, path);
+  private writeJson(key: string, value: unknown): void {
+    putJson(this.storage, key, value);
   }
 
-  private readJson<T>(path: string, fallback: T): T {
-    return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as T) : fallback;
+  private readJson<T>(key: string, fallback: T): T {
+    return getJson(this.storage, key, fallback);
   }
 
   exists(id: string): boolean {
     try {
-      return existsSync(this.path(id, 'doc.ydoc'));
+      return this.storage.get(this.path(id, 'doc.ydoc')) !== undefined;
     } catch {
       return false;
     }
@@ -114,7 +108,7 @@ export class ProjectStore {
     if (cached) return cached;
     this.requireProject(id);
     const doc = new Y.Doc();
-    Y.applyUpdate(doc, readFileSync(this.path(id, 'doc.ydoc')));
+    Y.applyUpdate(doc, this.storage.get(this.path(id, 'doc.ydoc'))!);
     doc.on('update', () => this.scheduleSave(id));
     const project = { doc, awareness: new Awareness(doc) };
     project.awareness.setLocalState(null); // 서버 자신은 참가자로 보이지 않게
@@ -132,9 +126,7 @@ export class ProjectStore {
     this.timers.delete(id);
     const project = this.loaded.get(id);
     if (!project) return;
-    const tmp = this.path(id, 'doc.ydoc.tmp');
-    writeFileSync(tmp, Y.encodeStateAsUpdate(project.doc));
-    renameSync(tmp, this.path(id, 'doc.ydoc'));
+    this.storage.put(this.path(id, 'doc.ydoc'), Buffer.from(Y.encodeStateAsUpdate(project.doc)));
     const info = this.readJson<ProjectInfo>(this.path(id, 'info.json'), {} as ProjectInfo);
     const meta = readMeta(project.doc);
     this.writeJson(this.path(id, 'info.json'), {
@@ -152,8 +144,8 @@ export class ProjectStore {
   }
 
   list(): ProjectInfo[] {
-    if (!existsSync(this.dir)) return [];
-    return readdirSync(this.dir)
+    const ids = new Set(this.storage.keys('projects/').map((k) => k.split('/')[1]));
+    return [...ids]
       .filter((id) => this.exists(id))
       .map((id) => this.readJson<ProjectInfo>(this.path(id, 'info.json'), { id } as ProjectInfo))
       .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
@@ -161,13 +153,12 @@ export class ProjectStore {
 
   create(name: string, dialect: DialectId, schema: Schema = emptySchema()): ProjectInfo {
     const id = randomUUID();
-    mkdirSync(join(this.dir, id), { recursive: true });
     const doc = new Y.Doc();
     doc.transact(() => {
       writeMeta(doc, { name, dialect, aiMode: 'apply', aiAllowDbExecute: false });
       writeSchema(doc, schema);
     });
-    writeFileSync(this.path(id, 'doc.ydoc'), Y.encodeStateAsUpdate(doc));
+    this.storage.put(this.path(id, 'doc.ydoc'), Buffer.from(Y.encodeStateAsUpdate(doc)));
     const now = new Date().toISOString();
     const info: ProjectInfo = { id, name, dialect, tableCount: schema.tables.length, createdAt: now, updatedAt: now };
     this.writeJson(this.path(id, 'info.json'), info);
@@ -180,7 +171,7 @@ export class ProjectStore {
     project?.doc.destroy();
     this.loaded.delete(id);
     clearTimeout(this.timers.get(id));
-    rmSync(join(this.dir, id), { recursive: true, force: true });
+    this.storage.delete(`projects/${id}`);
   }
 
   // ── 읽기/쓰기 ─────────────────────────────

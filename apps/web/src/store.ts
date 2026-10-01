@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { cloneSchema, emptySchema, readMeta, readSchema, writeMeta, writeSchema, type DialectId, type ProjectMeta, type Schema } from '@erd/core';
+import { authApi, type Me, type Role } from './lib/api';
 
 export type ViewMode = 'physical' | 'logical' | 'both';
 export type RelationTool = '1:N' | '1:N-identifying' | '1:1' | 'N:M';
@@ -40,6 +41,13 @@ interface State extends LocalPrefs {
   peers: Peer[];
   canUndo: boolean;
   canRedo: boolean;
+  /** 로그인 정보 (로컬 모드면 authEnabled=false) */
+  me: Me | null;
+  /** 지금 프로젝트에서 내 권한. viewer면 편집할 수 없다 */
+  role: Role | null;
+  /** 프로젝트를 열 수 없을 때 (권한 없음 등) */
+  openError: string;
+  setMe: (me: Me | null) => void;
   /** 버전 비교 중이면 기준 버전 (편집은 잠긴다) */
   compare: { name: string; createdAt: string; schema: Schema } | null;
 
@@ -100,6 +108,14 @@ export const useStore = create<State>()(
         canUndo: false,
         canRedo: false,
         compare: null,
+        me: null,
+        role: null,
+        openError: '',
+        setMe: (me) => {
+          set({ me });
+          // 로그인 모드에서는 계정 이름을, 로컬 모드에서는 직접 정한 이름을 함께 작업할 때 보여준다
+          if (me?.authEnabled && me.user) get().setUserName(me.user.name);
+        },
 
         setCompare: (compare) => set({ compare, selection: null }),
 
@@ -137,8 +153,12 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, selection: null, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, selection: null, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
           publishPresence();
+          authApi
+            .project(projectId)
+            .then((p) => get().projectId === projectId && set({ role: p.role }))
+            .catch((e) => get().projectId === projectId && set({ openError: e instanceof Error ? e.message : String(e) }));
         },
 
         close() {
@@ -153,7 +173,7 @@ export const useStore = create<State>()(
 
         edit(fn) {
           // 서버 문서를 받기 전에 쓰면 최상위 맵이 겹쳐 서버 내용이 사라질 수 있으므로 막는다. 비교 중에는 편집하지 않는다.
-          if (!doc || !get().synced || get().compare) return;
+          if (!doc || !get().synced || get().compare || get().role === 'viewer') return;
           const draft = cloneSchema(get().schema);
           try {
             fn(draft);
@@ -201,12 +221,12 @@ export const useStore = create<State>()(
         },
         setDialect(dialect) {
           const d = doc;
-          if (!get().synced) return;
+          if (!get().synced || get().role === 'viewer') return;
           d?.transact(() => writeMeta(d, { dialect }), LOCAL);
         },
         setProjectName(name) {
           const d = doc;
-          if (!get().synced) return;
+          if (!get().synced || get().role === 'viewer') return;
           d?.transact(() => writeMeta(d, { name }), LOCAL);
         },
       };

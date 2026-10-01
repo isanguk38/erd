@@ -14,7 +14,10 @@ const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const PING_INTERVAL = 30_000;
 
-export function createSyncServer(store: ProjectStore) {
+/** 접속을 허락하면 { readOnly }를, 거절하면 null을 돌려준다 */
+export type Authorize = (req: IncomingMessage, projectId: string) => { readOnly: boolean } | null;
+
+export function createSyncServer(store: ProjectStore, authorize: Authorize = () => ({ readOnly: false })) {
   const wss = new WebSocketServer({ noServer: true });
   /** 문서별 접속자: 연결 → 그 연결이 관리하는 awareness client id들 */
   const rooms = new Map<string, Map<WebSocket, Set<number>>>();
@@ -51,7 +54,7 @@ export function createSyncServer(store: ProjectStore) {
     });
   };
 
-  const onConnection = (conn: WebSocket, id: string) => {
+  const onConnection = (conn: WebSocket, id: string, readOnly: boolean) => {
     listen(id);
     const { doc, awareness } = store.load(id);
     const room = rooms.get(id) ?? new Map<WebSocket, Set<number>>();
@@ -65,6 +68,12 @@ export function createSyncServer(store: ProjectStore) {
         const encoder = encoding.createEncoder();
         const type = decoding.readVarUint(decoder);
         if (type === MESSAGE_SYNC) {
+          // 보기 권한이면 문서를 받기만 하고, 바꾸는 메시지(step2·update)는 버린다
+          if (readOnly) {
+            const peek = decoding.createDecoder(new Uint8Array(data));
+            decoding.readVarUint(peek);
+            if (decoding.readVarUint(peek) !== syncProtocol.messageYjsSyncStep1) return;
+          }
           encoding.writeVarUint(encoder, MESSAGE_SYNC);
           // 화면에서 온 변경은 origin=conn (같은 사람에게 되돌려 보내지 않기 위해)
           syncProtocol.readSyncMessage(decoder, encoder, doc, conn);
@@ -115,7 +124,13 @@ export function createSyncServer(store: ProjectStore) {
       socket.destroy();
       return;
     }
-    wss.handleUpgrade(req, socket, head, (conn) => onConnection(conn, match[1]));
+    const access = authorize(req, match[1]);
+    if (!access) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (conn) => onConnection(conn, match[1], access.readOnly));
   };
 
   return { handleUpgrade, rooms, close: () => wss.close() };

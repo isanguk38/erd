@@ -30,6 +30,7 @@ import { buildDefinitionXlsx } from '@erd/core/excel';
 import { getConnector } from '@erd/db';
 import type { ConnectionStore } from '../connections';
 import type { Origin, ProjectStore } from '../projects';
+import type { Auth } from '../auth';
 
 const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
 /** 이 시간 동안 AI 변경이 없으면 다음 변경은 새 AI 작업으로 본다 (되돌리기 기준 버전을 새로 만든다) */
@@ -44,7 +45,7 @@ function summarize(changes: { id: string; category: ChangeCategory; tableName: s
   return changes.map(({ id, category, tableName, summary, warning }) => ({ id, category, tableName, summary, warning }));
 }
 
-export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore, connections: ConnectionStore, executeLog: (entry: object) => void) {
+export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore, connections: ConnectionStore, executeLog: (entry: object) => void, auth: Auth) {
   /**
    * 스키마 변경을 적용한다.
    * - mode=apply: 바로 문서에 반영. AI가 바꾸면 작업 시작 전 버전을 자동 저장해 한 번에 되돌릴 수 있게 한다.
@@ -88,15 +89,22 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
   };
 
   // ── 프로젝트 ─────────────────────────────
-  app.get('/api/projects', async () => store.list());
+  app.get('/api/projects', async (req) =>
+    store
+      .list()
+      .map((p) => ({ ...p, role: auth.role(p.id, req.user.id) }))
+      .filter((p) => p.role !== null),
+  );
 
   app.post<{ Body: { name?: string; dialect?: DialectId; schema?: Schema } }>('/api/projects', async (req) => {
     const dialect = req.body?.dialect ?? 'mysql';
     if (!DIALECTS.includes(dialect)) throw badRequest('DB 종류가 올바르지 않습니다');
-    return store.create(req.body?.name?.trim() || '새 프로젝트', dialect, req.body?.schema ?? emptySchema());
+    const project = store.create(req.body?.name?.trim() || '새 프로젝트', dialect, req.body?.schema ?? emptySchema());
+    auth.initProject(project.id, req.user.id);
+    return { ...project, role: 'owner' };
   });
 
-  app.get<{ Params: { id: string } }>('/api/projects/:id', async (req) => store.get(req.params.id));
+  app.get<{ Params: { id: string } }>('/api/projects/:id', async (req) => ({ ...store.get(req.params.id), role: auth.role(req.params.id, req.user.id) }));
 
   app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/projects/:id', async (req) => {
     const b = req.body ?? {};
@@ -104,9 +112,13 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     if (typeof b.name === 'string' && b.name.trim()) patch.name = b.name.trim();
     if (DIALECTS.includes(b.dialect as DialectId)) patch.dialect = b.dialect;
     if (b.aiMode === 'apply' || b.aiMode === 'propose') patch.aiMode = b.aiMode;
-    if (typeof b.aiAllowDbExecute === 'boolean') patch.aiAllowDbExecute = b.aiAllowDbExecute;
+    if (typeof b.aiAllowDbExecute === 'boolean') {
+      // AI에게 DB 실행을 허용하는 것은 소유자만
+      if (auth.role(req.params.id, req.user.id) !== 'owner') throw Object.assign(new Error('AI의 DB 실행 허용은 프로젝트 소유자만 바꿀 수 있습니다'), { statusCode: 403 });
+      patch.aiAllowDbExecute = b.aiAllowDbExecute;
+    }
     if (b.dbConnectionId === null || typeof b.dbConnectionId === 'string') {
-      if (b.dbConnectionId) connections.get(b.dbConnectionId);
+      if (b.dbConnectionId) connections.get(b.dbConnectionId, req.user.id);
       patch.dbConnectionId = b.dbConnectionId;
     }
     return store.setMeta(req.params.id, patch);
@@ -284,9 +296,10 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
   const STATUS_CACHE_MS = 60_000;
   const statusCache = new Map<string, { at: number; name: string; database: string; dialect: ReturnType<typeof getDialect>; schema: Schema }>();
 
-  async function readDb(id: string, connectionId: string) {
-    const saved = connections.get(connectionId);
-    const config = connections.config(connectionId);
+  async function readDb(id: string, connectionId: string, userId: string) {
+    const saved = connections.get(connectionId, userId);
+    const config = connections.config(connectionId, userId);
+    await auth.assertAllowedDbHost(config.host);
     const db = await getConnector(config.dialect).introspect(config);
     // 이 프로젝트가 어느 DB와 연결돼 있는지 기억한다 (다른 사람·AI·차이 알림이 같은 DB를 본다)
     if (store.meta(id).dbConnectionId !== connectionId) store.setMeta(id, { dbConnectionId: connectionId });
@@ -294,8 +307,8 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
   }
 
   /** 지금 DB 상태를 기준 시점으로 저장한다 (가져오기·내보내기 직후) */
-  async function markSynced(id: string, connectionId: string) {
-    const { db } = await readDb(id, connectionId);
+  async function markSynced(id: string, connectionId: string, userId: string) {
+    const { db } = await readDb(id, connectionId, userId);
     return store.setBaseline(id, connectionId, alignDb(db.schema, store.schema(id)));
   }
 
@@ -322,10 +335,10 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
   app.post<{ Params: { id: string }; Body: { connectionId: string; schema?: Schema } }>('/api/projects/:id/db/baseline', async (req) => {
     const { id } = req.params;
     const { connectionId, schema } = req.body ?? ({} as never);
-    connections.get(connectionId);
+    connections.get(connectionId, req.user.id);
     if (schema !== undefined && (!Array.isArray(schema?.tables) || !Array.isArray(schema?.relations))) throw badRequest('schema 형식이 올바르지 않습니다');
     statusCache.delete(`${id}:${connectionId}`);
-    const b = schema ? store.setBaseline(id, connectionId, schema) : await markSynced(id, connectionId);
+    const b = schema ? store.setBaseline(id, connectionId, schema) : await markSynced(id, connectionId, req.user.id);
     return { at: b.at };
   });
 
@@ -334,11 +347,17 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     const { id } = req.params;
     const connectionId = req.query.connectionId || store.meta(id).dbConnectionId;
     if (!connectionId) return { connected: false };
+    // 연결은 만든 사람만 쓸 수 있다. 함께 작업하는 다른 사람에게는 상태를 보여주지 않는다.
+    try {
+      connections.get(connectionId, req.user.id);
+    } catch {
+      return { connected: false, reason: '이 프로젝트에 연결된 DB는 다른 사람의 연결입니다' };
+    }
     // 여러 사람이 같은 프로젝트를 열어도 DB를 자주 읽지 않도록 잠시 기억한다 (DB 구조만, ERD 비교는 매번 새로)
     const key = `${id}:${connectionId}`;
     let cached = statusCache.get(key);
     if (!cached || Date.now() - cached.at > STATUS_CACHE_MS) {
-      const { saved, dialect, db } = await readDb(id, connectionId);
+      const { saved, dialect, db } = await readDb(id, connectionId, req.user.id);
       cached = { at: Date.now(), name: saved.name, database: saved.database, dialect, schema: db.schema };
       statusCache.set(key, cached);
     }
@@ -354,7 +373,7 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
   }>('/api/projects/:id/db/pull', async (req) => {
     const { id } = req.params;
     const { connectionId, apply = false, includeRemovals = false, source = 'api' } = req.body ?? ({} as never);
-    const { saved, config, dialect, db } = await readDb(id, connectionId);
+    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id);
     const current = store.schema(id);
     const baseline = store.baseline(id, connectionId)?.schema;
     const first = planPull(current, db.schema, { dialect, baseline });
@@ -387,7 +406,7 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
   }>('/api/projects/:id/db/push', async (req) => {
     const { id } = req.params;
     const { connectionId, execute = false, includeDrop = false, confirmDatabase, source = 'api' } = req.body ?? ({} as never);
-    const { saved, config, dialect, db } = await readDb(id, connectionId);
+    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id);
     const schema = store.schema(id);
     const baseline = store.baseline(id, connectionId)?.schema;
     const first = planPush(schema, db.schema, { dialect, baseline });
@@ -408,7 +427,7 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     executeLog({ at: new Date().toISOString(), project: id, connection: saved.name, database: saved.database, source, ok: result.ok, results: result.results });
     if (result.ok) store.saveVersion(id, `DB 적용 · ${saved.name}`, 'db');
     // 일부만 성공했어도 DB는 바뀌었으므로 지금 DB 상태를 기준 시점으로 다시 잡는다
-    if (result.appliedCount > 0) await markSynced(id, connectionId);
+    if (result.appliedCount > 0) await markSynced(id, connectionId, req.user.id);
     return { ...preview, result };
   });
 }

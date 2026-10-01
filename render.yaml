@@ -1,0 +1,31 @@
+# Render 배포 설정 (Blueprint)
+# Render 대시보드 → New → Blueprint → 이 저장소를 고르면 아래대로 서비스가 만들어진다.
+# sync: false 인 값은 대시보드에서 직접 넣는다. README의 "배포" 참고.
+services:
+  - type: web
+    name: erd
+    runtime: node
+    plan: free
+    # 화면(vite)을 빌드하려면 개발 의존성도 필요하다
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # DB 비밀번호 암호화·로그인 세션 서명 키. 한 번 정해지면 바꾸지 않는다 (바꾸면 저장된 DB 비밀번호를 읽을 수 없다)
+      - key: ERD_SECRET
+        generateValue: true
+      # 데이터를 저장할 PostgreSQL (예: Supabase의 Connection string). Render 무료 서버는 재시작하면 디스크가 지워진다
+      - key: DATABASE_URL
+        sync: false
+      # 이 서비스의 주소 (예: https://erd-xxxx.onrender.com)
+      - key: ERD_PUBLIC_URL
+        sync: false
+      # GitHub OAuth App (콜백 URL: <ERD_PUBLIC_URL>/auth/github/callback)
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false

@@ -323,14 +323,18 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
   );
 }
 
-export function httpApi(baseUrl: string): ErdApi {
+/** token: 로그인 모드 서버에 연결할 때 쓰는 개인 액세스 토큰 (ERD_TOKEN) */
+export function httpApi(baseUrl: string, token?: string): ErdApi {
   const base = baseUrl.replace(/\/$/, '');
   const call = async (method: string, path: string, body?: unknown) => {
     let res: Response;
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
     try {
       res = await fetch(base + path, {
         method,
-        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
@@ -338,6 +342,7 @@ export function httpApi(baseUrl: string): ErdApi {
     }
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (res.status === 401) throw new Error('ERD 서버가 로그인을 요구합니다. 화면의 AI 버튼에서 개인 토큰을 만들어 ERD_TOKEN 환경 변수로 넣으세요.');
       throw new Error(data.error ?? `요청 실패 (${res.status})`);
     }
     return res;

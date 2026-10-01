@@ -30,13 +30,17 @@ const COLORS = ['', '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2
 export function Inspector() {
   const selection = useStore((s) => s.selection);
   const schema = useStore((s) => s.schema);
-  if (!selection) return <EmptyInspector />;
-  if (selection.type === 'table') {
+  const readOnly = useStore((s) => s.role === 'viewer');
+  let content = <EmptyInspector />;
+  if (selection?.type === 'table') {
     const table = findTable(schema, selection.id);
-    return table ? <TableEditor table={table} /> : <EmptyInspector />;
+    if (table) content = <TableEditor table={table} />;
+  } else if (selection?.type === 'relation') {
+    const relation = schema.relations.find((r) => r.id === selection.id);
+    if (relation) content = <RelationEditor relation={relation} />;
   }
-  const relation = schema.relations.find((r) => r.id === selection.id);
-  return relation ? <RelationEditor relation={relation} /> : <EmptyInspector />;
+  // 보기 권한이면 모든 입력을 잠근다
+  return readOnly ? <fieldset className="readonly-fieldset" disabled>{content}</fieldset> : content;
 }
 
 function EmptyInspector() {

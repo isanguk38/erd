@@ -6,8 +6,9 @@ import { exportDiagram } from '../lib/exportImage';
 import { downloadDataUrl, safeFileName } from '../lib/download';
 import { useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { sampleSchema } from '../lib/sample';
+import { authApi } from '../lib/api';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -63,6 +64,27 @@ function Participants() {
   );
 }
 
+/** 로그인 모드에서 내 계정과 로그아웃 */
+export function UserMenu() {
+  const me = useStore((s) => s.me);
+  if (!me?.authEnabled || !me.user) return null;
+  return (
+    <span className="user-menu">
+      {me.user.avatarUrl ? <img src={me.user.avatarUrl} alt="" className="avatar-img" /> : <span className="avatar" style={{ background: 'var(--accent)' }}>{me.user.name.slice(0, 1)}</span>}
+      <span className="small">{me.user.name}</span>
+      <button
+        className="btn btn-sm"
+        onClick={async () => {
+          await authApi.logout();
+          location.href = '/';
+        }}
+      >
+        로그아웃
+      </button>
+    </span>
+  );
+}
+
 export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const projectName = useProjectName();
   const dialect = useDialect();
@@ -73,6 +95,8 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const synced = useStore((s) => s.synced);
   const isEmpty = useStore((s) => s.schema.tables.length === 0);
   const pendingProposals = useStore((s) => s.meta.pendingProposals ?? 0);
+  const role = useStore((s) => s.role);
+  const readOnly = role === 'viewer';
   const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
   const { getNodes, getNodesBounds, screenToFlowPosition, fitView } = useReactFlow();
   const [exporting, setExporting] = useState(false);
@@ -120,14 +144,17 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     <header className="toolbar">
       <a className="icon-btn back" href="#/" title="프로젝트 목록">←</a>
       <ProjectNameInput />
-      <select value={dialect} disabled={!synced} onChange={(e) => setDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
+      <select value={dialect} disabled={!synced || readOnly} onChange={(e) => setDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
         {dialectList.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
       </select>
       <Participants />
+      {role === 'viewer' && <span className="role-tag" title="이 프로젝트는 보기 권한입니다">보기 전용</span>}
+      <button className="btn btn-sm" onClick={() => onOpen('share')}>공유</button>
+      <UserMenu />
       <span className="divider" />
       <button
         className="btn btn-primary"
-        disabled={!synced}
+        disabled={!synced || readOnly}
         onClick={() => {
           const center = screenToFlowPosition({ x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 });
           edit((d) => {
@@ -146,10 +173,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <button key={m.id} className={viewMode === m.id ? 'active' : ''} onClick={() => setViewMode(m.id)}>{m.label}</button>
         ))}
       </div>
-      <button className="btn" disabled={isEmpty} onClick={arrange} title="관계를 보고 테이블을 자동으로 배치합니다">자동 정렬</button>
+      <button className="btn" disabled={isEmpty || readOnly} onClick={arrange} title="관계를 보고 테이블을 자동으로 배치합니다">자동 정렬</button>
       <button className="icon-btn" title="되돌리기 (Ctrl+Z) · 내가 한 변경만" disabled={!canUndo} onClick={undo}>↶</button>
       <button className="icon-btn" title="다시 실행 (Ctrl+Y)" disabled={!canRedo} onClick={redo}>↷</button>
-      {isEmpty && synced && (
+      {isEmpty && synced && !readOnly && (
         <button
           className="btn"
           onClick={() => {
@@ -161,7 +188,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </button>
       )}
       <span className="spacer" />
-      <button className="btn btn-with-badge" onClick={() => onOpen('dbPull')} title={dbTitle}>
+      <button className="btn btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? '보기 권한에서는 ERD를 바꿀 수 없습니다' : dbTitle}>
         DB에서 가져오기
         {(dbChanged > 0 || unknownDiff > 0) && <span className="db-badge" title={dbTitle}>{dbChanged || unknownDiff}</span>}
       </button>
