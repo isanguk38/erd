@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDialect, planPull, summarizePlan, type DialectId } from '@erd/core';
 import { useStore } from '../store';
 import { api, projectApi, type VersionInfo } from './api';
@@ -69,20 +69,33 @@ export function refreshDbStatus(): void {
 
 const STATUS_INTERVAL = 3 * 60 * 1000;
 
-/** 설치형 앱: 사용자 PC에서 DB를 읽어 직접 비교한다 (서버는 DB에 접속하지 않음) */
-async function desktopStatus(projectId: string, connectionId: string): Promise<import('./api').DbStatus> {
+/** 설치형 앱에서 마지막으로 읽은 DB 구조. ERD가 바뀌면 DB를 다시 읽지 않고 이것과 다시 비교한다. */
+interface DesktopSnapshot {
+  connection: { name: string; database: string };
+  db: Awaited<ReturnType<typeof api.introspect>>;
+  baseline: Awaited<ReturnType<typeof projectApi.baseline>>;
+  checkedAt: string;
+}
+
+/** 설치형 앱: 사용자 PC에서 DB를 읽는다 (서버는 DB에 접속하지 않음) */
+async function readDesktopSnapshot(projectId: string, connectionId: string): Promise<DesktopSnapshot | null> {
   const connections = await api.listConnections();
   const connection = connections.find((c) => c.id === connectionId);
   // 이 프로젝트에 연결된 DB가 다른 PC(다른 사람)의 연결이면 이 PC에서는 확인할 수 없다
-  if (!connection) return { connected: false };
+  if (!connection) return null;
   const [db, baseline] = await Promise.all([api.introspect(connection.id), projectApi.baseline(projectId, connection.id)]);
-  const plan = planPull(useStore.getState().schema, db.schema, { dialect: getDialect(db.dialect), baseline: baseline?.schema });
+  return { connection, db, baseline, checkedAt: new Date().toISOString() };
+}
+
+/** 지금 ERD와 읽어 둔 DB 구조를 비교한다 */
+function compareSnapshot(snap: DesktopSnapshot): import('./api').DbStatus {
+  const plan = planPull(useStore.getState().schema, snap.db.schema, { dialect: getDialect(snap.db.dialect), baseline: snap.baseline?.schema });
   return {
     connected: true,
-    connection: connection.name,
-    database: connection.database,
-    checkedAt: new Date().toISOString(),
-    baselineAt: baseline?.at ?? null,
+    connection: snap.connection.name,
+    database: snap.connection.database,
+    checkedAt: snap.checkedAt,
+    baselineAt: snap.baseline?.at ?? null,
     ...summarizePlan(plan),
   };
 }
@@ -94,14 +107,21 @@ export function useDbStatus() {
   const serverDb = useStore((s) => s.me?.serverDb !== false);
   const [status, setStatus] = useState<import('./api').DbStatus | null>(null);
   const [error, setError] = useState('');
+  const snapshot = useRef<DesktopSnapshot | null>(null);
 
   const check = useCallback(async () => {
     if (!projectId || !dbConnectionId || (!desktop && !serverDb)) {
+      snapshot.current = null;
       setStatus(null);
       return;
     }
     try {
-      setStatus(desktop ? await desktopStatus(projectId, dbConnectionId) : await projectApi.dbStatus(projectId));
+      if (desktop) {
+        snapshot.current = await readDesktopSnapshot(projectId, dbConnectionId);
+        setStatus(snapshot.current ? compareSnapshot(snapshot.current) : { connected: false });
+      } else {
+        setStatus(await projectApi.dbStatus(projectId));
+      }
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -109,13 +129,27 @@ export function useDbStatus() {
   }, [projectId, dbConnectionId, serverDb]);
 
   useEffect(() => {
+    snapshot.current = null;
     check();
     const timer = setInterval(check, STATUS_INTERVAL);
     const onFocus = () => check();
     window.addEventListener('focus', onFocus);
     statusListeners.add(check);
+    // ERD가 바뀌면 (내 편집, AI·MCP, 다른 사람, 제안 승인, 버전 복원 모두) 배지를 다시 계산한다.
+    // 설치형 앱은 읽어 둔 DB 구조와 바로 비교하고, 서버 모드는 잠시 모았다가 서버에 묻는다.
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = useStore.subscribe((s, prev) => {
+      if (s.schema === prev.schema) return;
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        if (snapshot.current) setStatus(compareSnapshot(snapshot.current));
+        else if (!desktop) check();
+      }, desktop ? 300 : 1500);
+    });
     return () => {
       clearInterval(timer);
+      clearTimeout(debounce);
+      unsubscribe();
       window.removeEventListener('focus', onFocus);
       statusListeners.delete(check);
     };
