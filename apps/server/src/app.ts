@@ -7,11 +7,16 @@ import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
 import { ProjectStore } from './projects';
 import { registerProjectRoutes } from './routes/projects';
 import { createSyncServer } from './ws';
+import { loadMcpToken, registerMcpRoute } from './mcp';
 
 export interface AppOptions {
   dataDir: string;
   secret?: string;
   logger?: boolean;
+  /** 원격 MCP 토큰. 없으면 dataDir/mcp-token에 만들어 둔다 */
+  mcpToken?: string;
+  /** 화면 주소 (MCP 응답의 링크용) */
+  webUrl?: string;
 }
 
 const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
@@ -62,6 +67,7 @@ export interface ErdApp {
   projects: ProjectStore;
   connections: ConnectionStore;
   sync: ReturnType<typeof createSyncServer>;
+  mcpToken: string;
 }
 
 export function buildApp(options: AppOptions): ErdApp {
@@ -119,10 +125,12 @@ export function buildApp(options: AppOptions): ErdApp {
   });
 
   registerProjectRoutes(app, projects, store, writeLog);
+  const mcpToken = loadMcpToken(options.dataDir, options.mcpToken);
+  registerMcpRoute(app, mcpToken, options.webUrl);
   app.addHook('onClose', async () => {
     projects.flush();
     sync.close();
   });
 
-  return { app, projects, connections: store, sync };
+  return { app, projects, connections: store, sync, mcpToken };
 }

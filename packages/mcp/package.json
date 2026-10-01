@@ -1,0 +1,29 @@
+{
+  "name": "@erd/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "erd-mcp": "./bin/erd-mcp.mjs"
+  },
+  "scripts": {
+    "start": "tsx src/stdio.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5",
+    "@erd/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26",
+    "vitest": "^5.0.3"
+  }
+}
