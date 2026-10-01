@@ -11,13 +11,19 @@ export type TableNodeData = {
   highlight?: 'added' | 'changed' | 'removed';
   /** 이 테이블을 선택한 다른 사람들 */
   peers?: { name: string; color: string }[];
+  /** 검색 중: 맞는 테이블(match) / 아닌 테이블(dim) */
+  search?: 'match' | 'dim';
+  matchColumnIds?: string[];
+  /** 검색 결과에서 고른 컬럼 ('*'이면 테이블 전체) */
+  focusColumnId?: string;
   /** 비교 화면: 컬럼별 추가/변경/삭제 표시 */
   columnMarks?: Record<string, 'added' | 'changed' | 'removed'>;
 };
 export type TableNodeType = Node<TableNodeData, 'table'>;
 
 function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
-  const { table, fkIds, viewMode, highlight, peers = [], columnMarks } = data;
+  const { table, fkIds, viewMode, highlight, peers = [], columnMarks, search, matchColumnIds, focusColumnId } = data;
+  const matched = new Set(matchColumnIds ?? []);
   const connection = useConnection();
   const isTarget = connection.inProgress && connection.fromNode.id !== id;
   const fk = new Set(fkIds);
@@ -26,7 +32,7 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
 
   return (
     <div
-      className={`table-node${selected ? ' selected' : ''}${highlight ? ` hl-${highlight}` : ''}`}
+      className={`table-node${selected ? ' selected' : ''}${highlight ? ` hl-${highlight}` : ''}${search ? ` search-${search}` : ''}${focusColumnId === '*' ? ' search-focus' : ''}`}
       style={{
         ['--table-color' as string]: table.color || 'var(--accent)',
         ...(peers.length ? { outline: `2px solid ${peers[0].color}`, outlineOffset: 3 } : {}),
@@ -49,7 +55,10 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
         {table.columns.map((c) => {
           const name = viewMode === 'logical' ? c.logicalName || c.name : c.name;
           return (
-            <div key={c.id} className={`table-node__column${c.primaryKey ? ' pk' : ''}${columnMarks?.[c.id] ? ` col-${columnMarks[c.id]}` : ''}`}>
+            <div
+              key={c.id}
+              className={`table-node__column${c.primaryKey ? ' pk' : ''}${columnMarks?.[c.id] ? ` col-${columnMarks[c.id]}` : ''}${matched.has(c.id) ? ' col-match' : ''}${focusColumnId === c.id ? ' col-focus' : ''}`}
+            >
               <span className="table-node__key">
                 {c.primaryKey && <span className="badge badge-pk" title="기본키">PK</span>}
                 {fk.has(c.id) && <span className="badge badge-fk" title="외래키">FK</span>}

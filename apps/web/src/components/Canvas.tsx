@@ -16,6 +16,7 @@ import { useStore } from '../store';
 import { TableNode, type TableNodeType } from './TableNode';
 import { RelationEdge } from './RelationEdge';
 import { buildCompareGraph, buildEdges, buildNodes } from '../lib/graph';
+import { matchIds } from '../lib/search';
 import { getDialect, type DialectId } from '@erd/core';
 
 const nodeTypes = { table: TableNode };
@@ -28,6 +29,23 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const selection = useStore((s) => s.selection);
   const peers = useStore((s) => s.peers);
   const compare = useStore((s) => s.compare);
+  const searchOpen = useStore((s) => s.searchOpen);
+  const searchQuery = useStore((s) => s.searchQuery);
+  const searchFocus = useStore((s) => s.searchFocus);
+  // 검색에서 고른 것은 잠깐(2.5초) 강조한다
+  const [focus, setFocus] = useState<typeof searchFocus>(null);
+  useEffect(() => {
+    setFocus(searchFocus);
+    if (!searchFocus) return;
+    const t = setTimeout(() => setFocus(null), 2500);
+    return () => clearTimeout(t);
+  }, [searchFocus]);
+  const searchMarks = useMemo(() => {
+    const q = searchOpen ? searchQuery.trim() : '';
+    if (!q && !focus) return null;
+    const ids = q ? matchIds(schema, q) : { tables: new Set(schema.tables.map((t) => t.id)), columns: new Set<string>() };
+    return { ...ids, focus };
+  }, [searchOpen, searchQuery, schema, focus]);
   const dialectId = useStore((s) => s.meta.dialect);
   const synced = useStore((s) => s.synced);
   const { edit, select, setCursor } = useStore.getState();
@@ -55,9 +73,9 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const measured = new Map(prev.map((n) => [n.id, n.measured]));
         return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
       }
-      return buildNodes(schema, viewMode, selectedTable, prev, peers);
+      return buildNodes(schema, viewMode, selectedTable, prev, peers, searchMarks);
     });
-  }, [schema, viewMode, selectedTable, peers, compareGraph]);
+  }, [schema, viewMode, selectedTable, peers, compareGraph, searchMarks]);
   const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
   const role = useStore((s) => s.role);
   const readOnly = Boolean(compare) || role === 'viewer';

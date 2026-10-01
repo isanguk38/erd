@@ -4,7 +4,21 @@ import type { TableNodeType } from '../components/TableNode';
 import type { RelationEdgeType } from '../components/RelationEdge';
 
 /** 스키마 → React Flow 노드. 이전 노드의 측정 크기는 유지한다 (관계선 계산에 필요). */
-export function buildNodes(schema: Schema, viewMode: ViewMode, selectedId: string | null, prev: TableNodeType[] = [], peers: Peer[] = []): TableNodeType[] {
+/** 검색 중 강조: 맞는 테이블·컬럼, 결과에서 고른 것 */
+export interface SearchMarks {
+  tables: Set<string>;
+  columns: Set<string>;
+  focus: { tableId: string; columnId?: string } | null;
+}
+
+export function buildNodes(
+  schema: Schema,
+  viewMode: ViewMode,
+  selectedId: string | null,
+  prev: TableNodeType[] = [],
+  peers: Peer[] = [],
+  search: SearchMarks | null = null,
+): TableNodeType[] {
   const measured = new Map(prev.map((n) => [n.id, n.measured]));
   const peerMarks = (tableId: string) =>
     peers.filter((p) => p.selection?.type === 'table' && p.selection.id === tableId).map((p) => ({ name: p.name, color: p.color }));
@@ -14,7 +28,15 @@ export function buildNodes(schema: Schema, viewMode: ViewMode, selectedId: strin
     position: table.position,
     selected: table.id === selectedId,
     measured: measured.get(table.id),
-    data: { table, fkIds: [...foreignKeyColumnIds(schema, table.id)], viewMode, peers: peerMarks(table.id) },
+    data: {
+      table,
+      fkIds: [...foreignKeyColumnIds(schema, table.id)],
+      viewMode,
+      peers: peerMarks(table.id),
+      search: search ? (search.tables.has(table.id) ? 'match' : 'dim') : undefined,
+      matchColumnIds: search ? table.columns.filter((c) => search.columns.has(c.id)).map((c) => c.id) : undefined,
+      focusColumnId: search?.focus?.tableId === table.id ? search.focus.columnId ?? '*' : undefined,
+    },
   }));
 }
 

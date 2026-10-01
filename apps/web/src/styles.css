@@ -65,18 +65,50 @@ code, pre, .sql-view { font-family: 'JetBrains Mono', Consolas, 'D2Coding', mono
 
 .app { display: flex; flex-direction: column; height: 100%; }
 
-/* 상단 도구 막대 */
-.toolbar {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
-}
-.toolbar .divider { width: 1px; height: 22px; background: var(--border); }
+/* 상단: 프로젝트 줄(topbar) + 작업 도구 줄(toolstrip) */
+.toolbar { background: var(--panel); border-bottom: 1px solid var(--border); }
+.topbar, .toolstrip { display: flex; align-items: center; gap: 6px; padding: 0 12px; min-width: 0; }
+.topbar { height: 48px; border-bottom: 1px solid var(--border); }
+.toolstrip { min-height: 44px; flex-wrap: wrap; padding-top: 4px; padding-bottom: 4px; background: var(--bg); }
+.toolbar .divider { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; flex: none; }
 .toolbar .spacer { flex: 1; }
+.tool-group { display: flex; align-items: center; gap: 4px; }
+.app-logo { width: 24px; height: 24px; border-radius: 6px; flex: none; }
 .project-name {
   font-weight: 700; font-size: 15px; border: 1px solid transparent; background: transparent;
-  padding: 4px 6px; border-radius: 6px; width: 180px;
+  padding: 4px 8px; border-radius: 6px; width: 200px; min-width: 80px;
 }
-.project-name:hover, .project-name:focus { border-color: var(--border); outline: none; }
+.project-name:hover, .project-name:focus { border-color: var(--border-strong); outline: none; background: var(--panel); }
+.chip-select { font-size: 12px; padding: 3px 8px; border-radius: 12px; background: var(--bg); }
+.tool-select { font-size: 13px; padding: 5px 8px; }
+.toolbar .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; }
+.toolbar .btn.icon-only { padding: 0; width: 32px; justify-content: center; }
+.btn-ghost { border-color: transparent; background: transparent; }
+.btn-ghost:hover:not(:disabled) { background: var(--border); color: var(--text); border-color: transparent; }
+.btn-outline { border-color: var(--accent); color: var(--accent); }
+.btn-outline:hover:not(:disabled) { background: var(--accent-soft); }
+.btn-tool { background: var(--panel); }
+.btn-tool.active { border-color: var(--accent); color: var(--accent); }
+.toolbar kbd { font-size: 10px; color: var(--muted); border-color: var(--border-strong); background: var(--bg); }
+.toolbar .segmented button { height: 32px; padding: 0 12px; }
+.user-chip { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 1280px) { .hide-narrow { display: none !important; } }
+@media (max-width: 720px) { .project-name { width: 120px; } .topbar .chip-select { display: none; } }
+
+/* 펼침 메뉴 */
+.dropdown { position: relative; }
+.dropdown__menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 220px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15);
+}
+.dropdown__menu button {
+  all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.dropdown__menu button:hover:not(:disabled) { background: var(--accent-soft); }
+.dropdown__menu button:disabled { opacity: 0.45; cursor: default; }
+.dropdown__label { flex: 1; }
+.dropdown__hint { color: var(--muted); font-size: 11px; }
 
 input, select {
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 6px; padding: 5px 8px;
@@ -297,7 +329,7 @@ label.btn { display: inline-flex; align-items: center; }
   display: inline-grid; place-items: center; border: 2px solid var(--panel);
 }
 .avatar + .avatar { margin-left: -8px; }
-.toolbar .back { text-decoration: none; color: var(--text); font-size: 18px; }
+.toolbar .back { text-decoration: none; color: var(--text); display: inline-flex; padding: 4px; }
 .peer-tags { position: absolute; top: -20px; right: 0; display: flex; gap: 3px; }
 .peer-tags span { color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px 4px 0 0; white-space: nowrap; }
 .peer-cursor { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1000; display: flex; align-items: flex-start; }
@@ -414,3 +446,54 @@ label.btn { display: inline-flex; align-items: center; }
 .token-manager .toolbar-row input { flex: 1; min-width: 160px; }
 .readonly-fieldset { border: none; margin: 0; padding: 0; min-width: 0; display: contents; }
 .desktop-link { text-decoration: none; display: inline-flex; align-items: center; color: var(--accent); border-color: var(--accent); }
+
+
+/* Ctrl+F 검색 */
+.search-box {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30; width: min(620px, calc(100% - 32px));
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 16px 40px rgb(0 0 0 / 0.18);
+  overflow: hidden;
+}
+.search-box__input { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; color: var(--muted); }
+.search-box__input input { flex: 1; border: none; outline: none; font-size: 15px; background: transparent; color: var(--text); padding: 6px 0; }
+.search-box__input input:focus { outline: none; }
+.search-box__count { font-size: 12px; white-space: nowrap; }
+.search-box__results { list-style: none; margin: 0; padding: 4px; max-height: 360px; overflow: auto; border-top: 1px solid var(--border); }
+.search-box__results button {
+  all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer;
+}
+.search-box__results button.active { background: var(--accent-soft); }
+.search-box__empty { padding: 14px; color: var(--muted); text-align: center; }
+.search-kind { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex: none; }
+.search-kind-table { background: var(--accent); color: #fff; }
+.search-kind-column { background: var(--border); color: var(--text); }
+.search-title { font-weight: 600; font-family: Consolas, monospace; font-size: 13px; white-space: nowrap; }
+.search-detail { color: var(--muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-where { font-size: 10px; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px; }
+.search-box mark { background: #fde68a; color: inherit; border-radius: 2px; }
+.search-box__help { font-size: 11px; color: var(--muted); padding: 6px 12px; border-top: 1px solid var(--border); background: var(--bg); }
+.table-node.search-dim { opacity: 0.28; transition: opacity 0.15s; }
+.table-node.search-match { box-shadow: 0 0 0 2px #f59e0b; }
+.table-node__column.col-match { background: color-mix(in srgb, #f59e0b 22%, transparent); }
+@keyframes search-flash { 0%, 60% { background: color-mix(in srgb, #f59e0b 60%, transparent); } 100% { background: color-mix(in srgb, #f59e0b 22%, transparent); } }
+.table-node__column.col-focus { animation: search-flash 2.5s ease-out; outline: 2px solid #f59e0b; outline-offset: -2px; }
+.table-node.search-focus { box-shadow: 0 0 0 4px #f59e0b; }
+
+/* 빈 캔버스 안내 · 도움말 */
+.empty-canvas {
+  position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); z-index: 5; text-align: center; color: var(--muted);
+  pointer-events: none; max-width: 420px;
+}
+.empty-canvas h3 { margin: 0 0 6px; color: var(--text); }
+.empty-canvas p { margin: 0 0 12px; line-height: 1.6; }
+.empty-canvas .btn { pointer-events: auto; }
+.help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.help-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+.help-card h4 { margin: 0 0 8px; }
+.help-card ul { margin: 0; padding-left: 18px; line-height: 1.75; }
+.help-note { color: var(--accent); }
+.shortcut-table { width: 100%; border-collapse: collapse; }
+.shortcut-table td { padding: 5px 4px; border-bottom: 1px solid var(--border); }
+.shortcut-table td:first-child { white-space: nowrap; width: 40%; }
+.shortcut-table kbd + kbd { margin-left: 3px; }
+@media (max-width: 760px) { .help-grid { grid-template-columns: 1fr; } }

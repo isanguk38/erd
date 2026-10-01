@@ -48,6 +48,14 @@ interface State extends LocalPrefs {
   /** 프로젝트를 열 수 없을 때 (권한 없음 등) */
   openError: string;
   setMe: (me: Me | null) => void;
+  /** Ctrl+F 검색 */
+  searchOpen: boolean;
+  searchQuery: string;
+  /** 검색 결과에서 고른 것 (잠깐 강조) */
+  searchFocus: { tableId: string; columnId?: string; at: number } | null;
+  setSearchOpen: (open: boolean) => void;
+  setSearchQuery: (query: string) => void;
+  setSearchFocus: (focus: { tableId: string; columnId?: string } | null) => void;
   /** 버전 비교 중이면 기준 버전 (편집은 잠긴다) */
   compare: { name: string; createdAt: string; schema: Schema } | null;
 
@@ -109,6 +117,12 @@ export const useStore = create<State>()(
         canRedo: false,
         compare: null,
         me: null,
+        searchOpen: false,
+        searchQuery: '',
+        searchFocus: null,
+        setSearchOpen: (searchOpen) => set(searchOpen ? { searchOpen } : { searchOpen, searchQuery: '' }),
+        setSearchQuery: (searchQuery) => set({ searchQuery }),
+        setSearchFocus: (focus) => set({ searchFocus: focus ? { ...focus, at: Date.now() } : null }),
         role: null,
         openError: '',
         setMe: (me) => {

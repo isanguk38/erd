@@ -16,6 +16,8 @@ import { CompareBanner, ComparePanel } from './components/ComparePanel';
 import { LoginPage } from './components/LoginPage';
 import { ShareDialog } from './components/ShareDialog';
 import { authApi } from './lib/api';
+import { HelpDialog } from './components/HelpDialog';
+import { SearchBox } from './components/SearchBox';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -84,6 +86,9 @@ function Editor({ projectId }: { projectId: string }) {
   const status = useStore((s) => s.status);
   const comparing = useStore((s) => Boolean(s.compare));
   const openError = useStore((s) => s.openError);
+  const hasSelection = useStore((s) => Boolean(s.selection));
+  const isEmpty = useStore((s) => s.schema.tables.length === 0);
+  const role = useStore((s) => s.role);
 
   useEffect(() => {
     useStore.getState().open(projectId);
@@ -92,6 +97,17 @@ function Editor({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ctrl+F: 브라우저 찾기 대신 테이블·컬럼 검색 (입력 중에도)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        useStore.getState().setSearchOpen(true);
+        return;
+      }
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setDialog('help');
+        return;
+      }
       if (isTyping(e.target) || !(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
       if (key === 'z' && !e.shiftKey) {
@@ -132,9 +148,17 @@ function Editor({ projectId }: { projectId: string }) {
                 )}
               </div>
             )}
+            <SearchBox />
+            {synced && isEmpty && !comparing && (
+              <div className="empty-canvas">
+                <h3>빈 ERD입니다</h3>
+                <p>{role === 'viewer' ? '아직 테이블이 없습니다.' : '빈 곳을 더블클릭하거나 + 테이블로 시작하세요. 기존 DB가 있으면 "DB에서 가져오기"로 불러올 수 있습니다.'}</p>
+                <button className="btn" onClick={() => setDialog('help')}>사용 방법 보기</button>
+              </div>
+            )}
             <Canvas fitRequest={fitRequest} />
           </div>
-          {comparing ? <ComparePanel /> : <Inspector />}
+          {comparing ? <ComparePanel /> : hasSelection ? <Inspector /> : null}
         </main>
         {dialog === 'sql' && <SqlDialog onClose={close} />}
         {dialog === 'versions' && <VersionsDialog onClose={close} />}
@@ -144,6 +168,7 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'ai' && <AiDialog onClose={close} onOpenProposals={() => setDialog('proposals')} />}
         {dialog === 'proposals' && <ProposalsDialog onClose={close} />}
         {dialog === 'share' && <ShareDialog onClose={close} />}
+        {dialog === 'help' && <HelpDialog onClose={close} />}
       </div>
     </ReactFlowProvider>
   );
