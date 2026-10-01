@@ -55,7 +55,21 @@ async function openStorage(): Promise<Storage> {
   if (!env.DATABASE_URL) return new FileStorage(env.ERD_DATA_DIR || resolve(here, '../data'));
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(env.DATABASE_URL);
   const pool = new pg.Pool({ connectionString: env.DATABASE_URL, ssl: local ? undefined : { rejectUnauthorized: false }, max: 4 });
-  return PostgresStorage.open(pool, () => pool.end());
+  try {
+    return await PostgresStorage.open(pool, () => pool.end());
+  } catch (e) {
+    const err = e as { code?: string; address?: string; message?: string };
+    if (err.code === 'ENETUNREACH' && err.address?.includes(':')) {
+      fail(
+        'DATABASE_URL의 DB에 IPv6로만 연결할 수 있는데, 이 서버(Render 등)는 IPv6로 나갈 수 없습니다.\n' +
+          'Supabase라면 Connect → Connection String에서 "Direct connection"이 아니라 "Session pooler" 주소\n' +
+          '(postgresql://postgres.<프로젝트ID>:<비밀번호>@aws-0-<지역>.pooler.supabase.com:5432/postgres)를 쓰세요.',
+      );
+    }
+    if (err.code === '28P01') fail('DATABASE_URL의 DB 비밀번호가 맞지 않습니다. 주소의 [YOUR-PASSWORD] 자리에 실제 비밀번호를 넣었는지 확인하세요.');
+    if (err.code === 'ENOTFOUND') fail(`DATABASE_URL의 호스트를 찾을 수 없습니다. 주소를 다시 복사해 넣으세요. (${err.message})`);
+    throw e;
+  }
 }
 
 const storage = await openStorage();
