@@ -81,6 +81,31 @@ AI는 토큰 주인이 볼 수 있는 프로젝트만 다루고, 토큰은 화�
 AI가 바로 적용하면 화면에 "AI가 N건 바꿨습니다 · AI 변경 되돌리기"가 뜨고, 작업 전 버전이 자동 저장됩니다.
 제안 모드에서는 AI의 변경이 하나의 제안으로 모이고, 그 사이 사람이 한 편집은 유지한 채 고른 항목만 반영됩니다.
 
+## 웹 · 설치형 앱
+
+| | 웹 (브라우저) | 설치형 앱 (Windows) |
+|---|---|---|
+| 화면·로그인·프로젝트·동시 편집·AI | 같음 | 같음 (같은 사이트를 앱 창에 띄움) |
+| DB 가져오기·내보내기·차이 알림 | 꺼짐 | **켜짐: 내 PC에서 DB에 직접 연결** |
+
+배포한 웹 서버는 사용자의 사내망이나 PC(localhost)에 있는 DB에 접속할 수 없습니다.
+그래서 DB 연결은 설치형 앱이 사용자 PC에서 처리하고, DB 접속 정보도 그 PC에만 OS 보안 저장소로 암호화해 둡니다(서버로 보내지 않음).
+다른 계정 사람도 초대 링크로 같은 프로젝트에 들어와 함께 작업할 수 있습니다.
+
+```
+[설치형 앱] ─ 웹과 같은 화면·프로젝트 (https://erd-hgcp.onrender.com)
+     └─ DB 연결만 이 PC에서 직접 ──→ [사내 DB / 내 PC DB]
+```
+
+설치 파일 만들기 (`desktop/`):
+```bash
+npm install            # 저장소 루트 (DB 연결 코드 공유)
+cd desktop
+npm install
+npm run dist           # release/ERD-Setup-<버전>.exe
+```
+앱이 띄울 서버 주소는 기본 `https://erd-hgcp.onrender.com`이며, 앱 메뉴의 "설정 파일 열기"(config.json)나 `ERD_DESKTOP_URL`로 바꿀 수 있습니다.
+
 ## 배포 (Render + Supabase)
 
 1. **Supabase**에서 프로젝트를 만들고 Connection string(URI)을 복사합니다. (Render 무료 서버는 재시작하면 디스크가 지워지므로 데이터는 PostgreSQL에 저장합니다)

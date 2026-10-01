@@ -86,6 +86,8 @@ const { app, mcpToken, auth } = buildApp({
   webUrl: publicUrl,
   auth: authEnabled ? { enabled: true, github, devLogin, allowPrivateDb: env.ERD_ALLOW_PRIVATE_DB === '1' } : undefined,
   staticDir: env.NODE_ENV === 'production' || env.ERD_SERVE_WEB === '1' ? staticDir : undefined,
+  // 배포 모드에서는 서버가 DB에 접속하지 않는다 (설치형 앱이 사용자 PC에서 처리). ERD_SERVER_DB=1이면 공개된 클라우드 DB에 한해 허용
+  serverDb: !authEnabled || env.ERD_SERVER_DB === '1',
 });
 
 // 종료할 때 메모리의 문서를 저장한다

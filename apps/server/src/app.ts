@@ -11,7 +11,7 @@ import { registerProjectRoutes } from './routes/projects';
 import { registerAuthRoutes, requiredRole } from './routes/auth';
 import { createSyncServer } from './ws';
 import { loadMcpToken, registerMcpRoute } from './mcp';
-import { atLeast, Auth, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
+import { atLeast, Auth, DESKTOP_ONLY_MESSAGE, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
 import { FileStorage, type Storage } from './storage';
 
 declare module 'fastify' {
@@ -36,7 +36,13 @@ export interface AppOptions {
   auth?: Omit<AuthOptions, 'publicUrl' | 'secret'> & { secret?: string };
   /** 빌드한 화면 폴더 (배포 시 같은 서버에서 제공) */
   staticDir?: string;
+  /**
+   * 서버가 직접 DB에 접속하는 기능을 쓸지. 기본: 로컬 모드에서만 사용.
+   * 배포(로그인) 모드에서는 끄고, DB 연결은 설치형 앱이 사용자 PC에서 처리한다.
+   */
+  serverDb?: boolean;
 }
+
 
 const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
 const MAX_STATEMENTS = 1000;
@@ -107,6 +113,7 @@ export function buildApp(options: AppOptions): ErdApp {
     secret: options.auth?.secret ?? options.secret ?? randomBytes(32).toString('base64'),
   });
   const store = new ConnectionStore(storage, options.secret);
+  const serverDb = options.serverDb ?? !auth.enabled;
   const projects = new ProjectStore(storage);
   const mcpToken = loadMcpToken(storage, options.mcpToken);
 
@@ -150,6 +157,9 @@ export function buildApp(options: AppOptions): ErdApp {
     const isApi = path.startsWith('/api/');
     if (!user && isApi && !PUBLIC_PATHS.some((p) => path === p || path.startsWith(p))) {
       return reply.status(401).send({ error: '로그인이 필요합니다' });
+    }
+    if (!serverDb && path.startsWith('/api/connections')) {
+      return reply.status(403).send({ error: DESKTOP_ONLY_MESSAGE, code: 'DESKTOP_ONLY' });
     }
   });
   app.addHook('preHandler', async (req, reply) => {
@@ -206,8 +216,8 @@ export function buildApp(options: AppOptions): ErdApp {
     return result;
   });
 
-  registerAuthRoutes(app, auth, projects);
-  registerProjectRoutes(app, projects, store, writeLog, auth);
+  registerAuthRoutes(app, auth, projects, serverDb);
+  registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
   registerMcpRoute(app, { auth, localToken: mcpToken, webUrl: publicUrl });
 
   /** 화면의 "AI 연결" 안내용 */

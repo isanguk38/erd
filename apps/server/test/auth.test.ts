@@ -18,7 +18,7 @@ afterEach(async () => {
   for (const a of apps.splice(0)) await a.app.close();
 });
 
-function setup(extra: Parameters<typeof buildApp>[0] = {}) {
+function setup(extra: Partial<Parameters<typeof buildApp>[0]> = {}) {
   const erd = buildApp({
     dataDir: mkdtempSync(join(tmpdir(), 'erd-auth-')),
     secret: 'test-secret',
@@ -84,8 +84,22 @@ describe('로그인 모드: 권한', () => {
     expect((await app.inject({ method: 'POST', url: `/api/join/${editShare.token}`, ...as(b) })).statusCode).toBe(404);
   });
 
-  it('DB 연결은 만든 사람만 보고 쓸 수 있다', async () => {
+  it('배포(로그인) 모드에서는 기본으로 서버가 DB에 접속하지 않는다 (설치형 앱에서 처리)', async () => {
     const { app } = setup();
+    const a = await login(app, 'a');
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie: a } })).json().serverDb).toBe(false);
+    const res = await app.inject({ method: 'GET', url: '/api/connections', headers: { cookie: a } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ code: 'DESKTOP_ONLY' });
+    // 앱이 계산한 기준 시점은 저장할 수 있다 (연결 id는 앱에만 있음)
+    const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'p' }, headers: { cookie: a } })).json();
+    const saved = await app.inject({ method: 'POST', url: `/api/projects/${project.id}/db/baseline`, payload: { connectionId: 'local-conn-1', schema: { tables: [], relations: [] } }, headers: { cookie: a } });
+    expect(saved.statusCode).toBe(200);
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${project.id}`, payload: { dbConnectionId: 'local-conn-1' }, headers: { cookie: a } })).statusCode).toBe(200);
+  });
+
+  it('DB 연결은 만든 사람만 보고 쓸 수 있다', async () => {
+    const { app } = setup({ serverDb: true });
     const a = await login(app, 'a');
     const b = await login(app, 'b');
     const conn = (await app.inject({
@@ -97,7 +111,7 @@ describe('로그인 모드: 권한', () => {
   });
 
   it('배포 환경에서는 내부망 주소의 DB에 연결하지 못한다 (SSRF 방지)', async () => {
-    const { app } = setup();
+    const { app } = setup({ serverDb: true });
     const a = await login(app, 'a');
     const res = await app.inject({
       method: 'POST', url: '/api/connections/test', headers: { cookie: a },

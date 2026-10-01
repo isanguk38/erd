@@ -4,7 +4,10 @@ import { addTable, dialectList, type DialectId } from '@erd/core';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { exportDiagram } from '../lib/exportImage';
 import { downloadDataUrl, safeFileName } from '../lib/download';
-import { useDbStatus, useDialect, useProjectName } from '../lib/hooks';
+import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
+import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
+
+const DESKTOP_ONLY_TITLE = 'DB 가져오기·내보내기는 설치형 앱에서 쓸 수 있습니다. 웹 서버는 사내망이나 내 PC의 DB에 접속할 수 없어서, 앱이 내 PC에서 DB에 직접 연결합니다.';
 import { sampleSchema } from '../lib/sample';
 import { authApi } from '../lib/api';
 
@@ -97,6 +100,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const pendingProposals = useStore((s) => s.meta.pendingProposals ?? 0);
   const role = useStore((s) => s.role);
   const readOnly = role === 'viewer';
+  const dbAvailable = useDbAvailable();
   const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
   const { getNodes, getNodesBounds, screenToFlowPosition, fitView } = useReactFlow();
   const [exporting, setExporting] = useState(false);
@@ -188,14 +192,27 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </button>
       )}
       <span className="spacer" />
-      <button className="btn btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? '보기 권한에서는 ERD를 바꿀 수 없습니다' : dbTitle}>
-        DB에서 가져오기
-        {(dbChanged > 0 || unknownDiff > 0) && <span className="db-badge" title={dbTitle}>{dbChanged || unknownDiff}</span>}
-      </button>
-      <button className="btn btn-primary btn-with-badge" disabled={isEmpty} onClick={() => onOpen('dbPush')} title={dbStatus?.connected ? `ERD에서 바뀌고 아직 DB에 안 넣은 것 ${erdPending}건` : 'ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다'}>
-        DB로 내보내기
-        {erdPending > 0 && <span className="db-badge erd">{erdPending}</span>}
-      </button>
+      {dbAvailable ? (
+        <>
+          <button className="btn btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? '보기 권한에서는 ERD를 바꿀 수 없습니다' : dbTitle}>
+            DB에서 가져오기
+            {(dbChanged > 0 || unknownDiff > 0) && <span className="db-badge" title={dbTitle}>{dbChanged || unknownDiff}</span>}
+          </button>
+          <button className="btn btn-primary btn-with-badge" disabled={isEmpty} onClick={() => onOpen('dbPush')} title={dbStatus?.connected ? `ERD에서 바뀌고 아직 DB에 안 넣은 것 ${erdPending}건` : 'ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다'}>
+            DB로 내보내기
+            {erdPending > 0 && <span className="db-badge erd">{erdPending}</span>}
+          </button>
+        </>
+      ) : (
+        <>
+          {/* 웹에서는 서버가 사용자의 사내망·PC DB에 접속할 수 없어 DB 연결은 설치형 앱에서만 */}
+          <button className="btn" disabled title={DESKTOP_ONLY_TITLE}>DB에서 가져오기</button>
+          <button className="btn" disabled title={DESKTOP_ONLY_TITLE}>DB로 내보내기</button>
+          <a className="btn btn-sm desktop-link" href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" title={DESKTOP_ONLY_TITLE}>
+            설치형 앱 받기
+          </a>
+        </>
+      )}
       <span className="divider" />
       <button className="btn" onClick={() => onOpen('versions')}>버전</button>
       <button className="btn" onClick={() => onOpen('sql')}>SQL 추출</button>

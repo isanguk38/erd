@@ -1,4 +1,5 @@
 import type { DialectId, Schema } from '@erd/core';
+import { desktop, viaDesktop } from './desktop';
 
 export interface Connection {
   id: string;
@@ -60,15 +61,24 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+/**
+ * DB 연결. 설치형 앱 안에서는 앱이 사용자 PC에서 직접 처리하고(window.erdDesktop),
+ * 로컬 모드 웹에서는 내 PC의 ERD 서버가 처리한다.
+ */
 export const api = {
-  listConnections: () => request<Connection[]>('GET', '/api/connections'),
-  createConnection: (input: ConnectionInput) => request<Connection>('POST', '/api/connections', input),
-  updateConnection: (id: string, input: ConnectionInput) => request<Connection>('PUT', `/api/connections/${id}`, input),
-  deleteConnection: (id: string) => request<{ ok: true }>('DELETE', `/api/connections/${id}`),
-  testConnection: (input: ConnectionInput & { id?: string }) => request<{ serverVersion: string }>('POST', '/api/connections/test', input),
+  listConnections: () => (desktop ? viaDesktop(() => desktop!.listConnections()) : request<Connection[]>('GET', '/api/connections')),
+  createConnection: (input: ConnectionInput) =>
+    desktop ? viaDesktop(() => desktop!.createConnection(input)) : request<Connection>('POST', '/api/connections', input),
+  updateConnection: (id: string, input: ConnectionInput) =>
+    desktop ? viaDesktop(() => desktop!.updateConnection(id, input)) : request<Connection>('PUT', `/api/connections/${id}`, input),
+  deleteConnection: (id: string) =>
+    desktop ? viaDesktop(() => desktop!.deleteConnection(id)) : request<{ ok: true }>('DELETE', `/api/connections/${id}`),
+  testConnection: (input: ConnectionInput & { id?: string }) =>
+    desktop ? viaDesktop(() => desktop!.testConnection(input)) : request<{ serverVersion: string }>('POST', '/api/connections/test', input),
   introspect: (id: string, commentAs: 'logicalName' | 'comment' = 'logicalName') =>
-    request<IntrospectResult>('POST', `/api/connections/${id}/introspect`, { commentAs }),
-  execute: (id: string, statements: string[]) => request<ExecuteResult>('POST', `/api/connections/${id}/execute`, { statements }),
+    desktop ? viaDesktop(() => desktop!.introspect(id, commentAs)) : request<IntrospectResult>('POST', `/api/connections/${id}/introspect`, { commentAs }),
+  execute: (id: string, statements: string[]) =>
+    desktop ? viaDesktop(() => desktop!.execute(id, statements)) : request<ExecuteResult>('POST', `/api/connections/${id}/execute`, { statements }),
 };
 
 // ── 프로젝트 / 버전 / 제안 ─────────────────────────────
@@ -162,6 +172,8 @@ export interface Me {
   authEnabled: boolean;
   user: { id: string; login: string; name: string; avatarUrl?: string } | null;
   loginMethods: ('github' | 'dev')[];
+  /** false면 서버가 DB에 접속하지 않는다 (배포 웹). DB 연결은 설치형 앱에서만 */
+  serverDb?: boolean;
 }
 
 export interface Member {

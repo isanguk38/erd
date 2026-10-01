@@ -7,13 +7,15 @@ import type { ProjectStore } from '../projects';
 
 const badRequest = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
-export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: ProjectStore) {
+export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: ProjectStore, serverDb = true) {
   const { publicUrl, github, devLogin } = auth.options;
 
   app.get('/api/me', async (req) => ({
     authEnabled: auth.enabled,
     user: req.user ?? null,
     loginMethods: [...(github ? ['github'] : []), ...(devLogin ? ['dev'] : [])],
+    // false면 웹에서는 DB 연결 기능을 끄고 설치형 앱에서만 쓴다
+    serverDb,
   }));
 
   // ── GitHub 로그인 ─────────────────────────────

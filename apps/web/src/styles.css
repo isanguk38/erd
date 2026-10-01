@@ -413,3 +413,4 @@ label.btn { display: inline-flex; align-items: center; }
 .token-manager { display: flex; flex-direction: column; gap: 8px; }
 .token-manager .toolbar-row input { flex: 1; min-width: 160px; }
 .readonly-fieldset { border: none; margin: 0; padding: 0; min-width: 0; display: contents; }
+.desktop-link { text-decoration: none; display: inline-flex; align-items: center; color: var(--accent); border-color: var(--accent); }

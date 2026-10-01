@@ -7,6 +7,9 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { getJson, putJson, type Storage } from './storage';
 
+/** 배포 환경에서 서버가 DB에 접속하지 않을 때 안내 */
+export const DESKTOP_ONLY_MESSAGE = 'DB 연결은 설치형 앱에서 사용할 수 있습니다. 웹 서버는 사용자의 사내망·PC에 있는 DB에 접속할 수 없어서, DB 가져오기·내보내기는 앱이 사용자 PC에서 직접 처리합니다.';
+
 export type Role = 'owner' | 'editor' | 'viewer';
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 export const atLeast = (role: Role | null, needed: Role) => role !== null && RANK[role] >= RANK[needed];

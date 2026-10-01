@@ -1,0 +1,31 @@
+{
+  "name": "erd-desktop",
+  "productName": "ERD",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ERD 설치형 앱: 웹 화면 + 내 PC에서 직접 하는 DB 연결",
+  "author": "isanguk38",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "com.isanguk38.erd",
+    "productName": "ERD",
+    "directories": { "output": "release" },
+    "files": ["dist/**", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "ERD-Setup-${version}.exe"
+    }
+  }
+}
