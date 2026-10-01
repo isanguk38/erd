@@ -186,6 +186,15 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     });
   };
 
+  const sameRelation = (a: Relation, b: Relation) =>
+    a.fromTableId === b.fromTableId &&
+    a.toTableId === b.toTableId &&
+    sameList(a.fromColumnIds, b.fromColumnIds) &&
+    sameList(a.toColumnIds, b.toColumnIds) &&
+    dialect.normalizeAction(a.onDelete) === dialect.normalizeAction(b.onDelete) &&
+    dialect.normalizeAction(a.onUpdate) === dialect.normalizeAction(b.onUpdate) &&
+    sameName(a.name, b.name);
+
   for (const relation of base.relations) {
     const after = targetRelations.get(relation.id);
     if (!after || !sameRelation(relation, after)) dropFk(relation);
@@ -196,18 +205,6 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
   }
 
   return { base, target, changes };
-}
-
-function sameRelation(a: Relation, b: Relation): boolean {
-  return (
-    a.fromTableId === b.fromTableId &&
-    a.toTableId === b.toTableId &&
-    sameList(a.fromColumnIds, b.fromColumnIds) &&
-    sameList(a.toColumnIds, b.toColumnIds) &&
-    a.onDelete === b.onDelete &&
-    a.onUpdate === b.onUpdate &&
-    sameName(a.name, b.name)
-  );
 }
 
 function columnList(table: Table, ids: string[]): string {

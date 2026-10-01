@@ -257,11 +257,28 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
   .migration { grid-template-columns: 1fr; }
 }
 
-/* SQL 가져오기 */
-.sql-input {
-  width: 100%; min-height: 360px; resize: vertical; border: 1px solid var(--border-strong); border-radius: 8px;
-  padding: 10px 12px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; background: var(--panel);
-}
+/* DB 연결 */
+.connection-picker { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.connection-picker select { max-width: 520px; }
+.connection-form { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.connection-form h4 { margin: 0; }
+.row-2 { display: flex; gap: 6px; }
+.row-2 input:first-child { flex: 1; }
+.row-2 .port { width: 90px; }
+.error-box { color: var(--danger); background: var(--danger-soft); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }
+.ok-box { color: var(--create); background: color-mix(in srgb, var(--create) 12%, transparent); border-radius: 6px; padding: 8px 10px; }
+.confirm-box h3 { margin: 0 0 6px; font-size: 14px; }
+.confirm-box ul { margin: 0 0 10px; padding-left: 18px; line-height: 1.7; }
+.confirm-typing { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; color: var(--warning); }
+.confirm-typing input { max-width: 280px; }
+.sql-view.small-view { min-height: 120px; max-height: 32vh; }
+.exec-results { margin: 8px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+.exec-results li { line-height: 1.5; }
+.exec-status { display: inline-block; min-width: 44px; font-weight: 600; font-size: 12px; }
+.exec-results li.ok .exec-status { color: var(--create); }
+.exec-results li.fail .exec-status { color: var(--danger); }
+.exec-results li.skipped { color: var(--muted); }
+.exec-error { color: var(--danger); font-size: 12px; margin-left: 48px; }
 .import-summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .warning-inline { color: var(--warning); }
 .import-warnings { font-size: 12px; color: var(--muted); }

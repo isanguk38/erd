@@ -6,7 +6,7 @@ import { exportDiagram } from '../lib/exportImage';
 import { downloadDataUrl, safeFileName } from '../lib/download';
 import { sampleSchema } from '../lib/sample';
 
-export type DialogName = 'sql' | 'versions' | 'import' | 'definition';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -96,7 +96,9 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </button>
       )}
       <span className="spacer" />
-      <button className="btn" onClick={() => onOpen('import')}>SQL 가져오기</button>
+      <button className="btn" onClick={() => onOpen('dbPull')} title="연결한 DB의 구조를 읽어 ERD를 만들거나 갱신합니다">DB에서 가져오기</button>
+      <button className="btn btn-primary" disabled={isEmpty} onClick={() => onOpen('dbPush')} title="ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다">DB로 내보내기</button>
+      <span className="divider" />
       <button className="btn" onClick={() => onOpen('versions')}>버전</button>
       <button className="btn" onClick={() => onOpen('sql')}>SQL 추출</button>
       <button className="btn" disabled={isEmpty} onClick={() => onOpen('definition')}>정의서</button>

@@ -28,6 +28,8 @@ export interface Index {
   name: string;
   columnIds: string[];
   unique: boolean;
+  /** DB에서 읽은 UNIQUE 제약조건이면 true (PostgreSQL은 제약조건과 인덱스를 지우는 문법이 다르다) */
+  isConstraint?: boolean;
 }
 
 export interface Table {

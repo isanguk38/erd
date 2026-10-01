@@ -10,7 +10,7 @@ export interface Version {
   id: string;
   name: string;
   createdAt: string;
-  source: 'manual' | 'auto';
+  source: 'manual' | 'auto' | 'db';
   schema: Schema;
 }
 
@@ -22,6 +22,8 @@ interface State {
   viewMode: ViewMode;
   selection: Selection;
   relationTool: RelationTool;
+  /** 이 프로젝트에 연결한 DB (서버에 저장된 연결 id) */
+  connectionId: string | null;
   past: Schema[];
   future: Schema[];
 
@@ -35,6 +37,7 @@ interface State {
   select: (selection: Selection) => void;
   setViewMode: (mode: ViewMode) => void;
   setRelationTool: (tool: RelationTool) => void;
+  setConnectionId: (id: string | null) => void;
   setDialect: (dialect: DialectId) => void;
   setProjectName: (name: string) => void;
   saveVersion: (name: string, source?: Version['source']) => Version;
@@ -53,6 +56,7 @@ export const useStore = create<State>()(
       viewMode: 'physical',
       selection: null,
       relationTool: '1:N',
+      connectionId: null,
       past: [],
       future: [],
 
@@ -91,6 +95,7 @@ export const useStore = create<State>()(
       select: (selection) => set({ selection }),
       setViewMode: (viewMode) => set({ viewMode }),
       setRelationTool: (relationTool) => set({ relationTool }),
+      setConnectionId: (connectionId) => set({ connectionId }),
       setDialect: (dialect) => set({ dialect }),
       setProjectName: (projectName) => set({ projectName }),
       saveVersion(name, source = 'manual') {
@@ -102,7 +107,7 @@ export const useStore = create<State>()(
     }),
     {
       name: 'erd-project',
-      partialize: (s) => ({ projectName: s.projectName, dialect: s.dialect, schema: s.schema, versions: s.versions, viewMode: s.viewMode, relationTool: s.relationTool }),
+      partialize: (s) => ({ projectName: s.projectName, dialect: s.dialect, schema: s.schema, versions: s.versions, viewMode: s.viewMode, relationTool: s.relationTool, connectionId: s.connectionId }),
     },
   ),
 );

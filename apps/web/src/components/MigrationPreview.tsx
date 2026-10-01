@@ -21,12 +21,14 @@ export function MigrationPreview({
   selected,
   onSelectedChange,
   fileName,
+  emptyMessage = '변경 사항이 없습니다. 기준과 지금 ERD가 같습니다.',
 }: {
   diff: DiffResult;
   dialect: Dialect;
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
   fileName: string;
+  emptyMessage?: string;
 }) {
   const [tab, setTab] = useState<SqlTab>('all');
   const [copied, setCopied] = useState(false);
@@ -34,7 +36,7 @@ export function MigrationPreview({
   const script = useMemo(() => toScript(statements, { categories: tab === 'all' ? undefined : [tab] }), [statements, tab]);
 
   if (diff.changes.length === 0) {
-    return <div className="empty-state">변경 사항이 없습니다. 기준과 지금 ERD가 같습니다.</div>;
+    return <div className="empty-state">{emptyMessage}</div>;
   }
 
   const counts = Object.fromEntries(GROUPS.map((g) => [g.category, statements.filter((s) => s.category === g.category).length])) as Record<ChangeCategory, number>;

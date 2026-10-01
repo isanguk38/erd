@@ -55,6 +55,7 @@ export const mysql: Dialect = {
 
   quote: q,
   renderType,
+  normalizeAction: (action) => (action === 'RESTRICT' ? 'NO ACTION' : action),
   normalizeDefault(value) {
     const v = normalizeDefaultCommon(value);
     if (v === 'TRUE') return '1';

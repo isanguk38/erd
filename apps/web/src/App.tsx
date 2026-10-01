@@ -6,7 +6,8 @@ import { Inspector } from './components/Inspector';
 import { Toolbar, type DialogName } from './components/Toolbar';
 import { SqlDialog } from './components/SqlDialog';
 import { VersionsDialog } from './components/VersionsDialog';
-import { ImportDialog } from './components/ImportDialog';
+import { DbPullDialog } from './components/DbPullDialog';
+import { DbPushDialog } from './components/DbPushDialog';
 import { DefinitionDialog } from './components/DefinitionDialog';
 
 function isTyping(target: EventTarget | null): boolean {
@@ -46,7 +47,8 @@ export function App() {
         </main>
         {dialog === 'sql' && <SqlDialog onClose={() => setDialog(null)} />}
         {dialog === 'versions' && <VersionsDialog onClose={() => setDialog(null)} />}
-        {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImported={() => setFitRequest((n) => n + 1)} />}
+        {dialog === 'dbPull' && <DbPullDialog onClose={() => setDialog(null)} onDone={() => setFitRequest((n) => n + 1)} />}
+        {dialog === 'dbPush' && <DbPushDialog onClose={() => setDialog(null)} />}
         {dialog === 'definition' && <DefinitionDialog onClose={() => setDialog(null)} />}
       </div>
     </ReactFlowProvider>

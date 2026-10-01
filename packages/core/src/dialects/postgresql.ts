@@ -89,6 +89,7 @@ export const postgresql: Dialect = {
 
   quote: q,
   renderType,
+  normalizeAction: (action) => action,
   normalizeDefault(value) {
     if (value === null) return null;
     // 'Y'::character varying → 'Y'
@@ -158,7 +159,10 @@ export const postgresql: Dialect = {
     const cols = columnNames(table, index.columnIds).map(q).join(', ');
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${cols})`];
   },
-  dropIndex: (table, index) => [`DROP INDEX ${q(indexName(table, index))}`],
+  dropIndex: (table, index) =>
+    index.isConstraint
+      ? [`ALTER TABLE ${q(table.name)} DROP CONSTRAINT ${q(indexName(table, index))}`]
+      : [`DROP INDEX ${q(indexName(table, index))}`],
 
   addForeignKey(schema, relation) {
     const { from, to } = relationTables(schema, relation);

@@ -1,4 +1,4 @@
-import type { Column, Index, Relation, Schema, Table } from '../model';
+import type { Column, Index, ReferentialAction, Relation, Schema, Table } from '../model';
 
 /** 새 DB를 추가하려면 이 목록에 id를 넣고 Dialect를 구현해 registry에 등록한다. */
 export type DialectId = 'mysql' | 'postgresql';
@@ -20,6 +20,8 @@ export interface Dialect {
   renderType(column: Column): string;
   /** 비교용 기본값. 의미가 같으면 같은 문자열이 나와야 한다. */
   normalizeDefault(value: string | null): string | null;
+  /** 비교용 참조 동작. 의미가 같으면 같은 값 (MySQL은 RESTRICT와 NO ACTION이 같다) */
+  normalizeAction(action: ReferentialAction): ReferentialAction;
 
   createTable(table: Table): string[];
   dropTable(table: Table): string[];
