@@ -6,6 +6,8 @@ import { Inspector } from './components/Inspector';
 import { Toolbar, type DialogName } from './components/Toolbar';
 import { SqlDialog } from './components/SqlDialog';
 import { VersionsDialog } from './components/VersionsDialog';
+import { ImportDialog } from './components/ImportDialog';
+import { DefinitionDialog } from './components/DefinitionDialog';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -14,6 +16,7 @@ function isTyping(target: EventTarget | null): boolean {
 
 export function App() {
   const [dialog, setDialog] = useState<DialogName | null>(null);
+  const [fitRequest, setFitRequest] = useState(0);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -37,12 +40,14 @@ export function App() {
         <Toolbar onOpen={setDialog} />
         <main className="workspace">
           <div className="canvas">
-            <Canvas />
+            <Canvas fitRequest={fitRequest} />
           </div>
           <Inspector />
         </main>
         {dialog === 'sql' && <SqlDialog onClose={() => setDialog(null)} />}
         {dialog === 'versions' && <VersionsDialog onClose={() => setDialog(null)} />}
+        {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImported={() => setFitRequest((n) => n + 1)} />}
+        {dialog === 'definition' && <DefinitionDialog onClose={() => setDialog(null)} />}
       </div>
     </ReactFlowProvider>
   );

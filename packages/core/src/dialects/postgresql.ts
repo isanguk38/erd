@@ -47,7 +47,8 @@ function q(name: string): string {
 }
 
 function renderType(column: Column): string {
-  const raw = column.type.trim().toUpperCase();
+  // PostgreSQL에는 UNSIGNED가 없다
+  const raw = column.type.trim().toUpperCase().replace(/\s+(UNSIGNED|ZEROFILL)/g, '');
   const type = TYPE_MAP[raw] ?? raw;
   const length = NO_LENGTH.has(type) ? '' : column.length;
   return typeWithLength(type, length);

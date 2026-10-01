@@ -256,3 +256,15 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
   .inspector { position: absolute; right: 0; top: 0; bottom: 0; max-width: 100vw; z-index: 10; }
   .migration { grid-template-columns: 1fr; }
 }
+
+/* SQL 가져오기 */
+.sql-input {
+  width: 100%; min-height: 360px; resize: vertical; border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 10px 12px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; background: var(--panel);
+}
+.import-summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.warning-inline { color: var(--warning); }
+.import-warnings { font-size: 12px; color: var(--muted); }
+.import-warnings ul { margin: 6px 0; padding-left: 18px; max-height: 120px; overflow: auto; }
+.form-grid.wide-label { grid-template-columns: 100px 1fr; }
+label.btn { display: inline-flex; align-items: center; }

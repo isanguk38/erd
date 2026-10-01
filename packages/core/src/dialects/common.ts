@@ -26,7 +26,12 @@ export function relationTables(schema: Schema, relation: Relation): { from: Tabl
 export function typeWithLength(type: string, length: string): string {
   const t = type.trim().toUpperCase();
   const len = length.replace(/\s+/g, '');
-  return len ? `${t}(${len})` : t;
+  if (!len) return t;
+  // DECIMAL UNSIGNED + 10,2 → DECIMAL(10,2) UNSIGNED
+  const [base, ...modifiers] = t.split(' ').filter(Boolean);
+  const isModifier = (m: string) => m === 'UNSIGNED' || m === 'ZEROFILL';
+  if (modifiers.length && modifiers.every(isModifier)) return `${base}(${len}) ${modifiers.join(' ')}`;
+  return `${t}(${len})`;
 }
 
 export function normalizeDefaultCommon(value: string | null): string | null {

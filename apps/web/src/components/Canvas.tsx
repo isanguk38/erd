@@ -10,43 +10,25 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { addTable, connectManyToMany, connectTables, foreignKeyColumnIds, removeRelation, removeTable, type Schema } from '@erd/core';
+import { addTable, connectManyToMany, connectTables, removeRelation, removeTable } from '@erd/core';
 import { useStore } from '../store';
 import { TableNode, type TableNodeType } from './TableNode';
-import { RelationEdge, type RelationEdgeType } from './RelationEdge';
+import { RelationEdge } from './RelationEdge';
+import { buildEdges, buildNodes } from '../lib/graph';
 
 const nodeTypes = { table: TableNode };
 const edgeTypes = { relation: RelationEdge };
 
-export function buildNodes(schema: Schema, viewMode: ReturnType<typeof useStore.getState>['viewMode'], selectedId: string | null, prev: TableNodeType[] = []): TableNodeType[] {
-  const measured = new Map(prev.map((n) => [n.id, n.measured]));
-  return schema.tables.map((table) => ({
-    id: table.id,
-    type: 'table',
-    position: table.position,
-    selected: table.id === selectedId,
-    measured: measured.get(table.id),
-    data: { table, fkIds: [...foreignKeyColumnIds(schema, table.id)], viewMode },
-  }));
-}
-
-export function buildEdges(schema: Schema, selectedId: string | null): RelationEdgeType[] {
-  return schema.relations.map((r) => ({
-    id: r.id,
-    type: 'relation',
-    source: r.toTableId, // 부모
-    target: r.fromTableId, // 자식
-    selected: r.id === selectedId,
-    data: { cardinality: r.cardinality },
-  }));
-}
-
-export function Canvas() {
+/** fitRequest가 바뀌면 전체가 보이게 화면을 맞춘다 (가져오기 직후 등) */
+export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const schema = useStore((s) => s.schema);
   const viewMode = useStore((s) => s.viewMode);
   const selection = useStore((s) => s.selection);
   const { edit, editSilently, select } = useStore.getState();
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+  useEffect(() => {
+    if (fitRequest) setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 80);
+  }, [fitRequest, fitView]);
 
   const selectedTable = selection?.type === 'table' ? selection.id : null;
   const selectedRelation = selection?.type === 'relation' ? selection.id : null;

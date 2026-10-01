@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { generateStatements, toScript, type ChangeCategory, type DiffResult, type Dialect } from '@erd/core';
 import { downloadText } from '../lib/download';
+import { ChangeList } from './ChangeList';
 
-const GROUPS: { category: ChangeCategory; title: string; hint: string }[] = [
-  { category: 'create', title: 'CREATE', hint: '새 테이블과 그 인덱스·외래키' },
-  { category: 'alter', title: 'ALTER', hint: '이미 있는 테이블의 수정' },
-  { category: 'drop', title: 'DROP', hint: '테이블 삭제' },
+const GROUPS: { category: ChangeCategory; title: string }[] = [
+  { category: 'create', title: 'CREATE' },
+  { category: 'alter', title: 'ALTER' },
+  { category: 'drop', title: 'DROP' },
 ];
 
 type SqlTab = 'all' | ChangeCategory;
@@ -32,12 +33,6 @@ export function MigrationPreview({
   const statements = useMemo(() => generateStatements(diff, dialect, selected), [diff, dialect, selected]);
   const script = useMemo(() => toScript(statements, { categories: tab === 'all' ? undefined : [tab] }), [statements, tab]);
 
-  const toggle = (ids: string[], on: boolean) => {
-    const next = new Set(selected);
-    ids.forEach((id) => (on ? next.add(id) : next.delete(id)));
-    onSelectedChange(next);
-  };
-
   if (diff.changes.length === 0) {
     return <div className="empty-state">변경 사항이 없습니다. 기준과 지금 ERD가 같습니다.</div>;
   }
@@ -46,34 +41,7 @@ export function MigrationPreview({
 
   return (
     <div className="migration">
-      <div className="migration__changes">
-        {GROUPS.map((group) => {
-          const changes = diff.changes.filter((c) => c.category === group.category);
-          if (changes.length === 0) return null;
-          const ids = changes.map((c) => c.id);
-          const all = ids.every((id) => selected.has(id));
-          return (
-            <section key={group.category} className={`change-group change-group--${group.category}`}>
-              <label className="change-group__head">
-                <input type="checkbox" checked={all} onChange={(e) => toggle(ids, e.target.checked)} />
-                <b>{group.title}</b>
-                <span className="muted">{group.hint} · {changes.length}건</span>
-              </label>
-              <ul>
-                {changes.map((c) => (
-                  <li key={c.id}>
-                    <label>
-                      <input type="checkbox" checked={selected.has(c.id)} onChange={(e) => toggle([c.id], e.target.checked)} />
-                      <span>{c.summary}</span>
-                    </label>
-                    {c.warning && <div className="warning">⚠ {c.warning}</div>}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          );
-        })}
-      </div>
+      <ChangeList changes={diff.changes} selected={selected} onSelectedChange={onSelectedChange} />
       <div className="migration__sql">
         <div className="tabs">
           <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>전체 ({statements.length})</button>

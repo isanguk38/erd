@@ -6,7 +6,7 @@ import { exportDiagram } from '../lib/exportImage';
 import { downloadDataUrl, safeFileName } from '../lib/download';
 import { sampleSchema } from '../lib/sample';
 
-export type DialogName = 'sql' | 'versions';
+export type DialogName = 'sql' | 'versions' | 'import' | 'definition';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -30,13 +30,22 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const canRedo = useStore((s) => s.future.length > 0);
   const isEmpty = useStore((s) => s.schema.tables.length === 0);
   const { setProjectName, setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
-  const { getNodes, screenToFlowPosition, fitView } = useReactFlow();
+  const { getNodes, getNodesBounds, screenToFlowPosition, fitView } = useReactFlow();
   const [exporting, setExporting] = useState(false);
+
+  const arrange = async () => {
+    const { autoLayout } = await import('@erd/core/layout');
+    const positions = await autoLayout(useStore.getState().schema);
+    edit((d) => {
+      for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
+    });
+    setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 50);
+  };
 
   const exportImage = async (format: 'png' | 'svg') => {
     setExporting(true);
     try {
-      const url = await exportDiagram(getNodes(), format);
+      const url = await exportDiagram(getNodes(), getNodesBounds, format);
       downloadDataUrl(url, `${safeFileName(projectName)}.${format}`);
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
@@ -72,6 +81,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <button key={m.id} className={viewMode === m.id ? 'active' : ''} onClick={() => setViewMode(m.id)}>{m.label}</button>
         ))}
       </div>
+      <button className="btn" disabled={isEmpty} onClick={arrange} title="관계를 보고 테이블을 자동으로 배치합니다">자동 정렬</button>
       <button className="icon-btn" title="되돌리기 (Ctrl+Z)" disabled={!canUndo} onClick={undo}>↶</button>
       <button className="icon-btn" title="다시 실행 (Ctrl+Y)" disabled={!canRedo} onClick={redo}>↷</button>
       {isEmpty && (
@@ -86,8 +96,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </button>
       )}
       <span className="spacer" />
+      <button className="btn" onClick={() => onOpen('import')}>SQL 가져오기</button>
       <button className="btn" onClick={() => onOpen('versions')}>버전</button>
       <button className="btn" onClick={() => onOpen('sql')}>SQL 추출</button>
+      <button className="btn" disabled={isEmpty} onClick={() => onOpen('definition')}>정의서</button>
       <button className="btn" disabled={exporting} onClick={() => exportImage('png')}>PNG</button>
       <button className="btn" disabled={exporting} onClick={() => exportImage('svg')}>SVG</button>
     </header>
