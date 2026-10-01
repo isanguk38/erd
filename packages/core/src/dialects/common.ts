@@ -45,5 +45,7 @@ export function normalizeDefaultCommon(value: string | null): string | null {
     if (upper === 'NOW()' || upper === 'CURRENT_TIMESTAMP()') return 'CURRENT_TIMESTAMP';
     return upper;
   }
+  // 숫자는 값으로 비교한다 (DECIMAL 기본값 0을 DB는 0.00으로 돌려준다)
+  if (/^[-+]?\d+(\.\d+)?$/.test(v)) return String(Number(v));
   return v;
 }

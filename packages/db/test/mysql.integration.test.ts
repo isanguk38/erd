@@ -74,7 +74,8 @@ function erd(): Schema {
       op: 'createTable', name: 'orders', logicalName: '주문',
       columns: [
         { name: 'order_id', type: 'BIGINT', primaryKey: true, autoIncrement: true },
-        { name: 'amount', logicalName: '금액', type: 'DECIMAL(12,2)', nullable: false, default: '0.00' },
+        // DB는 0을 0.00으로 돌려준다. 값이 같으므로 차이로 보지 않아야 한다
+        { name: 'amount', logicalName: '금액', type: 'DECIMAL(12,2)', nullable: false, default: '0' },
         { name: 'memo', type: 'TEXT' },
         { name: 'status', type: "ENUM('READY','PAID','CANCEL')", nullable: false, default: "'READY'" },
       ],

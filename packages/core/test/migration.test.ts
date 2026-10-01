@@ -127,6 +127,9 @@ describe('변경분 (ALTER)', () => {
     target.tables[0].columns[0].nullable = true; // PK는 항상 NOT NULL
     target.tables[1].columns[2].defaultValue = "'READY'";
     const pgBase = cloneSchema(base);
+    // 숫자 기본값은 값으로 비교 (0.00 = 0)
+    pgBase.tables[1].columns.push({ ...pgBase.tables[1].columns[2], id: 'o_amount', name: 'amount', type: 'DECIMAL', length: '12,2', defaultValue: '0.00' });
+    target.tables[1].columns.push({ ...target.tables[1].columns[2], id: 'o_amount', name: 'amount', type: 'NUMERIC', length: '12,2', defaultValue: '0' });
     pgBase.tables[1].columns[0].type = 'INT8';
     target.tables[1].columns[0].type = 'BIGINT';
     expect(generateMigration(pgBase, target, getDialect('postgresql')).statements).toEqual([]);
