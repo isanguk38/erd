@@ -24,6 +24,33 @@ function isTyping(target: EventTarget | null): boolean {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 }
 
+/** 로그인하러 간 사이 기억해 둘 초대 토큰 (30분 뒤엔 버린다) */
+const PENDING_JOIN = 'erd-pending-join';
+const storage = {
+  get(key: string): string | null {
+    try {
+      const v = JSON.parse(localStorage.getItem(key) ?? 'null') as { value: string; at: number } | null;
+      return v && Date.now() - v.at < 30 * 60 * 1000 ? v.value : null;
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ value, at: Date.now() }));
+    } catch {
+      /* 저장소를 못 쓰면 링크를 한 번 더 열면 된다 */
+    }
+  },
+  remove(key: string) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* 무시 */
+    }
+  },
+};
+
 /** 주소: #/ → 프로젝트 목록, #/p/<id> → 편집기, #/join/<token> → 초대 링크 */
 function useHash(): string {
   const [hash, setHash] = useState(location.hash);
@@ -57,10 +84,23 @@ export function App() {
     return () => window.removeEventListener('erd:unauthorized', onUnauthorized);
   }, []);
 
-  // 초대 링크: 로그인한 상태면 참여하고 프로젝트로 이동
+  // 초대 링크: 로그인한 상태면 참여하고 프로젝트로 이동.
+  // 로그인(GitHub)을 다녀오면 주소의 #/join/... 이 사라지므로, 로그인 전에 토큰을 기억해 두었다가 이어서 참여한다.
   const joinToken = hash.match(/^#\/join\/([A-Za-z0-9_-]+)/)?.[1];
+  const loggedIn = Boolean(me && (!me.authEnabled || me.user));
   useEffect(() => {
-    if (!joinToken || !me || (me.authEnabled && !me.user)) return;
+    if (!me) return;
+    if (joinToken && !loggedIn) {
+      storage.set(PENDING_JOIN, joinToken);
+      return;
+    }
+    if (!loggedIn) return;
+    const pending = storage.get(PENDING_JOIN);
+    if (!joinToken) {
+      if (pending) location.hash = `#/join/${pending}`;
+      return;
+    }
+    storage.remove(PENDING_JOIN);
     authApi
       .join(joinToken)
       .then(({ projectId }) => (location.hash = `#/p/${projectId}`))
@@ -68,7 +108,7 @@ export function App() {
         alert(e instanceof Error ? e.message : String(e));
         location.hash = '#/';
       });
-  }, [joinToken, me]);
+  }, [joinToken, me, loggedIn]);
 
   if (error) return <div className="center-message error-box">{error}</div>;
   if (!me) return <div className="center-message muted">불러오는 중…</div>;
