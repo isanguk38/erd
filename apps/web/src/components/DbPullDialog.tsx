@@ -7,6 +7,7 @@ import { Modal } from './Modal';
 import { ChangeList, type GroupLabel } from './ChangeList';
 import { ConnectionPicker } from './ConnectionPicker';
 import { BaselineInfo, RenamePanel } from './SyncParts';
+import { loadModule } from '../lib/appVersion';
 
 const PULL_GROUPS: Record<'create' | 'alter' | 'drop', GroupLabel> = {
   create: { title: '새 테이블', hint: 'DB에는 있고 ERD에는 없는 테이블' },
@@ -62,7 +63,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
       const label = `${connection.name} (${connection.database})`;
       if (isEmpty) {
         const schema = structuredClone(result.schema);
-        const { autoLayout } = await import('@erd/core/layout');
+        const { autoLayout } = await loadModule(() => import('@erd/core/layout'));
         const positions = await autoLayout(schema);
         for (const t of schema.tables) t.position = positions.get(t.id) ?? t.position;
         replaceSchema(schema);

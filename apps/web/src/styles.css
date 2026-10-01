@@ -497,3 +497,11 @@ label.btn { display: inline-flex; align-items: center; }
 .shortcut-table td:first-child { white-space: nowrap; width: 40%; }
 .shortcut-table kbd + kbd { margin-left: 3px; }
 @media (max-width: 760px) { .help-grid { grid-template-columns: 1fr; } }
+
+/* 새 버전 안내 */
+.update-banner {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1000;
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px;
+  background: var(--panel, #fff); color: var(--text, #111); border: 1px solid var(--border, #d0d7e2);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); font-size: 13px; max-width: calc(100vw - 32px);
+}

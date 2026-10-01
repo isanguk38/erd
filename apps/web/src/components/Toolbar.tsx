@@ -11,6 +11,7 @@ const DESKTOP_ONLY_TITLE = 'DB 가져오기·내보내기는 설치형 앱에서
 import { sampleSchema } from '../lib/sample';
 import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
+import { loadModule } from '../lib/appVersion';
 
 export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help';
 
@@ -131,7 +132,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   }, [projectName]);
 
   const arrange = async () => {
-    const { autoLayout } = await import('@erd/core/layout');
+    const { autoLayout } = await loadModule(() => import('@erd/core/layout'));
     const positions = await autoLayout(useStore.getState().schema);
     edit((d) => {
       for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;

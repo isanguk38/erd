@@ -5,6 +5,7 @@ import { projectApi } from '../lib/api';
 import { useDialect, useProjectName, useVersions, useVersionSchema } from '../lib/hooks';
 import { downloadBlob, safeFileName } from '../lib/download';
 import { Modal } from './Modal';
+import { loadModule } from '../lib/appVersion';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -28,7 +29,7 @@ export function DefinitionDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       localStorage.setItem('erd-author', author);
-      const { buildDefinitionXlsx } = await import('@erd/core/excel');
+      const { buildDefinitionXlsx } = await loadModule(() => import('@erd/core/excel'));
       const base = historyBase ? await projectApi.version(projectId, historyBase) : undefined;
       const changes = base
         ? { title: `변경 이력 ("${base.name}" 이후)`, items: diffSchemas(base.schema, schema, getDialect(dialect)).changes }
