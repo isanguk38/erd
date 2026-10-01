@@ -30,8 +30,8 @@ function flowMapper(viewportEl: HTMLElement) {
 const SKIP = '.react-flow__handle, .peer-tags';
 
 /** 테이블 하나를 SVG 조각으로 */
-function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, clipId: string): string {
-  const out: string[] = [];
+function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, clipId: string, tableId: string): string {
+  const out: string[] = [`<g data-table-id="${esc(tableId)}">`];
   const nodeStyle = getComputedStyle(nodeEl);
   const box = toFlow(nodeEl.getBoundingClientRect());
   const radius = parseFloat(nodeStyle.borderTopLeftRadius) || 0;
@@ -97,7 +97,7 @@ function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, c
   walk(nodeEl);
   out.push('</g>');
   // 바깥 테두리는 잘리지 않게 맨 위에
-  out.push(...borders);
+  out.push(...borders, '</g>');
   return out.join('');
 }
 
@@ -164,7 +164,7 @@ export function diagramToSvg({ nodes, edgeIds }: ExportTarget, getNodesBounds: (
   const ids = new Set(nodes.map((n) => n.id));
   const parts = [...viewportEl.querySelectorAll<HTMLElement>('.react-flow__node')]
     .filter((el) => ids.has(el.dataset.id ?? ''))
-    .map((el, i) => nodeToSvg((el.firstElementChild as HTMLElement) ?? el, toFlow, `c${i}`));
+    .map((el, i) => nodeToSvg((el.firstElementChild as HTMLElement) ?? el, toFlow, `c${i}`, el.dataset.id ?? ''));
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<rect width="100%" height="100%" fill="${background}"/>` +

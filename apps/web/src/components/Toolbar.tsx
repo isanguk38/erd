@@ -266,11 +266,11 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <Dropdown
             label="추출"
             icon="download"
-            title="SQL·테이블 정의서·이미지로 추출"
+            title="SQL·테이블 정의서·ERD 도면(HTML·이미지)으로 추출"
             items={[
               { label: 'SQL 추출', hint: 'CREATE / 변경분 ALTER', onClick: () => onOpen('sql') },
               { label: '테이블 정의서', hint: 'Excel', disabled: isEmpty, onClick: () => onOpen('definition') },
-              { label: '이미지', hint: 'PNG · SVG', disabled: isEmpty, onClick: () => onOpen('image') },
+              { label: 'ERD 도면', hint: 'HTML · PNG · SVG', disabled: isEmpty, onClick: () => onOpen('image') },
             ]}
           />
         </div>

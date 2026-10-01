@@ -64,7 +64,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
           <ul>
             <li><b>공유</b>에서 편집/보기 초대 링크를 만들면 다른 사람이 자기 계정으로 들어와 함께 편집합니다. 다른 사람의 커서와 선택이 보입니다.</li>
             <li><b>버전</b>: 저장·복원하고, "지금과 비교"로 바뀐 점을 캔버스에 색으로 봅니다.</li>
-            <li><b>내보내기</b>: SQL(전체 CREATE / 변경분 ALTER), 테이블 정의서(Excel), PNG·SVG.</li>
+            <li><b>추출</b>: SQL(전체 CREATE / 변경분 ALTER), 테이블 정의서(Excel), ERD 도면(HTML·PNG·SVG). HTML은 파일 하나로 확대·검색·컬럼 상세까지 볼 수 있어 공유용으로 좋습니다.</li>
             <li><b>AI</b>: Claude 등과 연결하면 "쿠폰 테이블 설계해줘"처럼 말로 ERD를 고칩니다. 바로 적용(한 번에 되돌리기) 또는 제안 모드(항목별 승인).</li>
           </ul>
         </section>
