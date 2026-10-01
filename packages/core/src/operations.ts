@@ -127,6 +127,31 @@ export interface ConnectOptions {
   onUpdate?: Relation['onUpdate'];
 }
 
+/** 기본키가 "id"처럼 테이블 이름 없는 이름인지 */
+const isGenericKey = (name: string) => /^id$/i.test(name);
+
+/** 영어 복수형 테이블 이름을 단수로 (products → product, categories → category) */
+function singular(name: string): string {
+  if (/ies$/i.test(name)) return name.slice(0, -3) + 'y';
+  if (/(ss|x|ch|sh)es$/i.test(name)) return name.slice(0, -2);
+  if (/[^s]s$/i.test(name)) return name.slice(0, -1);
+  return name;
+}
+
+/**
+ * 자식에 만들 FK 컬럼 이름. 부모 기본키가 member_id처럼 이름이 있으면 그대로 쓰고,
+ * "id"처럼 흔한 이름이면 자식의 "id"와 겹치지 않게 테이블 이름을 붙인다
+ * (camelCase 스키마면 productId, 아니면 product_id).
+ */
+function fkColumnName(parent: Table, child: Table, parentColumn: Column): string {
+  const self = child.id === parent.id;
+  if (!isGenericKey(parentColumn.name)) return self ? `parent_${parentColumn.name}` : parentColumn.name;
+  const camel = [...child.columns, ...parent.columns].some((c) => /^[a-z]+[A-Z]/.test(c.name));
+  const words = (self ? 'parent' : singular(parent.name)).split(/[_\s]+/).filter(Boolean);
+  if (!camel) return `${words.join('_')}_${parentColumn.name.toLowerCase()}`;
+  return words.map((w, i) => (i === 0 ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1).toLowerCase())).join('') + 'Id';
+}
+
 /**
  * 부모 테이블의 기본키를 참조하는 외래키를 만든다.
  * 자식 테이블에 같은 이름의 컬럼이 있으면 그 컬럼을 쓰고, 없으면 새로 만든다.
@@ -139,16 +164,17 @@ export function connectTables(schema: Schema, options: ConnectOptions): Relation
 
   const fromColumnIds: string[] = [];
   for (const parentColumn of pk) {
-    const existing = child.columns.find((c) => c.name === parentColumn.name && c.id !== parentColumn.id);
+    const generic = isGenericKey(parentColumn.name);
+    const base = fkColumnName(parent, child, parentColumn);
+    const existing = child.columns.find((c) => c.name === base && c.id !== parentColumn.id);
     if (existing && child.id !== parent.id) {
       if (options.identifying) existing.primaryKey = true;
       fromColumnIds.push(existing.id);
       continue;
     }
-    const name = child.id === parent.id ? uniqueColumnName(child, `parent_${parentColumn.name}`) : uniqueColumnName(child, parentColumn.name);
     const column = createColumn({
-      name,
-      logicalName: parentColumn.logicalName,
+      name: uniqueColumnName(child, base),
+      logicalName: generic && !parentColumn.logicalName && parent.logicalName ? `${parent.logicalName} ID` : parentColumn.logicalName,
       type: parentColumn.type,
       length: parentColumn.length,
       nullable: child.id === parent.id,
