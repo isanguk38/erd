@@ -9,7 +9,7 @@ const input = { name: '로컬', dialect: 'mysql', host: '127.0.0.1', port: 3306,
 describe('연결 API', () => {
   it('비밀번호는 암호화해 저장하고 응답에는 넣지 않는다', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'erd-'));
-    const app = buildApp({ dataDir: dir });
+    const { app } = buildApp({ dataDir: dir });
     const created = (await app.inject({ method: 'POST', url: '/api/connections', payload: input })).json();
     expect(created).toMatchObject({ name: '로컬', hasPassword: true });
     expect(created.password).toBeUndefined();
@@ -29,7 +29,7 @@ describe('연결 API', () => {
   });
 
   it('잘못된 입력과 접속 실패는 알아보기 쉬운 오류로 돌려준다', async () => {
-    const app = buildApp({ dataDir: mkdtempSync(join(tmpdir(), 'erd-')) });
+    const { app } = buildApp({ dataDir: mkdtempSync(join(tmpdir(), 'erd-')) });
     const bad = await app.inject({ method: 'POST', url: '/api/connections', payload: { ...input, port: 'x' } });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error).toBe('포트가 올바르지 않습니다');

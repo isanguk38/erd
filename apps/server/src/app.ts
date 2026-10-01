@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import type { DialectId } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
+import { ProjectStore } from './projects';
+import { registerProjectRoutes } from './routes/projects';
+import { createSyncServer } from './ws';
 
 export interface AppOptions {
   dataDir: string;
@@ -54,10 +57,21 @@ function validateInput(body: unknown): ConnectionInput {
   };
 }
 
-export function buildApp(options: AppOptions): FastifyInstance {
+export interface ErdApp {
+  app: FastifyInstance;
+  projects: ProjectStore;
+  connections: ConnectionStore;
+  sync: ReturnType<typeof createSyncServer>;
+}
+
+export function buildApp(options: AppOptions): ErdApp {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 20 * 1024 * 1024 });
   const store = new ConnectionStore(options.dataDir, options.secret);
+  const projects = new ProjectStore(options.dataDir);
+  const sync = createSyncServer(projects);
   const applyLog = join(options.dataDir, 'apply-log.jsonl');
+  const writeLog = (entry: object) => appendFileSync(applyLog, JSON.stringify(entry) + '\n');
+  app.server.on('upgrade', sync.handleUpgrade);
 
   app.setErrorHandler((error: { statusCode?: number }, _req, reply) => {
     const status = error.statusCode && error.statusCode < 500 ? error.statusCode : 400;
@@ -100,12 +114,15 @@ export function buildApp(options: AppOptions): FastifyInstance {
     const config = store.config(req.params.id);
     const result = await getConnector(config.dialect).execute(config, statements);
     // 무엇을 언제 실행했는지 기록을 남긴다
-    appendFileSync(
-      applyLog,
-      JSON.stringify({ at: new Date().toISOString(), connection: saved.name, database: saved.database, ok: result.ok, results: result.results }) + '\n',
-    );
+    writeLog({ at: new Date().toISOString(), connection: saved.name, database: saved.database, source: 'user', ok: result.ok, results: result.results });
     return result;
   });
 
-  return app;
+  registerProjectRoutes(app, projects, store, writeLog);
+  app.addHook('onClose', async () => {
+    projects.flush();
+    sync.close();
+  });
+
+  return { app, projects, connections: store, sync };
 }
