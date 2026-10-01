@@ -18,6 +18,7 @@ import { ShareDialog } from './components/ShareDialog';
 import { authApi } from './lib/api';
 import { HelpDialog } from './components/HelpDialog';
 import { SearchBox } from './components/SearchBox';
+import { ImageExportDialog } from './components/ImageExportDialog';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -209,6 +210,7 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'proposals' && <ProposalsDialog onClose={close} />}
         {dialog === 'share' && <ShareDialog onClose={close} />}
         {dialog === 'help' && <HelpDialog onClose={close} />}
+        {dialog === 'image' && <ImageExportDialog onClose={close} />}
       </div>
     </ReactFlowProvider>
   );

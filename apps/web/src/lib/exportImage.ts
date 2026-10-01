@@ -101,30 +101,45 @@ function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, c
   return out.join('');
 }
 
-/** 관계선: 화면의 path를 그대로 (좌표가 이미 ERD 좌표) */
-function edgesToSvg(viewportEl: HTMLElement): string {
+/** 관계선: 화면의 path를 그대로 (좌표가 이미 ERD 좌표). edgeIds가 있으면 그 관계만 */
+function edgesToSvg(viewportEl: HTMLElement, edgeIds: Set<string> | null): string {
   const out: string[] = [];
-  for (const path of viewportEl.querySelectorAll<SVGPathElement>('.react-flow__edges path')) {
-    if (path.classList.contains('react-flow__edge-interaction')) continue;
-    const st = getComputedStyle(path);
-    const d = path.getAttribute('d');
-    if (!d || st.display === 'none' || st.visibility === 'hidden') continue;
-    const stroke = st.stroke;
-    if (!visibleColor(stroke) || stroke === 'none') continue;
-    const dash = st.strokeDasharray && st.strokeDasharray !== 'none' ? ` stroke-dasharray="${st.strokeDasharray.replace(/px/g, '')}"` : '';
-    out.push(`<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${parseFloat(st.strokeWidth) || 1}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`);
+  for (const edgeEl of viewportEl.querySelectorAll<SVGGElement>('.react-flow__edge')) {
+    const id = edgeEl.getAttribute('data-testid')?.replace(/^rf__edge-/, '') ?? edgeEl.getAttribute('data-id') ?? '';
+    if (edgeIds && !edgeIds.has(id)) continue;
+    for (const path of edgeEl.querySelectorAll<SVGPathElement>('path')) {
+      if (path.classList.contains('react-flow__edge-interaction')) continue;
+      const st = getComputedStyle(path);
+      const d = path.getAttribute('d');
+      if (!d || st.display === 'none' || st.visibility === 'hidden') continue;
+      const stroke = st.stroke;
+      if (!visibleColor(stroke) || stroke === 'none') continue;
+      const dash = st.strokeDasharray && st.strokeDasharray !== 'none' ? ` stroke-dasharray="${st.strokeDasharray.replace(/px/g, '')}"` : '';
+      out.push(`<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${parseFloat(st.strokeWidth) || 1}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`);
+    }
   }
   return out.join('');
 }
 
-/** 화면의 ERD 전체를 벡터 SVG 문자열로 */
-export function diagramToSvg(nodes: Node[], getNodesBounds: (nodes: Node[]) => Rect): { svg: string; width: number; height: number } {
+/** 내보낼 범위: 테이블들과 그 사이 관계선 (edgeIds가 null이면 모든 관계선) */
+export interface ExportTarget {
+  nodes: Node[];
+  edgeIds: Set<string> | null;
+}
+
+/** 이미지 크기 (여백 포함, ERD 좌표 1 = 1px) */
+export function exportSize(nodes: Node[], getNodesBounds: (nodes: Node[]) => Rect): { width: number; height: number } {
+  const bounds = getNodesBounds(nodes);
+  return { width: Math.ceil(bounds.width + PADDING * 2), height: Math.ceil(bounds.height + PADDING * 2) };
+}
+
+/** 화면의 ERD를 벡터 SVG 문자열로 */
+export function diagramToSvg({ nodes, edgeIds }: ExportTarget, getNodesBounds: (nodes: Node[]) => Rect): { svg: string; width: number; height: number } {
   const viewportEl = document.querySelector<HTMLElement>('.react-flow__viewport');
   if (!viewportEl || nodes.length === 0) throw new Error('내보낼 테이블이 없습니다');
   const toFlow = flowMapper(viewportEl);
   const bounds = getNodesBounds(nodes);
-  const width = Math.ceil(bounds.width + PADDING * 2);
-  const height = Math.ceil(bounds.height + PADDING * 2);
+  const { width, height } = exportSize(nodes, getNodesBounds);
   const background = getComputedStyle(document.body).getPropertyValue('--canvas-bg').trim() || '#ffffff';
   const ids = new Set(nodes.map((n) => n.id));
   const parts = [...viewportEl.querySelectorAll<HTMLElement>('.react-flow__node')]
@@ -133,7 +148,7 @@ export function diagramToSvg(nodes: Node[], getNodesBounds: (nodes: Node[]) => R
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<rect width="100%" height="100%" fill="${background}"/>` +
-    `<g transform="translate(${num(PADDING - bounds.x)} ${num(PADDING - bounds.y)})">${edgesToSvg(viewportEl)}${parts.join('')}</g></svg>`;
+    `<g transform="translate(${num(PADDING - bounds.x)} ${num(PADDING - bounds.y)})">${edgesToSvg(viewportEl, edgeIds)}${parts.join('')}</g></svg>`;
   return { svg, width, height };
 }
 
@@ -142,9 +157,9 @@ export function pngScale(width: number, height: number): number {
   return Math.max(0.1, Math.min(MAX_SCALE, MAX_SIDE / width, MAX_SIDE / height, Math.sqrt(MAX_AREA / (width * height))));
 }
 
-/** ERD 전체를 SVG 또는 고해상도 PNG 파일로 */
-export async function exportDiagram(nodes: Node[], getNodesBounds: (nodes: Node[]) => Rect, format: 'png' | 'svg'): Promise<Blob> {
-  const { svg, width, height } = diagramToSvg(nodes, getNodesBounds);
+/** ERD를 SVG 또는 고해상도 PNG 파일로 */
+export async function exportDiagram(target: ExportTarget, getNodesBounds: (nodes: Node[]) => Rect, format: 'png' | 'svg'): Promise<Blob> {
+  const { svg, width, height } = diagramToSvg(target, getNodesBounds);
   const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
   if (format === 'svg') return svgBlob;
 

@@ -505,3 +505,8 @@ label.btn { display: inline-flex; align-items: center; }
   background: var(--panel, #fff); color: var(--text, #111); border: 1px solid var(--border, #d0d7e2);
   border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); font-size: 13px; max-width: calc(100vw - 32px);
 }
+
+/* 이미지 내보내기: 범위 고르기 */
+.radio-list { display: flex; flex-direction: column; gap: 6px; }
+.form-grid .radio-list label { color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.form-grid .radio-list label.disabled { color: var(--muted); cursor: default; }

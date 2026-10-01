@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { addTable, dialectList, type DialectId } from '@erd/core';
 import { useStore, type RelationTool, type ViewMode } from '../store';
-import { exportDiagram } from '../lib/exportImage';
-import { downloadBlob, safeFileName } from '../lib/download';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
 
@@ -13,7 +11,7 @@ import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
 import { loadModule } from '../lib/appVersion';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -110,8 +108,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const readOnly = role === 'viewer';
   const dbAvailable = useDbAvailable();
   const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
-  const { getNodes, getNodesBounds, screenToFlowPosition, fitView } = useReactFlow();
-  const [exporting, setExporting] = useState(false);
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const { status: dbStatus, error: dbError } = useDbStatus();
   const dbChanged = (dbStatus?.db ?? 0) + (dbStatus?.conflict ?? 0);
   const erdPending = dbStatus?.erd ?? 0;
@@ -138,18 +135,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
       for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
     });
     setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 50);
-  };
-
-  const exportImage = async (format: 'png' | 'svg') => {
-    setExporting(true);
-    try {
-      const blob = await exportDiagram(getNodes(), getNodesBounds, format);
-      downloadBlob(blob, `${safeFileName(projectName)}.${format}`);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setExporting(false);
-    }
   };
 
   const addTableAtCenter = () => {
@@ -285,8 +270,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
             items={[
               { label: 'SQL 추출', hint: 'CREATE / 변경분 ALTER', onClick: () => onOpen('sql') },
               { label: '테이블 정의서', hint: 'Excel', disabled: isEmpty, onClick: () => onOpen('definition') },
-              { label: '이미지 PNG', disabled: exporting || isEmpty, onClick: () => exportImage('png') },
-              { label: '이미지 SVG', disabled: exporting || isEmpty, onClick: () => exportImage('svg') },
+              { label: '이미지', hint: 'PNG · SVG', disabled: isEmpty, onClick: () => onOpen('image') },
             ]}
           />
         </div>
