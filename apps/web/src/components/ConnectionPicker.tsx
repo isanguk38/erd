@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { DialectId } from '@erd/core';
 import { api, type Connection, type ConnectionInput } from '../lib/api';
 import { useStore } from '../store';
+import { useDialect } from '../lib/hooks';
 
 const DEFAULT_PORT: Record<DialectId, number> = { mysql: 3306, postgresql: 5432 };
 
@@ -15,7 +16,7 @@ function emptyInput(dialect: DialectId): ConnectionInput {
  */
 export function ConnectionPicker({ onChange }: { onChange?: (connection: Connection | null) => void }) {
   const connectionId = useStore((s) => s.connectionId);
-  const projectDialect = useStore((s) => s.dialect);
+  const projectDialect = useDialect();
   const { setConnectionId } = useStore.getState();
   const [connections, setConnections] = useState<Connection[] | null>(null);
   const [loadError, setLoadError] = useState('');

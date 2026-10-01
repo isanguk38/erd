@@ -178,8 +178,14 @@ export function registerProjectRoutes(app: FastifyInstance, store: ProjectStore,
     store.versions(req.params.id).map(({ schema, ...v }) => ({ ...v, tableCount: schema.tables.length })),
   );
   app.get<{ Params: { id: string; vid: string } }>('/api/projects/:id/versions/:vid', async (req) => store.version(req.params.id, req.params.vid));
-  app.post<{ Params: { id: string }; Body: { name?: string; source?: 'manual' | 'auto' | 'db' | 'ai' } }>('/api/projects/:id/versions', async (req) => {
-    const v = store.saveVersion(req.params.id, req.body?.name?.trim() || new Date().toLocaleString('ko-KR'), req.body?.source ?? 'manual');
+  /**
+   * 버전 저장. 화면은 저장할 스키마(schema)를 함께 보낸다.
+   * 화면의 편집은 WebSocket으로, 이 요청은 HTTP로 오기 때문에 서버 문서가 아직 최신이 아닐 수 있어서다.
+   */
+  app.post<{ Params: { id: string }; Body: { name?: string; source?: 'manual' | 'auto' | 'db' | 'ai'; schema?: Schema } }>('/api/projects/:id/versions', async (req) => {
+    const schema = req.body?.schema;
+    if (schema !== undefined && (!Array.isArray(schema?.tables) || !Array.isArray(schema?.relations))) throw badRequest('schema 형식이 올바르지 않습니다');
+    const v = store.saveVersion(req.params.id, req.body?.name?.trim() || new Date().toLocaleString('ko-KR'), req.body?.source ?? 'manual', schema);
     return { ...v, schema: undefined, tableCount: v.schema.tables.length };
   });
   app.delete<{ Params: { id: string; vid: string } }>('/api/projects/:id/versions/:vid', async (req) => {

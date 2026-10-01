@@ -9,11 +9,13 @@ export type TableNodeData = {
   viewMode: ViewMode;
   /** 비교 화면에서 쓰는 강조 표시 */
   highlight?: 'added' | 'changed' | 'removed';
+  /** 이 테이블을 선택한 다른 사람들 */
+  peers?: { name: string; color: string }[];
 };
 export type TableNodeType = Node<TableNodeData, 'table'>;
 
 function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
-  const { table, fkIds, viewMode, highlight } = data;
+  const { table, fkIds, viewMode, highlight, peers = [] } = data;
   const connection = useConnection();
   const isTarget = connection.inProgress && connection.fromNode.id !== id;
   const fk = new Set(fkIds);
@@ -23,8 +25,18 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
   return (
     <div
       className={`table-node${selected ? ' selected' : ''}${highlight ? ` hl-${highlight}` : ''}`}
-      style={{ ['--table-color' as string]: table.color || 'var(--accent)' }}
+      style={{
+        ['--table-color' as string]: table.color || 'var(--accent)',
+        ...(peers.length ? { outline: `2px solid ${peers[0].color}`, outlineOffset: 3 } : {}),
+      }}
     >
+      {peers.length > 0 && (
+        <div className="peer-tags">
+          {peers.map((p) => (
+            <span key={p.name + p.color} style={{ background: p.color }}>{p.name}</span>
+          ))}
+        </div>
+      )}
       <div className="table-node__header">
         <span className="table-node__title">{title}</span>
         {subtitle && <span className="table-node__subtitle">{subtitle}</span>}

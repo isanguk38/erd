@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyNodeChanges,
   Background,
+  ViewportPortal,
   ConnectionMode,
   Controls,
   MiniMap,
@@ -24,19 +25,26 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const schema = useStore((s) => s.schema);
   const viewMode = useStore((s) => s.viewMode);
   const selection = useStore((s) => s.selection);
-  const { edit, editSilently, select } = useStore.getState();
+  const peers = useStore((s) => s.peers);
+  const synced = useStore((s) => s.synced);
+  const { edit, select, setCursor } = useStore.getState();
   const { screenToFlowPosition, fitView } = useReactFlow();
   useEffect(() => {
     if (fitRequest) setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 80);
   }, [fitRequest, fitView]);
+  // 서버 문서를 처음 받으면 전체가 보이게 맞춘다
+  useEffect(() => {
+    if (synced) setTimeout(() => fitView({ padding: 0.15 }), 60);
+  }, [synced, fitView]);
+  const lastCursor = useRef(0);
 
   const selectedTable = selection?.type === 'table' ? selection.id : null;
   const selectedRelation = selection?.type === 'relation' ? selection.id : null;
 
   const [nodes, setNodes] = useState<TableNodeType[]>(() => buildNodes(schema, viewMode, selectedTable));
   useEffect(() => {
-    setNodes((prev) => buildNodes(schema, viewMode, selectedTable, prev));
-  }, [schema, viewMode, selectedTable]);
+    setNodes((prev) => buildNodes(schema, viewMode, selectedTable, prev, peers));
+  }, [schema, viewMode, selectedTable, peers]);
   const edges = useMemo(() => buildEdges(schema, selectedRelation), [schema, selectedRelation]);
 
   const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
@@ -77,10 +85,18 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       onNodeClick={(_, node) => select({ type: 'table', id: node.id })}
       onEdgeClick={(_, edge) => select({ type: 'relation', id: edge.id })}
       onPaneClick={() => select(null)}
-      onNodeDragStart={() => edit(() => {})}
+      onMouseMove={(e) => {
+        // 다른 사람에게 내 커서 위치를 알린다 (초당 20번까지)
+        const now = Date.now();
+        if (now - lastCursor.current < 50) return;
+        lastCursor.current = now;
+        const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        setCursor({ x: Math.round(p.x), y: Math.round(p.y) });
+      }}
+      onMouseLeave={() => setCursor(null)}
       onNodeDragStop={(_, __, dragged) => {
         const moved = new Map(dragged.map((n) => [n.id, n.position]));
-        editSilently((draft) => {
+        edit((draft) => {
           for (const t of draft.tables) {
             const p = moved.get(t.id);
             if (p) t.position = { x: Math.round(p.x), y: Math.round(p.y) };
@@ -107,6 +123,14 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       <Background gap={20} size={1} />
       <Controls showInteractive={false} />
       <MiniMap pannable zoomable nodeStrokeWidth={3} />
+      <ViewportPortal>
+        {peers.filter((p) => p.cursor).map((p) => (
+          <div key={p.clientId} className="peer-cursor" style={{ transform: `translate(${p.cursor!.x}px, ${p.cursor!.y}px)`, color: p.color }}>
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 1 L1 13 L4.5 9.5 L7 15 L9 14 L6.5 8.5 L11.5 8.5 Z" fill="currentColor" stroke="white" strokeWidth="1" /></svg>
+            <span style={{ background: p.color }}>{p.name}</span>
+          </div>
+        ))}
+      </ViewportPortal>
     </ReactFlow>
   );
 }

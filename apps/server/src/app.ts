@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { DialectId } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
@@ -127,6 +128,19 @@ export function buildApp(options: AppOptions): ErdApp {
   registerProjectRoutes(app, projects, store, writeLog);
   const mcpToken = loadMcpToken(options.dataDir, options.mcpToken);
   registerMcpRoute(app, mcpToken, options.webUrl);
+
+  /** 화면의 "AI 연결" 안내용. 서버가 내 PC(127.0.0.1)에서만 열려 있다는 전제다. */
+  app.get('/api/mcp-info', async () => {
+    const address = app.server.address();
+    const port = typeof address === 'object' && address ? address.port : 4000;
+    const serverUrl = `http://127.0.0.1:${port}`;
+    return {
+      serverUrl,
+      url: `${serverUrl}/mcp`,
+      token: mcpToken,
+      mcpCommand: ['node', fileURLToPath(new URL('../../../packages/mcp/bin/erd-mcp.mjs', import.meta.url))],
+    };
+  });
   app.addHook('onClose', async () => {
     projects.flush();
     sync.close();

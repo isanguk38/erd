@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { addTable, dialectList, type DialectId } from '@erd/core';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { exportDiagram } from '../lib/exportImage';
 import { downloadDataUrl, safeFileName } from '../lib/download';
+import { useDialect, useProjectName } from '../lib/hooks';
 import { sampleSchema } from '../lib/sample';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -21,17 +22,64 @@ const RELATION_TOOLS: { id: RelationTool; label: string }[] = [
   { id: 'N:M', label: 'N:M (연결 테이블)' },
 ];
 
+const STATUS_LABEL = { connected: '실시간 연결됨', connecting: '연결 중…', disconnected: '연결 끊김 (다시 연결 중)' };
+
+function ProjectNameInput() {
+  const name = useProjectName();
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft.trim() && draft !== name) useStore.getState().setProjectName(draft.trim());
+    setDraft(null);
+  };
+  return (
+    <input
+      className="project-name"
+      value={draft ?? name}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      aria-label="프로젝트 이름"
+    />
+  );
+}
+
+function Participants() {
+  const peers = useStore((s) => s.peers);
+  const status = useStore((s) => s.status);
+  const userName = useStore((s) => s.userName);
+  const userColor = useStore((s) => s.userColor);
+  return (
+    <div className="participants">
+      <span className={`status-dot status-${status}`} title={STATUS_LABEL[status]} />
+      <span className="avatar" style={{ background: userColor }} title={`나 (${userName || '이름 없음'})`}>
+        {(userName || '나').slice(0, 1)}
+      </span>
+      {peers.map((p) => (
+        <span key={p.clientId} className="avatar" style={{ background: p.color }} title={p.name}>
+          {p.name.slice(0, 1)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
-  const projectName = useStore((s) => s.projectName);
-  const dialect = useStore((s) => s.dialect);
+  const projectName = useProjectName();
+  const dialect = useDialect();
   const viewMode = useStore((s) => s.viewMode);
   const relationTool = useStore((s) => s.relationTool);
-  const canUndo = useStore((s) => s.past.length > 0);
-  const canRedo = useStore((s) => s.future.length > 0);
+  const canUndo = useStore((s) => s.canUndo);
+  const canRedo = useStore((s) => s.canRedo);
+  const synced = useStore((s) => s.synced);
   const isEmpty = useStore((s) => s.schema.tables.length === 0);
-  const { setProjectName, setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
+  const pendingProposals = useStore((s) => s.meta.pendingProposals ?? 0);
+  const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
   const { getNodes, getNodesBounds, screenToFlowPosition, fitView } = useReactFlow();
   const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    document.title = `${projectName} · ERD`;
+  }, [projectName]);
 
   const arrange = async () => {
     const { autoLayout } = await import('@erd/core/layout');
@@ -56,13 +104,16 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
 
   return (
     <header className="toolbar">
-      <input className="project-name" value={projectName} onChange={(e) => setProjectName(e.target.value)} aria-label="프로젝트 이름" />
-      <select value={dialect} onChange={(e) => setDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
+      <a className="icon-btn back" href="#/" title="프로젝트 목록">←</a>
+      <ProjectNameInput />
+      <select value={dialect} disabled={!synced} onChange={(e) => setDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
         {dialectList.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
       </select>
+      <Participants />
       <span className="divider" />
       <button
         className="btn btn-primary"
+        disabled={!synced}
         onClick={() => {
           const center = screenToFlowPosition({ x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 });
           edit((d) => {
@@ -82,9 +133,9 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         ))}
       </div>
       <button className="btn" disabled={isEmpty} onClick={arrange} title="관계를 보고 테이블을 자동으로 배치합니다">자동 정렬</button>
-      <button className="icon-btn" title="되돌리기 (Ctrl+Z)" disabled={!canUndo} onClick={undo}>↶</button>
+      <button className="icon-btn" title="되돌리기 (Ctrl+Z) · 내가 한 변경만" disabled={!canUndo} onClick={undo}>↶</button>
       <button className="icon-btn" title="다시 실행 (Ctrl+Y)" disabled={!canRedo} onClick={redo}>↷</button>
-      {isEmpty && (
+      {isEmpty && synced && (
         <button
           className="btn"
           onClick={() => {
@@ -104,6 +155,9 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
       <button className="btn" disabled={isEmpty} onClick={() => onOpen('definition')}>정의서</button>
       <button className="btn" disabled={exporting} onClick={() => exportImage('png')}>PNG</button>
       <button className="btn" disabled={exporting} onClick={() => exportImage('svg')}>SVG</button>
+      <button className={`btn btn-ai${pendingProposals ? ' has-badge' : ''}`} onClick={() => onOpen(pendingProposals ? 'proposals' : 'ai')} title="AI(MCP) 연결과 제안">
+        AI{pendingProposals ? <span className="badge-count">{pendingProposals}</span> : null}
+      </button>
     </header>
   );
 }

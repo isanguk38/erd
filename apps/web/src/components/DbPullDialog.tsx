@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { applyChanges, diffIncoming, getDialect, placeNewTables, type DiffResult } from '@erd/core';
 import { api, type Connection, type IntrospectResult } from '../lib/api';
 import { useStore } from '../store';
+import { saveVersion } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ChangeList, type GroupLabel } from './ChangeList';
 import { ConnectionPicker } from './ConnectionPicker';
@@ -48,7 +49,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
     if (!result || !connection) return;
     setBusy(true);
     try {
-      const { replaceSchema, saveVersion, setDialect } = useStore.getState();
+      const { replaceSchema, setDialect } = useStore.getState();
       const label = `${connection.name} (${connection.database})`;
       if (isEmpty) {
         const schema = structuredClone(result.schema);
@@ -57,14 +58,14 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
         for (const t of schema.tables) t.position = positions.get(t.id) ?? t.position;
         replaceSchema(schema);
       } else if (diff) {
-        saveVersion(`DB 가져오기 전 · ${label}`, 'auto');
+        await saveVersion(`DB 가져오기 전 · ${label}`, 'auto');
         const next = applyChanges(current, diff, selected);
         placeNewTables(next, diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
         replaceSchema(next);
       }
       setDialect(result.dialect);
       // 가져온 직후 상태를 버전으로 남겨 두면 이후 "변경분만" SQL의 기준이 된다
-      saveVersion(`DB 가져오기 · ${label}`, 'db');
+      await saveVersion(`DB 가져오기 · ${label}`, 'db');
       onDone();
       onClose();
     } finally {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { diffSchemas, dialectList, emptySchema, getDialect, type DialectId } from '@erd/core';
 import { useStore } from '../store';
+import { useDialect, useProjectName, useVersions, useVersionSchema } from '../lib/hooks';
 import { safeFileName } from '../lib/download';
 import { Modal } from './Modal';
 import { MigrationPreview } from './MigrationPreview';
@@ -9,17 +10,18 @@ type Mode = 'full' | 'changes';
 
 export function SqlDialog({ onClose }: { onClose: () => void }) {
   const schema = useStore((s) => s.schema);
-  const versions = useStore((s) => s.versions);
-  const projectName = useStore((s) => s.projectName);
-  const [dialectId, setDialectId] = useState<DialectId>(useStore.getState().dialect);
-  const [mode, setMode] = useState<Mode>(versions.length ? 'changes' : 'full');
-  const [baseId, setBaseId] = useState(versions[0]?.id ?? '');
+  const versions = useVersions().versions ?? [];
+  const projectName = useProjectName();
+  const projectDialect = useDialect();
+  const [dialectId, setDialectId] = useState<DialectId>(projectDialect);
+  const [mode, setMode] = useState<Mode>('full');
+  const [pickedId, setPickedId] = useState('');
+  const baseId = pickedId || versions[0]?.id || '';
+  const setBaseId = setPickedId;
   const dialect = getDialect(dialectId);
+  const versionSchema = useVersionSchema(mode === 'changes' ? baseId : null);
 
-  const base = useMemo(
-    () => (mode === 'full' ? emptySchema() : versions.find((v) => v.id === baseId)?.schema ?? emptySchema()),
-    [mode, baseId, versions],
-  );
+  const base = useMemo(() => (mode === 'full' ? emptySchema() : versionSchema ?? emptySchema()), [mode, versionSchema]);
   const diff = useMemo(() => diffSchemas(base, schema, dialect), [base, schema, dialect]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   useEffect(() => setSelected(new Set(diff.changes.map((c) => c.id))), [diff]);
@@ -61,7 +63,7 @@ export function SqlDialog({ onClose }: { onClose: () => void }) {
           {mode === 'changes' && baseVersion && (
             <p className="muted small">"{baseVersion.name}" 버전 → 지금 ERD 로 가는 SQL입니다. 바뀌지 않은 테이블은 포함되지 않습니다.</p>
           )}
-          <MigrationPreview diff={diff} dialect={dialect} selected={selected} onSelectedChange={setSelected} fileName={fileName} />
+          {mode === 'changes' && !versionSchema ? <div className="muted">버전을 불러오는 중…</div> : <MigrationPreview diff={diff} dialect={dialect} selected={selected} onSelectedChange={setSelected} fileName={fileName} />}
         </>
       )}
     </Modal>

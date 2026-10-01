@@ -111,6 +111,19 @@ describe('AI 제안 모드', () => {
   });
 });
 
+describe('버전', () => {
+  it('화면이 보낸 스키마를 그대로 저장한다 (동기화보다 먼저 도착해도 안전)', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app);
+    const schema = { tables: [{ id: 't1', name: 'member', logicalName: '', comment: '', columns: [], indexes: [], position: { x: 0, y: 0 } }], relations: [] };
+    // 서버 문서는 아직 비어 있지만, 화면이 보낸 스키마로 저장된다
+    const v = (await app.inject({ method: 'POST', url: `/api/projects/${id}/versions`, payload: { name: 'DB 가져오기', source: 'db', schema } })).json();
+    expect(v.tableCount).toBe(1);
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/versions/${v.id}/restore` });
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json().schema.tables.map((t: { name: string }) => t.name)).toEqual(['member']);
+  });
+});
+
 describe('실시간 동기화', () => {
   it('API(AI) 변경이 접속한 화면에 바로 반영되고, 화면 변경도 서버에 반영된다', async () => {
     const erd = setup();

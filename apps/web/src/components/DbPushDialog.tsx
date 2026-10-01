@@ -3,6 +3,7 @@ import { alignToCurrent, diffSchemas, generateStatements, getDialect, type DiffR
 import { api, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
+import { saveVersion, useDialect, useProjectName } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ConnectionPicker } from './ConnectionPicker';
 import { MigrationPreview } from './MigrationPreview';
@@ -15,8 +16,8 @@ type Step = 'compare' | 'confirm' | 'result';
  */
 export function DbPushDialog({ onClose }: { onClose: () => void }) {
   const schema = useStore((s) => s.schema);
-  const projectName = useStore((s) => s.projectName);
-  const projectDialect = useStore((s) => s.dialect);
+  const projectName = useProjectName();
+  const projectDialect = useDialect();
   const [connection, setConnection] = useState<Connection | null>(null);
   const [db, setDb] = useState<IntrospectResult | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -56,12 +57,11 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError('');
     try {
-      const { saveVersion } = useStore.getState();
-      saveVersion(`DB 적용 전 · ${connection.name} (${connection.database})`, 'auto');
+      await saveVersion(`DB 적용 전 · ${connection.name} (${connection.database})`, 'auto');
       const r = await api.execute(connection.id, statements.map((s) => s.sql));
       setResult(r);
       setStep('result');
-      if (r.ok) saveVersion(`DB 적용 · ${connection.name} (${connection.database})`, 'db');
+      if (r.ok) await saveVersion(`DB 적용 · ${connection.name} (${connection.database})`, 'db');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

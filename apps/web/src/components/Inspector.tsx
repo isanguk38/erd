@@ -22,6 +22,7 @@ import {
   type Table,
 } from '@erd/core';
 import { useStore } from '../store';
+import { useDialect } from '../lib/hooks';
 
 const ACTIONS: ReferentialAction[] = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
 const COLORS = ['', '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#9333ea', '#64748b'];
@@ -78,7 +79,7 @@ function TextInput({ value, onCommit, placeholder, className, list }: { value: s
 
 function TableEditor({ table }: { table: Table }) {
   const schema = useStore((s) => s.schema);
-  const dialect = getDialect(useStore((s) => s.dialect));
+  const dialect = getDialect(useDialect());
   const { edit, select } = useStore.getState();
   const fkIds = foreignKeyColumnIds(schema, table.id);
   const setTable = (patch: Parameters<typeof updateTable>[2]) => edit((d) => updateTable(d, table.id, patch));

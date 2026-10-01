@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { diffSchemas, getDialect } from '@erd/core';
 import { useStore } from '../store';
+import { projectApi } from '../lib/api';
+import { useDialect, useProjectName, useVersions } from '../lib/hooks';
 import { downloadBlob, safeFileName } from '../lib/download';
 import { Modal } from './Modal';
 
@@ -8,9 +10,10 @@ const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 export function DefinitionDialog({ onClose }: { onClose: () => void }) {
   const schema = useStore((s) => s.schema);
-  const projectName = useStore((s) => s.projectName);
-  const dialect = useStore((s) => s.dialect);
-  const versions = useStore((s) => s.versions);
+  const projectName = useProjectName();
+  const dialect = useDialect();
+  const versions = useVersions().versions ?? [];
+  const projectId = useStore((s) => s.projectId)!;
   const [author, setAuthor] = useState(() => localStorage.getItem('erd-author') ?? '');
   const [version, setVersion] = useState('1.0');
   const [layout, setLayout] = useState<'sheetPerTable' | 'singleSheet'>('sheetPerTable');
@@ -22,7 +25,7 @@ export function DefinitionDialog({ onClose }: { onClose: () => void }) {
     try {
       localStorage.setItem('erd-author', author);
       const { buildDefinitionXlsx } = await import('@erd/core/excel');
-      const base = versions.find((v) => v.id === historyBase);
+      const base = historyBase ? await projectApi.version(projectId, historyBase) : undefined;
       const changes = base
         ? { title: `변경 이력 ("${base.name}" 이후)`, items: diffSchemas(base.schema, schema, getDialect(dialect)).changes }
         : undefined;

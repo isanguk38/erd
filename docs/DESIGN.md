@@ -135,7 +135,22 @@ MySQL, PostgreSQL로 시작하고, 나중에 Oracle, SQL Server 등을 추가할
 | MCP | `packages/mcp`: @modelcontextprotocol/sdk |
 | 엑셀 | exceljs, 배치: elkjs |
 
-## 6. 진행 순서
+## 6. 구현 상태 (2026-10-01)
+
+| 항목 | 상태 |
+|---|---|
+| 편집기, 인덱스, 논리/물리명, 자동 배치, PNG/SVG | 완료 |
+| SQL 추출 (전체 / 변경분, CREATE·ALTER·DROP 구분, 경고) | 완료 |
+| 테이블 정의서 Excel | 완료 |
+| DB에서 가져오기 / DB로 내보내기 (MySQL, PostgreSQL) | 완료 |
+| 서버 프로젝트 저장 + Yjs 실시간 동시 편집 + 커서·선택 표시 | 완료 |
+| 버전 (서버 저장, 자동 저장, 복원) | 완료 |
+| MCP (로컬 stdio + 원격 HTTP), AI 바로 적용 + 되돌리기, 제안 모드 | 완료 |
+| 로그인·권한, 외부 배포 | 남음 |
+| 3방향 비교 (마지막 동기화 시점 기준 충돌 표시) | 남음 |
+| 이름 변경 추정 (삭제+추가 → RENAME 제안) | 남음 |
+
+## 7. 진행 순서
 
 1. core(모델·비교·SQL 생성) + 혼자 쓰는 편집기 + 인덱스 + SQL 추출(전체/변경분) + PNG/SVG
 2. SQL 붙여넣기, 논리/물리명 전환, 테이블 정의서 Excel
