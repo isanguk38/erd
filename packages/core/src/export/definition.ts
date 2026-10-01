@@ -151,9 +151,17 @@ export async function buildDefinitionWorkbook(schema: Schema, options: Definitio
   const layout = options.layout ?? 'sheetPerTable';
   const names = sheetNames(tables);
 
+  // 변경 이력이 있으면 테이블별로 생성/수정 표시
+  const changes = options.changes;
+  const tableChange = new Map<string, '신규' | '수정'>();
+  for (const c of changes?.items ?? []) {
+    if (c.kind === 'createTable') tableChange.set(c.tableName, '신규');
+    else if (c.category !== 'drop' && !tableChange.has(c.tableName)) tableChange.set(c.tableName, '수정');
+  }
+
   // 표지
   const cover = wb.addWorksheet('표지', { views: [{ showGridLines: false }] });
-  cover.columns = [{ width: 4 }, { width: 18 }, { width: 50 }];
+  cover.columns = [{ width: 4 }, { width: 18 }, { width: 60 }];
   cover.addRow([]);
   cover.addRow([]);
   const title = cover.addRow(['', '테이블 정의서']);
@@ -167,31 +175,64 @@ export async function buildDefinitionWorkbook(schema: Schema, options: Definitio
     ['작성일', date.toISOString().slice(0, 10)],
     ['테이블 수', String(tables.length)],
   ];
+  if (changes) coverInfo.push(['변경 이력', `${changes.title} · ${changes.items.length}건 ("변경 이력" 시트)`]);
   for (const [label, value] of coverInfo) {
     const row = cover.addRow(['', label, value]);
     row.getCell(2).font = BOLD;
     row.getCell(2).fill = LABEL_FILL;
     row.getCell(2).border = THIN;
     row.getCell(3).border = THIN;
+    if (label === '변경 이력') {
+      row.getCell(3).value = { text: value, hyperlink: "#'변경 이력'!A1" };
+      row.getCell(3).font = { color: { argb: 'FF2563EB' }, underline: true };
+    }
   }
 
   // 테이블 목록
   const list = wb.addWorksheet('테이블 목록');
-  list.columns = [{ width: 6 }, { width: 28 }, { width: 24 }, { width: 50 }, { width: 10 }];
+  const listColumns = changes ? 6 : 5;
+  list.columns = [{ width: 6 }, { width: 28 }, { width: 24 }, { width: 50 }, { width: 10 }, ...(changes ? [{ width: 10 }] : [])];
   const listTitle = list.addRow(['테이블 목록']);
   listTitle.getCell(1).font = TITLE_FONT;
   list.addRow([]);
-  styleRow(list.addRow(['No', '테이블명(물리)', '테이블명(논리)', '설명', '컬럼 수']), { header: true, to: 5 });
+  styleRow(list.addRow(['No', '테이블명(물리)', '테이블명(논리)', '설명', '컬럼 수', ...(changes ? ['변경'] : [])]), { header: true, to: listColumns });
   tables.forEach((t, i) => {
-    const row = list.addRow([i + 1, t.name, t.logicalName, t.comment, t.columns.length]);
+    const row = list.addRow([i + 1, t.name, t.logicalName, t.comment, t.columns.length, ...(changes ? [tableChange.get(t.name) ?? ''] : [])]);
     if (layout === 'sheetPerTable') {
       row.getCell(2).value = { text: t.name, hyperlink: `#'${names.get(t.id)}'!A1` };
       row.getCell(2).font = { color: { argb: 'FF2563EB' }, underline: true };
     }
-    styleRow(row, { to: 5 });
+    styleRow(row, { to: listColumns });
     row.getCell(1).alignment = { horizontal: 'center' };
     row.getCell(5).alignment = { horizontal: 'center' };
+    if (changes) {
+      row.getCell(6).alignment = { horizontal: 'center' };
+      const mark = tableChange.get(t.name);
+      if (mark) row.getCell(6).font = { bold: true, color: { argb: mark === '신규' ? 'FF059669' : 'FFB45309' } };
+    }
   });
+
+  // 변경 이력: 찾기 쉽도록 테이블 목록 바로 다음 시트에 둔다
+  if (changes) {
+    const sheet = wb.addWorksheet('변경 이력');
+    sheet.columns = [{ width: 6 }, { width: 10 }, { width: 24 }, { width: 70 }, { width: 50 }];
+    const head = sheet.addRow([changes.title]);
+    head.getCell(1).font = TITLE_FONT;
+    sheet.addRow([`작성일 ${date.toISOString().slice(0, 10)} 기준 · ${changes.items.length}건`]).getCell(1).font = { color: { argb: 'FF64748B' } };
+    sheet.addRow([]);
+    styleRow(sheet.addRow(['No', '구분', '테이블', '내용', '주의']), { header: true, to: 5 });
+    const label = { create: '생성', alter: '수정', drop: '삭제' } as const;
+    if (changes.items.length === 0) {
+      const row = sheet.addRow(['', '', '', '변경 없음 (기준 버전과 지금 ERD가 같습니다)', '']);
+      styleRow(row, { to: 5 });
+    }
+    changes.items.forEach((c, i) => {
+      const row = sheet.addRow([i + 1, label[c.category], c.tableName, c.summary, c.warning ?? '']);
+      styleRow(row, { to: 5 });
+      row.getCell(1).alignment = { horizontal: 'center' };
+      row.getCell(2).alignment = { horizontal: 'center' };
+    });
+  }
 
   // 테이블 상세
   if (layout === 'sheetPerTable') {
@@ -206,20 +247,6 @@ export async function buildDefinitionWorkbook(schema: Schema, options: Definitio
     tables.forEach((t, i) => {
       if (i > 0) { sheet.addRow([]); sheet.addRow([]); }
       writeTableBlock(sheet, schema, t, options.dialect, false);
-    });
-  }
-
-  // 변경 이력
-  if (options.changes) {
-    const sheet = wb.addWorksheet('변경 이력');
-    sheet.columns = [{ width: 6 }, { width: 10 }, { width: 24 }, { width: 70 }, { width: 50 }];
-    const head = sheet.addRow([options.changes.title]);
-    head.getCell(1).font = TITLE_FONT;
-    sheet.addRow([]);
-    styleRow(sheet.addRow(['No', '구분', '테이블', '내용', '주의']), { header: true, to: 5 });
-    const label = { create: '생성', alter: '수정', drop: '삭제' } as const;
-    options.changes.items.forEach((c, i) => {
-      styleRow(sheet.addRow([i + 1, label[c.category], c.tableName, c.summary, c.warning ?? '']), { to: 5 });
     });
   }
 
