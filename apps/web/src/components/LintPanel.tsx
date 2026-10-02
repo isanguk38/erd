@@ -9,7 +9,11 @@ import { Icon } from './ui';
 export function useLintCount(): number {
   const schema = useStore((s) => s.schema);
   const dialect = useStore((s) => s.meta.dialect);
-  return useMemo(() => lintSchema(schema, dialect).filter((i) => i.severity !== 'info').length, [schema, dialect]);
+  const ignored = useStore((s) => s.meta.lintIgnored);
+  return useMemo(() => {
+    const skip = new Set(ignored ?? []);
+    return lintSchema(schema, dialect).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
+  }, [schema, dialect, ignored]);
 }
 
 /** 설계 검사 결과. 항목을 누르면 그 테이블로 이동한다 */
@@ -19,7 +23,21 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const readOnly = useStore((s) => s.role === 'viewer' || Boolean(s.compare));
   const projectName = useProjectName();
   const { fitView } = useReactFlow();
-  const issues = useMemo(() => lintSchema(schema, dialect), [schema, dialect]);
+  const ignoredIds = useStore((s) => s.meta.lintIgnored);
+  const all = useMemo(() => lintSchema(schema, dialect), [schema, dialect]);
+  // 무시한 항목은 목록·배지에서 빼고 아래 "무시한 항목"에 모은다
+  const ignoredSet = useMemo(() => new Set(ignoredIds ?? []), [ignoredIds]);
+  const issues = useMemo(() => all.filter((i) => !ignoredSet.has(i.id)), [all, ignoredSet]);
+  const ignored = useMemo(() => all.filter((i) => ignoredSet.has(i.id)), [all, ignoredSet]);
+  const [showIgnored, setShowIgnored] = useState(false);
+  const setIgnored = (id: string, on: boolean) => {
+    const next = new Set(ignoredIds ?? []);
+    if (on) next.add(id);
+    else next.delete(id);
+    // 이미 고쳐져 없어진 항목의 무시 기록은 정리한다
+    const live = new Set(all.map((i) => i.id));
+    useStore.getState().setLintIgnored([...next].filter((x) => live.has(x)));
+  };
   const [open, setOpen] = useState<Partial<Record<LintRule, boolean>>>({ 'no-primary-key': true, 'fk-type-mismatch': true, 'fk-without-index': true });
   const [copied, setCopied] = useState(false);
 
@@ -62,7 +80,7 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
       {issues.length === 0 ? (
         <div className="lint-empty">
           <Icon name="check" size={20} />
-          <p>문제가 없습니다.</p>
+          <p>{ignored.length ? '무시한 항목 외에는 문제가 없습니다.' : '문제가 없습니다.'}</p>
         </div>
       ) : (
         <div className="lint-groups">
@@ -81,6 +99,11 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                     {list.map((issue) => (
                       <li key={issue.id}>
                         <button className="lint-item" onClick={() => go(issue)}>{issue.message}</button>
+                        {!readOnly && (
+                          <button className="btn btn-ghost small lint-ignore" title="이 항목을 목록과 배지에서 숨깁니다 (아래 '무시한 항목'에서 되살릴 수 있음)" onClick={() => setIgnored(issue.id, true)}>
+                            무시
+                          </button>
+                        )}
                         {issue.fix?.kind === 'addIndex' && !readOnly && (
                           <button
                             className="btn btn-ghost small"
@@ -97,6 +120,27 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
               )}
             </section>
           ))}
+        </div>
+      )}
+      {ignored.length > 0 && (
+        <div className="lint-ignored">
+          <button className="lint-group__head" onClick={() => setShowIgnored(!showIgnored)}>
+            <span className="muted">무시한 항목 {ignored.length}</span>
+            <span className="lint-group__chev">{showIgnored ? '▾' : '▸'}</span>
+          </button>
+          {showIgnored && (
+            <ul>
+              {ignored.map((issue) => (
+                <li key={issue.id}>
+                  <span className={`sev-dot sev-${issue.severity}`} />
+                  <button className="lint-item muted" onClick={() => go(issue)}>{issue.message}</button>
+                  {!readOnly && (
+                    <button className="btn btn-ghost small" onClick={() => setIgnored(issue.id, false)}>무시 취소</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       <div className="lint-panel__foot">

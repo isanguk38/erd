@@ -1,6 +1,5 @@
-import { assignAreas, copyTables, isClip, pasteTables, type Clip } from '@erd/core';
+import { copyTables, isClip, pasteTables, type Clip } from '@erd/core';
 import { useStore } from '../store';
-import { measuredSizeOf } from './sizes';
 
 // 테이블 복사·붙여넣기. 시스템 클립보드에도 넣어 다른 프로젝트·다른 창에 붙여넣을 수 있게 한다.
 
@@ -49,7 +48,6 @@ export async function pasteClipboard(): Promise<number> {
   let created: string[] = [];
   useStore.getState().edit((draft) => {
     created = pasteTables(draft, clip, { x: 40 * pasteCount, y: 40 * pasteCount });
-    assignAreas(draft, created, measuredSizeOf());
   });
   if (created.length) useStore.getState().selectTables(created);
   return created.length;

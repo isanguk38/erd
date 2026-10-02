@@ -86,6 +86,10 @@ interface State extends LocalPrefs {
   /** 테이블·컬럼 댓글 */
   comments: CommentThread[];
   addComment: (input: { tableId: string; columnId?: string; kind: CommentKind; text: string }) => void;
+  /** 여러 테이블에 같은 댓글을 한 번에 */
+  addComments: (tableIds: string[], kind: CommentKind, text: string) => void;
+  /** 설계 검사에서 무시한 항목 (프로젝트에 저장, 함께 쓰는 사람·AI도 같이 본다) */
+  setLintIgnored: (ids: string[]) => void;
   replyComment: (threadId: string, text: string) => void;
   setCommentStatus: (threadId: string, status: CommentThread['status']) => void;
   deleteComment: (threadId: string) => void;
@@ -289,6 +293,14 @@ export const useStore = create<State>()(
 
         addComment(input) {
           commentEdit((d) => addComment(d, { ...input, author: author() }));
+        },
+        addComments(tableIds, kind, text) {
+          commentEdit((d) => tableIds.forEach((tableId) => addComment(d, { tableId, kind, text, author: author() })));
+        },
+        setLintIgnored(ids) {
+          // 되돌리기(Ctrl+Z) 대상이 아닌 설정이라 댓글과 같은 방식으로 기록한다
+          commentEdit((d) => writeMeta(d, { lintIgnored: [...new Set(ids)] }));
+          if (doc) set({ meta: readMeta(doc) });
         },
         replyComment(threadId, text) {
           commentEdit((d) => replyComment(d, threadId, author(), text));

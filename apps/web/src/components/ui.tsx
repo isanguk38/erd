@@ -18,7 +18,6 @@ const PATHS: Record<string, string> = {
   chevron: 'M6 9l6 6 6-6',
   close: 'M6 6l12 12M18 6L6 18',
   desktop: 'M3 4h18v12H3zM8 20h8M12 16v4',
-  area: 'M4 4h16v16H4zM4 9h16',
   check: 'M4 12l5 5L20 6',
   moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
   sun: 'M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z',

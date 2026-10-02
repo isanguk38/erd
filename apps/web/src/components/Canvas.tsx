@@ -12,19 +12,18 @@ import {
   type NodeChange,
   type OnSelectionChangeParams,
 } from '@xyflow/react';
-import { assignAreas, connectManyToMany, connectTables, moveArea, removeArea, removeRelation, removeTable } from '@erd/core';
+import { connectManyToMany, connectTables, removeRelation, removeTable } from '@erd/core';
 import { useStore } from '../store';
 import { TableNode } from './TableNode';
-import { AreaNode } from './AreaNode';
 import { RelationEdge } from './RelationEdge';
-import { buildAreaNodes, buildCompareGraph, buildEdges, buildNodes, type ErdNode } from '../lib/graph';
+import { buildCompareGraph, buildEdges, buildNodes } from '../lib/graph';
+import type { TableNodeType } from './TableNode';
 import { matchIds } from '../lib/search';
-import { measuredSizeOf, setMeasuredSizes } from '../lib/sizes';
 import { addTableWithTemplate } from '../lib/templates';
 import { getDialect, type DialectId } from '@erd/core';
 import { useTheme } from '../lib/theme';
 
-const nodeTypes = { table: TableNode, area: AreaNode };
+const nodeTypes = { table: TableNode };
 const edgeTypes = { relation: RelationEdge };
 
 const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id) => b.includes(id));
@@ -83,10 +82,9 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const lastCursor = useRef(0);
 
   const selectedRelation = selection?.type === 'relation' ? selection.id : null;
-  // 테이블 선택은 스토어가, 영역 선택은 캔버스가 맡는다 (같은 것을 두 곳에서 정하면 서로 덮어써 무한 반복된다)
   const selectedIds = useMemo(() => new Set(selectedTables), [selectedTables]);
 
-  const [nodes, setNodes] = useState<ErdNode[]>(() => buildNodes(schema, viewMode, selectedIds));
+  const [nodes, setNodes] = useState<TableNodeType[]>(() => buildNodes(schema, viewMode, selectedIds));
   const compareGraph = useMemo(
     () => (compare ? buildCompareGraph(compare.schema, schema, getDialect((dialectId || 'mysql') as DialectId), viewMode) : null),
     [compare, schema, dialectId, viewMode],
@@ -97,26 +95,21 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const measured = new Map(prev.map((n) => [n.id, n.measured]));
         return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
       }
-      // 영역을 먼저 두어 테이블 뒤에 그려지게 한다
-      return [...buildAreaNodes(schema, prev), ...buildNodes(schema, viewMode, selectedIds, prev, peers, searchMarks, { remote: remoteChanges, comments: commentMarks })];
+      return buildNodes(schema, viewMode, selectedIds, prev, peers, searchMarks, { remote: remoteChanges, comments: commentMarks });
     });
   }, [schema, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks]);
-  // 영역 소속을 정할 때 화면에서 잰 테이블 크기를 쓴다
-  useEffect(() => {
-    setMeasuredSizes(new Map(nodes.filter((n) => n.type === 'table' && n.measured?.width).map((n) => [n.id, { width: n.measured!.width!, height: n.measured!.height! }])));
-  }, [nodes]);
   const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
   const role = useStore((s) => s.role);
   const readOnly = Boolean(compare) || role === 'viewer';
   const { effective: theme } = useTheme();
 
-  const onNodesChange = useCallback((changes: NodeChange<ErdNode>[]) => {
+  const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
     setNodes((prev) => applyNodeChanges(changes, prev));
   }, []);
 
   // 캔버스에서 고른 것(클릭, Ctrl+클릭, Shift+드래그 상자)을 스토어에 알린다
   const onSelectionChange = useCallback(({ nodes: picked }: OnSelectionChangeParams) => {
-    const tables = picked.filter((n) => n.type === 'table').map((n) => n.id);
+    const tables = picked.map((n) => n.id);
     const state = useStore.getState();
     if (sameIds(state.selectedTables, tables)) return;
     if (tables.length === 0 && state.selection?.type === 'relation') return; // 관계를 고른 상태는 유지
@@ -144,29 +137,6 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
     [edit, select],
   );
 
-  // 영역을 끄는 동안 안의 테이블도 같이 움직여 보이게 한다 (놓을 때 저장)
-  const dragStart = useRef<Map<string, { x: number; y: number }>>(new Map());
-  const onNodeDragStart = useCallback((_: unknown, __: unknown, dragged: ErdNode[]) => {
-    dragStart.current = new Map(nodes.map((n) => [n.id, { ...n.position }]));
-    void dragged;
-  }, [nodes]);
-  const onNodeDrag = useCallback((_: unknown, __: unknown, dragged: ErdNode[]) => {
-    const draggedIds = new Set(dragged.map((n) => n.id));
-    const follow = new Map<string, { x: number; y: number }>();
-    for (const n of dragged) {
-      if (n.type !== 'area') continue;
-      const start = dragStart.current.get(n.id);
-      if (!start) continue;
-      const dx = n.position.x - start.x;
-      const dy = n.position.y - start.y;
-      for (const id of n.data.area.tableIds) {
-        const s = dragStart.current.get(id);
-        if (s && !draggedIds.has(id)) follow.set(id, { x: s.x + dx, y: s.y + dy });
-      }
-    }
-    if (follow.size) setNodes((prev) => prev.map((n) => (follow.has(n.id) ? { ...n, position: follow.get(n.id)! } : n)));
-  }, []);
-
   return (
     <ReactFlow
       nodes={nodes}
@@ -181,7 +151,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       connectionMode={ConnectionMode.Loose}
       onNodeClick={(e, node) => {
         // Ctrl/Shift를 누르고 클릭하면 여러 개 고르기 (캔버스가 처리)
-        if (e.ctrlKey || e.metaKey || e.shiftKey || node.type !== 'table') return;
+        if (e.ctrlKey || e.metaKey || e.shiftKey) return;
         select({ type: 'table', id: node.id });
       }}
       onEdgeClick={(_, edge) => select({ type: 'relation', id: edge.id })}
@@ -195,27 +165,13 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         setCursor({ x: Math.round(p.x), y: Math.round(p.y) });
       }}
       onMouseLeave={() => setCursor(null)}
-      onNodeDragStart={onNodeDragStart}
-      onNodeDrag={onNodeDrag}
       onNodeDragStop={(_, __, dragged) => {
+        const moved = new Map(dragged.map((n) => [n.id, n.position]));
         edit((draft) => {
-          // 1) 영역을 옮겼으면 안의 테이블도 같은 만큼 (같이 끈 테이블은 영역이 옮긴다)
-          const movedByArea = new Set<string>();
-          for (const n of dragged) {
-            if (n.type !== 'area') continue;
-            moveArea(draft, n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) });
-            for (const id of n.data.area.tableIds) movedByArea.add(id);
+          for (const t of draft.tables) {
+            const p = moved.get(t.id);
+            if (p) t.position = { x: Math.round(p.x), y: Math.round(p.y) };
           }
-          // 2) 테이블
-          const moved: string[] = [];
-          for (const n of dragged) {
-            if (n.type !== 'table' || movedByArea.has(n.id)) continue;
-            const t = draft.tables.find((x) => x.id === n.id);
-            if (t) t.position = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
-            moved.push(n.id);
-          }
-          // 3) 옮긴 테이블이 어느 영역에 들어갔는지
-          if (moved.length) assignAreas(draft, moved, measuredSizeOf());
         });
       }}
       onDoubleClick={(e) => {
@@ -226,14 +182,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
           select({ type: 'table', id: table.id });
         });
       }}
-      onNodesDelete={(deleted) =>
-        edit((draft) =>
-          deleted.forEach((n) => {
-            if (n.type === 'area') removeArea(draft, n.id);
-            else removeTable(draft, n.id);
-          }),
-        )
-      }
+      onNodesDelete={(deleted) => edit((draft) => deleted.forEach((n) => removeTable(draft, n.id)))}
       onEdgesDelete={(deleted) => edit((draft) => deleted.forEach((e) => removeRelation(draft, e.id)))}
       deleteKeyCode={readOnly ? null : ['Delete']}
       multiSelectionKeyCode={['Control', 'Meta']}
@@ -247,7 +196,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
     >
       <Background gap={20} size={1} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable nodeStrokeWidth={3} nodeColor={(n) => (n.type === 'area' ? 'transparent' : theme === 'dark' ? '#475569' : '#cbd5e1')} />
+      <MiniMap pannable zoomable nodeStrokeWidth={3} nodeColor={theme === 'dark' ? '#475569' : '#cbd5e1'} />
       <ViewportPortal>
         {peers.filter((p) => p.cursor).map((p) => (
           <div key={p.clientId} className="peer-cursor" style={{ transform: `translate(${p.cursor!.x}px, ${p.cursor!.y}px)`, color: p.color }}>

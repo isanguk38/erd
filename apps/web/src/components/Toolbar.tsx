@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { createArea, dialectList, fitAreasToTables, type ColumnTemplate, type DialectId } from '@erd/core';
+import { dialectList, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
-import { measuredSizeOf } from '../lib/sizes';
 import { useLintCount } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
 import { setThemeSetting, useTheme, type ThemeSetting } from '../lib/theme';
@@ -138,8 +137,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     const positions = await autoLayout(useStore.getState().schema);
     edit((d) => {
       for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
-      // 테이블이 옮겨졌으니 영역도 안의 테이블에 맞춘다
-      fitAreasToTables(d, measuredSizeOf());
     });
     setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 50);
   };
@@ -164,13 +161,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
 
-  // 영역: 고른 테이블이 있으면 그것을 감싸고, 없으면 화면 가운데에 빈 영역
-  const addArea = () => {
-    const ids = useStore.getState().selectedTables;
-    edit((d) => {
-      createArea(d, ids.length ? { tableIds: ids, sizeOf: measuredSizeOf() } : { at: viewCenter() });
-    });
-  };
 
   return (
     <header className="toolbar">
@@ -250,10 +240,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               ]}
             />
           </div>
-          <button className="btn btn-tool" disabled={!synced || readOnly} onClick={addArea} title="영역 만들기: 고른 테이블(Shift+드래그로 여러 개)을 색깔 상자로 묶습니다">
-            <Icon name="area" />
-            <span className="hide-narrow">영역</span>
-          </button>
           <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
             {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>관계: {t.label}</option>)}
           </select>

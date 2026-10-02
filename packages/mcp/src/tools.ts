@@ -136,12 +136,16 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     safe(async ({ project }: { project: string }) => {
       const p = await resolveProject(project);
       const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
-      const issues = lintSchema(schema, String(meta.dialect ?? 'mysql'));
-      if (!issues.length) return text('설계 검사: 문제 없음');
+      // 사람이 화면에서 "무시"한 항목은 빼고 알려준다
+      const ignored = new Set(Array.isArray(meta.lintIgnored) ? (meta.lintIgnored as string[]) : []);
+      const all = lintSchema(schema, String(meta.dialect ?? 'mysql'));
+      const issues = all.filter((i) => !ignored.has(i.id));
+      const skipped = all.length - issues.length;
+      if (!issues.length) return text(`설계 검사: 문제 없음${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외)` : ''}`);
       const counts = { error: 0, warning: 0, info: 0 };
       for (const i of issues) counts[i.severity]++;
       return text({
-        summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}`,
+        summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (무시한 항목 ${skipped}개 제외)` : ''}`,
         issues: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
       });
     }),

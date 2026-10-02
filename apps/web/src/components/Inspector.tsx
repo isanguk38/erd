@@ -27,7 +27,7 @@ import { TableComments } from './Comments';
 import { useDialect } from '../lib/hooks';
 
 const ACTIONS: ReferentialAction[] = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
-const COLORS = ['', '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#9333ea', '#64748b'];
+export const TABLE_COLORS = ['', '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#9333ea', '#64748b'];
 
 export function Inspector() {
   const selection = useStore((s) => s.selection);
@@ -118,7 +118,7 @@ function TableEditor({ table }: { table: Table }) {
         <TextInput value={table.comment} onCommit={(comment) => setTable({ comment })} placeholder="비우면 논리명이 SQL 코멘트가 됩니다" />
         <label>색상</label>
         <div className="colors">
-          {COLORS.map((c) => (
+          {TABLE_COLORS.map((c) => (
             <button
               key={c || 'default'}
               className={`color-chip${(table.color ?? '') === c ? ' active' : ''}`}

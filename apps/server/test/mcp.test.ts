@@ -1,3 +1,4 @@
+import { lintSchema } from '@erd/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,6 +81,14 @@ describe('MCP', () => {
     const remaining = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
     expect(remaining.summary).toBe('오류 0 · 경고 0 · 참고 1');
     expect(remaining.issues[0].message).toContain('orders.member_id');
+
+    // 사람이 화면에서 "무시"한 항목은 AI에게도 빼고 알려준다
+    const pid = erd.projects.list().find((p) => p.name === '쇼핑몰')!.id;
+    const [left] = lintSchema(erd.projects.schema(pid), 'postgresql');
+    erd.projects.setMeta(pid, { lintIgnored: [left.id] });
+    expect(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } }))).toBe('설계 검사: 문제 없음 (사람이 무시한 항목 1개 제외)');
+    erd.projects.setMeta(pid, { lintIgnored: [] });
+    expect(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } }))).toContain('참고 1');
 
     // 화면(서버 문서)에도 반영됨 + AI 작업으로 기록됨
     const id = erd.projects.list()[0].id;

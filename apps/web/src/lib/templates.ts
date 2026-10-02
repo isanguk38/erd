@@ -1,7 +1,6 @@
 import { create } from 'zustand';
-import { addTable, applyTemplate, assignAreas, type ColumnTemplate, type Schema, type Table, type TemplateSettings } from '@erd/core';
+import { addTable, applyTemplate, type ColumnTemplate, type Schema, type Table, type TemplateSettings } from '@erd/core';
 import { templateApi } from './api';
-import { measuredSizeOf } from './sizes';
 
 // 내 컬럼 템플릿 (계정별, 서버에 저장). 처음 필요할 때 한 번 불러온다.
 
@@ -41,6 +40,5 @@ export function defaultTemplate(): ColumnTemplate | null {
 export function addTableWithTemplate(draft: Schema, partial: Partial<Table>, template: ColumnTemplate | null | undefined = defaultTemplate()): Table {
   const table = addTable(draft, partial);
   if (template) applyTemplate(draft, table.id, template);
-  assignAreas(draft, [table.id], measuredSizeOf());
   return table;
 }
