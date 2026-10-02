@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import { createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { explainConnectionError } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 
 // Oracle 12c 이상. 드라이버는 Thin 모드라 Oracle Client 설치가 필요 없다.
@@ -198,9 +199,11 @@ async function withConnection<T>(config: ConnectionConfig, fn: (conn: oracledb.C
     password: config.password,
     connectString: `${config.host}:${config.port}/${config.database}`,
     connectTimeout: 10,
-  });
+  }).catch((e) => { throw explainConnectionError(e); });
   try {
     return await fn(conn);
+  } catch (e) {
+    throw explainConnectionError(e);
   } finally {
     await conn.close().catch(() => {});
   }

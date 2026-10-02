@@ -109,7 +109,28 @@ export function useDbStatus() {
   const [error, setError] = useState('');
   const snapshot = useRef<DesktopSnapshot | null>(null);
 
-  const check = useCallback(async () => {
+  // DB 확인이 겹치지 않게 (창 포커스·3분 주기·대화상자 닫기가 한꺼번에 오면 연결이 여러 개 열린다).
+  // 진행 중에 또 요청되면 끝난 뒤 한 번만 더 확인한다.
+  const running = useRef(false);
+  const again = useRef(false);
+  const check = useCallback(async (): Promise<void> => {
+    if (running.current) {
+      again.current = true;
+      return;
+    }
+    running.current = true;
+    try {
+      await checkOnce();
+    } finally {
+      running.current = false;
+      if (again.current) {
+        again.current = false;
+        void check();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, dbConnectionId, serverDb]);
+  const checkOnce = async () => {
     if (!projectId || !dbConnectionId || (!desktop && !serverDb)) {
       snapshot.current = null;
       setStatus(null);
@@ -126,7 +147,7 @@ export function useDbStatus() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [projectId, dbConnectionId, serverDb]);
+  };
 
   useEffect(() => {
     snapshot.current = null;

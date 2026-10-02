@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 
 /** pg.Client, PGlite 등 query(sql, params)를 가진 무엇이든 */
@@ -244,9 +245,12 @@ async function withClient<T>(config: ConnectionConfig, fn: (client: pg.Client) =
     statement_timeout: 60_000,
     application_name: 'erd',
   });
-  await client.connect();
+  guardErrors(client);
+  await client.connect().catch((e) => { throw explainConnectionError(e); });
   try {
     return await fn(client);
+  } catch (e) {
+    throw explainConnectionError(e);
   } finally {
     await client.end().catch(() => {});
   }

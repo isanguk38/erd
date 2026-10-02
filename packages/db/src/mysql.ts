@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, StatementResult } from './types';
 
 export interface ColumnRow {
@@ -209,9 +210,12 @@ async function withConnection<T>(config: ConnectionConfig, fn: (conn: mysql.Conn
     connectTimeout: 10_000,
     multipleStatements: false,
     charset: 'utf8mb4',
-  });
+  }).catch((e) => { throw explainConnectionError(e); });
+  guardErrors(conn);
   try {
     return await fn(conn);
+  } catch (e) {
+    throw explainConnectionError(e);
   } finally {
     await conn.end().catch(() => {});
   }

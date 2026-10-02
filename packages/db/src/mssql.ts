@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import { createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 
 // SQL Server 2016 이상 / Azure SQL. 스키마는 기본 dbo.
@@ -183,7 +184,7 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
 }
 
 async function withPool<T>(config: ConnectionConfig, fn: (pool: sql.ConnectionPool) => Promise<T>): Promise<T> {
-  const pool = await new sql.ConnectionPool({
+  const created = new sql.ConnectionPool({
     server: config.host,
     port: config.port,
     user: config.user,
@@ -192,9 +193,13 @@ async function withPool<T>(config: ConnectionConfig, fn: (pool: sql.ConnectionPo
     connectionTimeout: 10_000,
     requestTimeout: 60_000,
     options: { encrypt: Boolean(config.ssl), trustServerCertificate: true },
-  }).connect();
+  });
+  guardErrors(created);
+  const pool = await created.connect().catch((e) => { throw explainConnectionError(e); });
   try {
     return await fn(pool);
+  } catch (e) {
+    throw explainConnectionError(e);
   } finally {
     await pool.close().catch(() => {});
   }

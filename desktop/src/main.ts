@@ -6,10 +6,24 @@
 
 import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { dialects, type DialectId } from '@erd/core';
+
+// 마지막 안전망: DB 드라이버 등에서 처리되지 않은 예외가 나도 오류 창으로 앱을 멈추지 않고 기록만 한다.
+// (DB 연결이 중간에 끊기는 것은 각 연결에서 처리하지만, 혹시 빠진 곳이 있어도 사용자가 작업을 잃지 않게)
+function logCrash(kind: string, err: unknown): void {
+  try {
+    const line = JSON.stringify({ at: new Date().toISOString(), kind, error: err instanceof Error ? err.stack ?? err.message : String(err) });
+    appendFileSync(join(app.getPath('userData'), 'error-log.jsonl'), `${line}${String.fromCharCode(10)}`);
+  } catch {
+    /* 기록도 못 하면 무시 */
+  }
+  console.error(kind, err);
+}
+process.on('uncaughtException', (err) => logCrash('uncaughtException', err));
+process.on('unhandledRejection', (err) => logCrash('unhandledRejection', err));
 
 const DEFAULT_SERVER = 'https://erd-hgcp.onrender.com';
 
