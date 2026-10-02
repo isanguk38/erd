@@ -57,11 +57,57 @@ describe('AI 바로 적용 + 되돌리기', () => {
     const versions = (await app.inject({ method: 'GET', url: `/api/projects/${id}/versions` })).json();
     expect(versions.filter((v: { name: string }) => v.name.startsWith('AI 작업 전'))).toHaveLength(1);
 
-    await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo` });
+    // 화면의 AI 배너: 묶음 전체 되돌리기
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo`, payload: { scope: 'session' } });
     project = (await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json();
     expect(project.meta.aiSession).toBe(null);
     expect(project.schema.tables.map((t: { name: string }) => t.name)).toEqual(['member']);
     expect(project.schema.tables[0].columns.map((c: { name: string }) => c.name)).toEqual(['member_id', 'email']);
+  });
+
+  it('MCP 되돌리기는 가장 최근 AI 작업 한 번만, 그 뒤 사람이 고친 것은 남긴다', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app);
+    const run = (source: string, commands: Command[]) => app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source, commands } });
+    const tables = async () => (await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json().schema.tables as { name: string; columns: { name: string }[] }[];
+    await run('ai', [member]);
+    await run('ai', [{ op: 'createTable', name: 'orders', columns: [{ name: 'order_id', type: 'BIGINT', primaryKey: true }] }]);
+    await run('api', [{ op: 'addColumn', table: 'member', column: { name: 'phone', type: 'VARCHAR(20)' } }]); // 사람이 고침
+
+    const undo1 = (await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo` })).json();
+    expect(undo1.undone.map((c: { summary: string }) => c.summary)).toEqual(['orders 테이블 삭제']);
+    let t = await tables();
+    expect(t.map((x) => x.name)).toEqual(['member']);
+    expect(t[0].columns.map((c) => c.name)).toContain('phone'); // 사람 편집은 그대로
+
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo` }); // 한 단계 더
+    t = await tables();
+    expect(t).toEqual([]);
+    const none = await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo` });
+    expect(none.statusCode).toBe(400);
+  });
+
+  it('제안 모드 프로젝트에서는 AI가 apply를 요청해도 제안으로 받는다', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app);
+    await app.inject({ method: 'PATCH', url: `/api/projects/${id}`, payload: { aiMode: 'propose' } });
+    const r = (await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source: 'ai', mode: 'apply', commands: [member] } })).json();
+    expect(r.mode).toBe('propose');
+    const project = (await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json();
+    expect(project.schema.tables).toEqual([]);
+    // 사람(api)은 그대로 바로 적용
+    const human = (await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { commands: [member] } })).json();
+    expect(human.mode).toBe('apply');
+  });
+
+  it('인덱스 추가 결과 문구에 방식·조건이 보인다', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app);
+    const r = (await app.inject({
+      method: 'POST', url: `/api/projects/${id}/commands`,
+      payload: { source: 'ai', commands: [member, { op: 'addIndex', table: 'member', columns: ['email'], method: 'gin', where: 'email IS NOT NULL' }] },
+    })).json();
+    expect(r.messages[1]).toBe('member 인덱스 추가 (gin email WHERE email IS NOT NULL)');
   });
 
   it('잘못된 명령은 아무것도 바꾸지 않고 이유를 돌려준다', async () => {

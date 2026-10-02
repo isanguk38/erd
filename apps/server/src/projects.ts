@@ -70,6 +70,13 @@ export type Origin = 'user' | 'ai' | 'api' | 'db' | 'proposal' | 'restore';
 
 const SAVE_DELAY = 1000;
 
+/** AI가 바로 적용한 작업 한 번 (되돌리기용) */
+export interface AiStep {
+  at: string;
+  before: Schema;
+  after: Schema;
+}
+
 export class ProjectStore {
   private readonly loaded = new Map<string, LoadedProject>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
@@ -241,6 +248,29 @@ export class ProjectStore {
     all[connectionId] = { at: new Date().toISOString(), schema };
     this.writeJson(this.path(id, 'sync.json'), all);
     return all[connectionId];
+  }
+
+  // ── AI 작업 단위 (되돌리기용) ─────────────────────────────
+
+  /** AI가 바로 적용한 작업 한 번의 전·후 구조를 쌓는다 (최근 20개만) */
+  pushAiStep(id: string, before: Schema, after: Schema): void {
+    const key = this.path(id, 'ai-steps.json');
+    const steps = this.readJson<AiStep[]>(key, []);
+    steps.push({ at: new Date().toISOString(), before, after });
+    this.writeJson(key, steps.slice(-20));
+  }
+
+  /** 가장 최근 AI 작업을 꺼낸다 (없으면 null) */
+  popAiStep(id: string): AiStep | null {
+    const key = this.path(id, 'ai-steps.json');
+    const steps = this.readJson<AiStep[]>(key, []);
+    const last = steps.pop() ?? null;
+    this.writeJson(key, steps);
+    return last;
+  }
+
+  clearAiSteps(id: string): void {
+    this.writeJson(this.path(id, 'ai-steps.json'), []);
   }
 
   // ── 제안 (AI 제안 모드) ─────────────────────────────

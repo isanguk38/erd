@@ -139,7 +139,8 @@ export const projectApi = {
   applyProposal: (id: string, pid: string, selected: string[]) => request('POST', `/api/projects/${id}/proposals/${pid}/apply`, { selected }),
   rejectProposal: (id: string, pid: string) => request('POST', `/api/projects/${id}/proposals/${pid}/reject`),
 
-  undoAi: (id: string) => request<{ restoredVersion: string }>('POST', `/api/projects/${id}/ai/undo`),
+  /** 화면의 AI 배너: 이번 AI 작업 묶음 전체를 되돌린다 */
+  undoAi: (id: string) => request<{ restoredVersion: string }>('POST', `/api/projects/${id}/ai/undo`, { scope: 'session' }),
   acceptAi: (id: string) => request('POST', `/api/projects/${id}/ai/accept`),
   setDbConnection: (id: string, dbConnectionId: string | null) => request('PATCH', `/api/projects/${id}`, { dbConnectionId }),
   baseline: async (id: string, connectionId: string) =>

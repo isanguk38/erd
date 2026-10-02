@@ -88,13 +88,16 @@ export function registerProjectRoutes(
         store.setMeta(id, { aiSession: { ...session, lastAt: now.toISOString(), changeCount: session.changeCount + changes.length } });
       }
     }
+    if (options.source === 'ai' && changes.length) store.pushAiStep(id, before, next);
     store.setSchema(id, next, options.origin ?? (options.source === 'ai' ? 'ai' : 'api'));
     return { mode: 'apply' as const, messages: options.messages, changes: summarize(changes) };
   }
 
   const modeOf = (id: string, mode: unknown, source: Source): Mode => {
+    // 프로젝트가 제안 모드면 AI 변경은 항상 사람 승인을 거친다 (AI가 apply를 요청해도 제안으로 받는다)
+    if (source === 'ai' && store.meta(id).aiMode === 'propose') return 'propose';
     if (mode === 'apply' || mode === 'propose') return mode;
-    return source === 'ai' ? (store.meta(id).aiMode ?? 'apply') : 'apply';
+    return 'apply';
   };
 
   // ── 프로젝트 ─────────────────────────────
@@ -190,15 +193,32 @@ export function registerProjectRoutes(
   );
 
   // ── AI 작업 되돌리기 ─────────────────────────────
-  app.post<{ Params: { id: string } }>('/api/projects/:id/ai/undo', async (req) => {
+  // scope=last(기본, MCP): 가장 최근 AI 작업 한 번만 거꾸로 되돌린다. 그 뒤 사람이 고친 다른 부분은 그대로 둔다.
+  // scope=session(화면의 AI 배너): 이번 AI 작업 묶음 전체를 작업 전 버전으로 되돌린다.
+  app.post<{ Params: { id: string }; Body: { scope?: 'last' | 'session' } }>('/api/projects/:id/ai/undo', async (req) => {
     const { id } = req.params;
-    const session = store.meta(id).aiSession;
-    if (!session) throw badRequest('되돌릴 AI 작업이 없습니다');
-    const version = store.version(id, session.versionId);
+    if (req.body?.scope === 'session') {
+      const session = store.meta(id).aiSession;
+      if (!session) throw badRequest('되돌릴 AI 작업이 없습니다');
+      const version = store.version(id, session.versionId);
+      store.saveVersion(id, `AI 변경 되돌리기 전`, 'auto');
+      store.setSchema(id, version.schema, 'restore');
+      store.setMeta(id, { aiSession: null });
+      store.clearAiSteps(id);
+      return { ok: true, restoredVersion: version.name };
+    }
+    const step = store.popAiStep(id);
+    if (!step) throw badRequest('되돌릴 AI 작업이 없습니다');
+    const dialect = getDialect(store.dialect(id));
+    const reverse = diffSchemas(step.after, step.before, dialect);
     store.saveVersion(id, `AI 변경 되돌리기 전`, 'auto');
-    store.setSchema(id, version.schema, 'restore');
-    store.setMeta(id, { aiSession: null });
-    return { ok: true, restoredVersion: version.name };
+    store.setSchema(id, applyChanges(store.schema(id), reverse), 'restore');
+    const session = store.meta(id).aiSession;
+    if (session) {
+      const left = Math.max(0, session.changeCount - reverse.changes.length);
+      store.setMeta(id, { aiSession: left ? { ...session, changeCount: left } : null });
+    }
+    return { ok: true, undone: summarize(reverse.changes), at: step.at };
   });
 
   app.post<{ Params: { id: string } }>('/api/projects/:id/ai/accept', async (req) => {

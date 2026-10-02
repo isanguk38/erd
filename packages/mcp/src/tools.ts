@@ -268,7 +268,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     'undo_ai_changes',
     {
       title: 'AI 변경 되돌리기',
-      description: '이번 AI 작업으로 바로 적용한 변경을 작업 전 상태로 되돌린다. 사용자가 되돌려 달라고 할 때만 쓴다.',
+      description: '가장 최근 AI 작업(edit_schema·import_ddl·db_pull 한 번)으로 바로 적용한 변경을 거꾸로 되돌린다. 그 사이 사람이 고친 다른 부분은 그대로 둔다. 여러 번 부르면 한 단계씩 더 되돌린다. 사용자가 되돌려 달라고 할 때만 쓴다.',
       inputSchema: { project: projectArg },
       annotations: { destructiveHint: true },
     },

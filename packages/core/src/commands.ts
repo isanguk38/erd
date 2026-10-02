@@ -4,6 +4,7 @@
 import {
   cloneSchema,
   findTable,
+  indexLabel,
   primaryKeyColumns,
   type Cardinality,
   type Column,
@@ -149,11 +150,11 @@ function applyOne(schema: Schema, command: Command, created: string[]): string {
       if (!expression && !command.columns?.length) throw new Error('인덱스 컬럼(columns) 또는 식(expression)이 필요합니다');
       const extra = { ...(command.method?.trim() ? { method: command.method.trim() } : {}), ...(command.where?.trim() ? { where: command.where.trim() } : {}) };
       if (expression) {
-        addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: [], expression, ...extra });
-        return `${table.name} 식 인덱스 추가 (${expression})`;
+        const index = addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: [], expression, ...extra });
+        return `${table.name} 식 인덱스 추가 (${command.unique ? 'UNIQUE ' : ''}${indexLabel(table, index)})`;
       }
-      addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: command.columns!.map((n) => columnByName(table, n).id), ...extra });
-      return `${table.name} 인덱스 추가 (${command.columns!.join(', ')})`;
+      const index = addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: command.columns!.map((n) => columnByName(table, n).id), ...extra });
+      return `${table.name} 인덱스 추가 (${command.unique ? 'UNIQUE ' : ''}${indexLabel(table, index)})`;
     }
     case 'dropIndex': {
       const table = tableByName(schema, command.table);
