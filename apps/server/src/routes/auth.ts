@@ -20,16 +20,22 @@ export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: P
 
   // ── GitHub 로그인 ─────────────────────────────
   if (github) {
-    app.get('/auth/github', async (_req, reply) => {
+    app.get<{ Querystring: { return?: string } }>('/auth/github', async (req, reply) => {
       const state = randomBytes(16).toString('base64url');
+      // MCP 로그인(OAuth) 허용 화면에서 왔으면 로그인 뒤 그 화면으로 돌아간다
+      const back = req.query.return?.startsWith('/oauth/authorize?') ? req.query.return : '';
       const params = new URLSearchParams({
         client_id: github.clientId,
         redirect_uri: `${publicUrl}/auth/github/callback`,
         scope: 'read:user',
         state,
       });
+      const secure = publicUrl.startsWith('https://') ? '; Secure' : '';
       reply
-        .header('set-cookie', `erd_oauth_state=${state}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600${publicUrl.startsWith('https://') ? '; Secure' : ''}`)
+        .header('set-cookie', [
+          `erd_oauth_state=${state}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600${secure}`,
+          `erd_return=${back ? encodeURIComponent(back) : ''}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=${back ? 600 : 0}${secure}`,
+        ])
         .redirect(`https://github.com/login/oauth/authorize?${params}`);
     });
 
@@ -47,7 +53,10 @@ export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: P
       const profileRes = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${token.access_token}`, 'User-Agent': 'erd' } });
       if (!profileRes.ok) throw badRequest('GitHub 사용자 정보를 읽지 못했습니다');
       const user = auth.upsertGithubUser((await profileRes.json()) as { id: number; login: string; name?: string; avatar_url?: string });
-      reply.header('set-cookie', [auth.sessionCookie(auth.createSession(user.id)), 'erd_oauth_state=; Path=/auth; Max-Age=0']).redirect(`${publicUrl}/`);
+      const back = parseCookies(req.headers.cookie).erd_return ?? '';
+      reply
+        .header('set-cookie', [auth.sessionCookie(auth.createSession(user.id)), 'erd_oauth_state=; Path=/auth; Max-Age=0', 'erd_return=; Path=/auth; Max-Age=0'])
+        .redirect(back.startsWith('/oauth/authorize?') ? `${publicUrl}${back}` : `${publicUrl}/`);
     });
   }
 

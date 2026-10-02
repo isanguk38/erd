@@ -49,7 +49,9 @@ export function registerMcpRoute(app: FastifyInstance, options: { auth: Auth; lo
     const given = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     const ok = auth.enabled ? Boolean(given && auth.userFromToken(given)) : Boolean(given) && sameToken(given, localToken);
     if (!ok) {
-      return reply.status(401).send({ error: 'MCP 토큰이 필요합니다 (Authorization: Bearer <토큰>)' });
+      // 로그인 모드: MCP 클라이언트가 이 안내를 보고 브라우저 로그인(OAuth)을 시작한다
+      if (auth.enabled) reply.header('www-authenticate', `Bearer resource_metadata="${auth.options.publicUrl}/.well-known/oauth-protected-resource"`);
+      return reply.status(401).send({ error: 'MCP 로그인이 필요합니다 (브라우저 로그인 또는 Authorization: Bearer <토큰>)' });
     }
     // 요청마다 새 서버를 만드는 상태 없는(stateless) 방식
     const server = createErdMcpServer(inProcessApi(app, header, webUrl), { canWriteFiles: false });

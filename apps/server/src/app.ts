@@ -11,6 +11,7 @@ import { registerProjectRoutes } from './routes/projects';
 import { registerAuthRoutes, requiredRole } from './routes/auth';
 import { registerTemplateRoutes } from './routes/templates';
 import { registerDesktopRoutes } from './routes/desktop';
+import { registerOAuthRoutes } from './routes/oauth';
 import { createSyncServer } from './ws';
 import { loadMcpToken, registerMcpRoute } from './mcp';
 import { atLeast, Auth, DESKTOP_ONLY_MESSAGE, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
@@ -221,6 +222,8 @@ export function buildApp(options: AppOptions): ErdApp {
   });
 
   registerAuthRoutes(app, auth, projects, serverDb);
+  // MCP 로그인(OAuth): 로그인 모드에서만. 로컬 모드는 공용 토큰을 쓴다
+  if (auth.enabled) registerOAuthRoutes(app, auth, auth.oauth);
   registerTemplateRoutes(app, storage);
   registerDesktopRoutes(app, options.fetchDesktopRelease);
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);

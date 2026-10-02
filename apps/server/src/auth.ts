@@ -5,6 +5,7 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { OAuthStore } from './oauth';
 import { getJson, putJson, type Storage } from './storage';
 
 /** 배포 환경에서 서버가 DB에 접속하지 않을 때 안내 */
@@ -71,6 +72,12 @@ export class Auth {
 
   get enabled(): boolean {
     return this.options.enabled;
+  }
+
+  private oauthStore?: OAuthStore;
+  /** MCP 로그인(OAuth)으로 받은 토큰·연결된 앱 */
+  get oauth(): OAuthStore {
+    return (this.oauthStore ??= new OAuthStore(this.storage));
   }
 
   // ── 사용자 ─────────────────────────────
@@ -161,6 +168,8 @@ export class Auth {
   }
 
   userFromToken(token: string): string | null {
+    // MCP 로그인(OAuth)으로 받은 토큰
+    if (token.startsWith('erdo_')) return this.oauth.userFromAccessToken(token);
     const hash = sha256(token);
     for (const key of this.storage.keys('tokens/')) {
       const t = getJson<TokenRecord | null>(this.storage, key, null);

@@ -216,6 +216,38 @@ function TokenManager({ onCreated }: { onCreated: (token: string) => void }) {
   );
 }
 
+/** MCP 로그인(OAuth)으로 연결된 앱. 끊으면 그 앱은 다시 로그인해야 한다 */
+function ConnectedApps() {
+  const [grants, setGrants] = useState<Awaited<ReturnType<typeof authApi.oauthGrants>>>([]);
+  const load = () => authApi.oauthGrants().then(setGrants).catch(() => setGrants([]));
+  useEffect(() => {
+    load();
+  }, []);
+  if (!grants.length) return <p className="muted small">아직 로그인으로 연결한 앱이 없습니다.</p>;
+  return (
+    <ul className="token-list">
+      {grants.map((g) => (
+        <li key={g.id}>
+          <b>{g.clientName}</b>
+          <span className="muted small">
+            {new Date(g.createdAt).toLocaleDateString()} 연결{g.lastUsedAt ? ` · ${new Date(g.lastUsedAt).toLocaleDateString()} 사용` : ''}
+          </span>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={async () => {
+              if (!confirm(`"${g.clientName}" 연결을 끊을까요? 그 앱은 다시 로그인해야 ERD를 쓸 수 있습니다.`)) return;
+              await authApi.revokeOauthGrant(g.id);
+              load();
+            }}
+          >
+            연결 끊기
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** AI 연결 설정: 적용 방식, DB 실행 허용, MCP 연결 방법 */
 export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; onOpenProposals: () => void }) {
   const projectId = useStore((s) => s.projectId)!;
@@ -297,8 +329,28 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
       </section>
 
       {info?.authEnabled && (
+        <>
+          {block(
+            'oauth',
+            '로그인으로 연결 (추천) — Claude Code',
+            `claude mcp add --transport http erd ${mcpUrl}`,
+            '토큰 없이 주소만 등록합니다. 처음 쓸 때 브라우저가 열리면 ERD에 로그인하고 "허용"을 누르세요. 연결이 오래되면 MCP 설정의 "재인증"으로 다시 로그인할 수 있습니다.',
+          )}
+          <section className="ai-section">
+            <h4>로그인으로 연결 — Claude 앱 · claude.ai</h4>
+            <p className="muted small">설정 → 커넥터 → 사용자 지정 커넥터 추가에서 아래 주소를 넣으면 로그인 화면이 열립니다.</p>
+            <div className="kv"><span>주소</span><code>{mcpUrl}</code></div>
+          </section>
+          <section className="ai-section">
+            <h4>로그인으로 연결된 앱</h4>
+            <ConnectedApps />
+          </section>
+        </>
+      )}
+
+      {info?.authEnabled && (
         <section className="ai-section">
-          <h4>내 개인 토큰</h4>
+          <h4>토큰으로 연결 (스크립트·다른 도구용)</h4>
           <p className="muted small">AI는 이 토큰의 주인(나)이 볼 수 있는 프로젝트만 다룹니다. 토큰마다 언제든 취소할 수 있습니다.</p>
           <TokenManager onCreated={setNewToken} />
         </section>
@@ -307,7 +359,7 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
       {remote ? (
         <>
           {!newToken && <div className="baseline-info none">먼저 위에서 <b>새 토큰 만들기</b>를 누르면 아래 설정에 토큰이 자동으로 들어갑니다.</div>}
-          {block('cc', 'Claude Code에 연결', remoteClaudeCode, '터미널에서 한 번 실행하면 됩니다. 프로그램을 따로 내려받을 필요가 없습니다.')}
+          {block('cc', 'Claude Code에 토큰으로 연결', remoteClaudeCode, '로그인 창을 띄울 수 없는 환경(서버, 자동화)에서 씁니다.')}
           {block('cursor', 'Cursor · VS Code 등 (mcp.json의 mcpServers에 추가)', remoteCursor)}
           {block('desktop', 'Claude Desktop (claude_desktop_config.json에 추가)', remoteDesktop, 'Claude Desktop은 설정 파일로 원격 주소를 바로 연결하지 못해 mcp-remote가 중간에서 이어 줍니다. PC에 Node.js가 있어야 합니다.')}
           <section className="ai-section">
