@@ -106,6 +106,13 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     safe(async () => text(await api.request('GET', '/api/projects'))),
   );
 
+  // 도구 목록이 재연결 없이 갱신되는지 확인하려고 잠시 넣은 도구
+  server.registerTool(
+    'ping',
+    { title: '연결 확인', description: 'ERD 서버 연결을 확인하고 서버 시각을 돌려준다.', inputSchema: {}, annotations: { readOnlyHint: true } },
+    safe(async () => text({ ok: true, serverTime: new Date().toISOString() })),
+  );
+
   server.registerTool(
     'create_project',
     {
