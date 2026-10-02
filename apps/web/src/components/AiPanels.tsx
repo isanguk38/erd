@@ -285,12 +285,27 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
 
       {remote ? (
         <>
-          {block(
-            'oauth',
-            'Claude Code에 연결',
-            `claude mcp add --transport http erd ${mcpUrl}`,
-            '터미널에서 한 번 실행하세요. 처음 쓸 때 브라우저가 열리면 ERD에 로그인하고 "허용"을 누르면 됩니다. MCP 기능이 바뀌면 MCP 설정의 "재인증"을 누르세요. 같은 앱은 연결이 새로 쌓이지 않고 기존 연결을 덮어씁니다.',
-          )}
+          <section className="ai-section">
+            <h4>Claude Code에 연결</h4>
+            <ol className="steps">
+              <li>
+                터미널에서 한 번 실행해 주소를 등록합니다. (이 단계에서는 아무 창도 뜨지 않는 것이 정상입니다)
+                <pre className="code-block">{`claude mcp add --transport http erd ${mcpUrl}`}</pre>
+                <button className="btn btn-sm" onClick={() => copy('oauth', `claude mcp add --transport http erd ${mcpUrl}`)}>{copied === 'oauth' ? '복사됨' : '복사'}</button>
+              </li>
+              <li>
+                로그인합니다.
+                <ul>
+                  <li>터미널(Claude Code): <code>claude</code> 실행 → <code>/mcp</code> 입력 → <b>erd</b> → <b>Authenticate</b></li>
+                  <li>Claude 데스크톱 앱(Code): MCP 서버 창 → <b>erd</b> → <b>재인증</b></li>
+                </ul>
+              </li>
+              <li>브라우저가 열리면 ERD에 로그인하고 <b>허용</b>을 누릅니다. 데스크톱 앱은 이어서 <b>다시 연결</b>을 누르세요.</li>
+            </ol>
+            <p className="muted small">
+              MCP 기능이 바뀌어 새 도구가 필요하면 같은 방법(<code>/mcp</code> → erd → 재인증)으로 다시 로그인하세요. 같은 앱은 연결이 새로 쌓이지 않고 기존 연결을 덮어씁니다.
+            </p>
+          </section>
           <section className="ai-section">
             <h4>Claude 앱 · claude.ai에 연결</h4>
             <p className="muted small">설정 → 커넥터 → 사용자 지정 커넥터 추가에서 아래 주소를 넣으면 로그인 화면이 열립니다.</p>
