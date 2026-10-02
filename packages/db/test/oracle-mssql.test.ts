@@ -63,7 +63,7 @@ describe('Oracle 구조 읽기', () => {
         { INDEX_NAME: 'PK_ORDERS', TABLE_NAME: 'ORDERS', UNIQUENESS: 'UNIQUE', INDEX_TYPE: 'NORMAL', COLUMN_NAME: 'ORDER_ID' },
         { INDEX_NAME: 'IX_ORDERS_MEMBER_AMOUNT', TABLE_NAME: 'ORDERS', UNIQUENESS: 'NONUNIQUE', INDEX_TYPE: 'NORMAL', COLUMN_NAME: 'MEMBER_ID' },
         { INDEX_NAME: 'IX_ORDERS_MEMBER_AMOUNT', TABLE_NAME: 'ORDERS', UNIQUENESS: 'NONUNIQUE', INDEX_TYPE: 'NORMAL', COLUMN_NAME: 'AMOUNT' },
-        { INDEX_NAME: 'IX_FN', TABLE_NAME: 'ORDERS', UNIQUENESS: 'NONUNIQUE', INDEX_TYPE: 'FUNCTION-BASED NORMAL', COLUMN_NAME: 'SYS_NC00005$' },
+        { INDEX_NAME: 'IX_FN', TABLE_NAME: 'ORDERS', UNIQUENESS: 'NONUNIQUE', INDEX_TYPE: 'FUNCTION-BASED NORMAL', COLUMN_NAME: 'SYS_NC00005$', COLUMN_EXPRESSION: 'UPPER("STATUS")' },
       ],
     };
     const query = async (sql: string) => {
@@ -77,10 +77,13 @@ describe('Oracle 구조 읽기', () => {
     expect(member.columns[0].defaultValue).toBeNull(); // IDENTITY 내부 시퀀스는 기본값으로 안 가져온다
     expect(member.primaryKeyName).toBe('pk_member');
     expect(schema.relations[0]).toMatchObject({ name: 'fk_orders_member', onDelete: 'CASCADE', onUpdate: 'NO ACTION' });
-    expect(warnings).toEqual([expect.stringContaining('함수 기반 인덱스')]);
+    expect(warnings).toEqual([]);
+    // 함수 기반 인덱스는 식 원문 그대로 가져온다
+    expect(schema.tables.find((t) => t.name === 'orders')!.indexes.find((i) => i.name === 'ix_fn')).toMatchObject({ columnIds: [], expression: 'UPPER("STATUS")' });
 
     const plan = planPush(erd(), schema, { dialect: getDialect('oracle') });
-    expect(plan.diff.changes.map((c) => c.summary)).toEqual([]);
+    // ERD에는 없는 DB 쪽 식 인덱스만 차이로 나온다
+    expect(plan.diff.changes.map((c) => c.summary)).toEqual(['orders 인덱스 삭제 (UPPER("STATUS"))']);
   });
 });
 

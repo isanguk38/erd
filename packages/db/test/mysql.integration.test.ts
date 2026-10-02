@@ -197,6 +197,19 @@ describe.skipIf(!url)('MySQL 실제 서버', () => {
     ]);
   });
 
+  it('식(함수) 인덱스를 만들고 다시 읽으면 ERD와 같다', async () => {
+    const config = await freshDatabase();
+    const schema = erd();
+    const member = schema.tables.find((t) => t.name === 'member')!;
+    addIndex(schema, member.id, { name: 'ix_member_email_lower', columnIds: [], expression: '(lower(`email`))' });
+    const { result } = await push(config, schema);
+    expect(result.results.filter((r) => !r.ok)).toEqual([]);
+    expect(await remaining(config, schema)).toEqual([]);
+    const { schema: read, warnings } = await mysqlConnector.introspect(config);
+    expect(warnings).toEqual([]);
+    expect(read.tables.find((t) => t.name === 'member')!.indexes.find((i) => i.name === 'ix_member_email_lower')).toMatchObject({ columnIds: [], expression: '(lower(`email`))' });
+  });
+
   it('실패하면 그 자리에서 멈추고 몇 문장까지 반영됐는지 알려준다', async () => {
     const config = await freshDatabase();
     const result = await mysqlConnector.execute(config, ['CREATE TABLE a (id INT)', 'CREATE TABLE a (id INT)', 'CREATE TABLE b (id INT)']);

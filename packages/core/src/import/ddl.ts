@@ -268,8 +268,8 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
       c.accept('KEY') || c.accept('INDEX');
       let name = constraintName;
       if (!c.isPunct('(') && !c.is('USING')) name = c.identifier();
-      skipIndexType(c);
-      addIndexByNames(table, name, columnList(c), unique);
+      const method = skipIndexType(c);
+      addIndexFromList(c, table, name, unique, method);
       c.skipItem();
       return;
     }
@@ -410,8 +410,9 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
     return names;
   }
 
-  function skipIndexType(c: Cursor) {
-    if (c.accept('USING')) c.next();
+  /** USING btree / USING gin 등: 방식을 돌려준다 */
+  function skipIndexType(c: Cursor): string {
+    return c.accept('USING') ? c.next().value.toLowerCase() : '';
   }
 
   function parseReferences(c: Cursor): Omit<PendingForeignKey, 'name' | 'fromTable' | 'fromColumns'> {
@@ -448,17 +449,50 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
     table.indexes.push(createIndex({ name, columnIds, unique }));
   }
 
+  /**
+   * ( ... ) 안이 컬럼 이름뿐이면 일반 인덱스, 식(함수·연산·연산자 클래스)이 있으면 원문 그대로 식 인덱스로 만든다.
+   * 끝에 WHERE가 있으면 부분 인덱스 조건으로 담는다.
+   */
+  function addIndexFromList(c: Cursor, table: Table, name: string, unique: boolean, method: string) {
+    const start = c.pos;
+    const inner = c.skipParens();
+    const plain = splitTopLevel(inner).every((part) => /^\s*[`"\[]?[\w$]+[`"\]]?(\s*\(\s*\d+\s*\))?(\s+(ASC|DESC))?\s*$/i.test(part));
+    let where = '';
+    if (c.accept('WHERE')) {
+      const first = c.peek();
+      let last = first;
+      while (!c.done && !c.isPunct(',') && !c.isPunct(')')) {
+        if (c.isPunct('(')) { c.skipParens(); last = c.peek(-1); }
+        else last = c.next();
+      }
+      if (first && last) where = c.raw(first, last).trim();
+    }
+    const end = c.pos;
+    const extra = { ...(method && method !== 'btree' ? { method } : {}), ...(where ? { where } : {}) };
+    if (plain) {
+      c.pos = start;
+      const names = columnList(c);
+      c.pos = end;
+      if (!extra.method && !where) return addIndexByNames(table, name, names, unique);
+      // 방식(gin 등)이나 조건이 있는 컬럼 인덱스: 컬럼으로 담되 방식·조건을 함께 기억한다
+      const columnIds = names.map((n) => columnOf(table, n)?.id).filter((id): id is string => !!id);
+      if (columnIds.length) table.indexes.push(createIndex({ name, columnIds, unique, ...extra }));
+      return;
+    }
+    table.indexes.push(createIndex({ name, columnIds: [], unique, expression: inner, ...extra }));
+  }
+
   function parseCreateIndex(c: Cursor, unique: boolean) {
     c.accept('CONCURRENTLY');
     c.accept('IF', 'NOT', 'EXISTS');
     const name = c.is('ON') ? '' : c.qualifiedName();
-    skipIndexType(c);
+    let method = skipIndexType(c);
     if (!c.accept('ON')) throw new Error('ON이 필요합니다');
     c.accept('ONLY');
     const table = tableOf(c.qualifiedName());
     if (!table) throw new Error('인덱스의 테이블을 먼저 정의해야 합니다');
-    skipIndexType(c);
-    addIndexByNames(table, name, columnList(c), unique);
+    method = skipIndexType(c) || method;
+    addIndexFromList(c, table, name, unique, method);
   }
 
   function parseAlterTable(c: Cursor) {
@@ -507,4 +541,30 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
     }
     throw new Error('COMMENT ON TABLE/COLUMN만 지원합니다');
   }
+}
+
+/** 괄호·따옴표 밖의 콤마로 나눈다 */
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (const ch of text) {
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+    } else if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+    } else if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
 }

@@ -204,6 +204,7 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .table-node__nn { color: var(--muted); font-size: 10px; }
 .table-node__indexes { border-top: 1px dashed var(--border); padding: 4px 10px 6px; }
 .table-node__index { font-size: 11px; color: var(--muted); display: flex; gap: 6px; align-items: center; line-height: 18px; }
+.table-node__index > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 3px; line-height: 14px; }
 .badge-pk { background: var(--pk); color: #1f1300; }
 .badge-fk { background: var(--fk); color: #fff; }
@@ -262,6 +263,14 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
 .index-card__head { display: flex; gap: 8px; align-items: center; }
 .index-card__head input:not([type='checkbox']) { flex: 1; }
 .index-card__columns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+.row-gap { display: inline-flex; gap: 4px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.index-card__expression, .index-card__more { margin-top: 6px; }
+.index-card__expression label, .index-card__more label { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.index-card__expression label > span, .index-card__more label > span { flex: none; width: 30px; font-size: 12px; color: var(--muted); }
+.index-card__expression input, .index-card__more input, .index-card__more select { flex: 1; min-width: 0; }
+.index-card__expression p { margin: 4px 0 0; }
+.index-card__more summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 .chip { background: var(--accent-soft); border-radius: 12px; padding: 2px 4px 2px 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 2px; }
 .chip button { border: none; background: none; cursor: pointer; padding: 0 4px; }
 .check { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }

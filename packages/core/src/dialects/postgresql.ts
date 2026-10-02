@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength } from './common';
+import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect } from './types';
 
 const TYPE_MAP: Record<string, string> = {
@@ -156,8 +156,8 @@ export const postgresql: Dialect = {
   },
 
   createIndex(table, index) {
-    const cols = columnNames(table, index.columnIds).map(q).join(', ');
-    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${cols})`];
+    const method = index.method?.trim() && index.method.trim().toLowerCase() !== 'btree' ? ` USING ${index.method.trim().toLowerCase()}` : '';
+    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)}${method} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },
   dropIndex: (table, index) =>
     index.isConstraint

@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import type { Change } from '../diff';
 import { getDialect } from '../dialects';
 import type { DialectId } from '../dialects/types';
-import { findTable, indexName, relationName, type Schema, type Table } from '../model';
+import { findTable, indexLabel, indexName, relationName, type Index, type Schema, type Table } from '../model';
 import { foreignKeyColumnIds } from '../operations';
 
 export interface DefinitionOptions {
@@ -113,10 +113,10 @@ function writeTableBlock(sheet: ExcelJS.Worksheet, schema: Schema, table: Table,
     const indexes = [
       ...table.indexes,
       ...table.columns.filter((c) => c.unique && !c.primaryKey && !table.indexes.some((i) => i.unique && i.columnIds.length === 1 && i.columnIds[0] === c.id))
-        .map((c) => ({ id: c.id, name: '', columnIds: [c.id], unique: true })),
+        .map((c): Index => ({ id: c.id, name: '', columnIds: [c.id], unique: true })),
     ];
     indexes.forEach((index, i) => {
-      const cols = index.columnIds.map((id) => table.columns.find((c) => c.id === id)?.name ?? '?').join(', ');
+      const cols = indexLabel(table, index);
       const row = sheet.addRow([i + 1, indexName(table, index), cols, '', '', index.unique ? 'Y' : '']);
       sheet.mergeCells(row.number, 3, row.number, 5);
       styleRow(row, { to: 6 });

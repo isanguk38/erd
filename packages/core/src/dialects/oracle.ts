@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength } from './common';
+import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys } from './common';
 import type { Dialect } from './types';
 
 // Oracle 12c 이상 (IDENTITY 컬럼). 따옴표 없는 이름은 Oracle이 대문자로 바꿔 저장하므로,
@@ -163,8 +163,7 @@ export const oracle: Dialect = {
   },
 
   createIndex(table, index) {
-    const cols = columnNames(table, index.columnIds).map(q).join(', ');
-    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${cols})`];
+    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})`];
   },
   dropIndex: (table, index) =>
     index.isConstraint ? [`ALTER TABLE ${q(table.name)} DROP CONSTRAINT ${q(indexName(table, index))}`] : [`DROP INDEX ${q(indexName(table, index))}`],

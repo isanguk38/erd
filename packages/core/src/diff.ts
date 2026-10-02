@@ -2,8 +2,13 @@ import type { ColumnField, Dialect } from './dialects/types';
 import { sqlComment } from './dialects/common';
 import {
   cloneSchema,
+  expressionColumns,
   findTable,
+  indexLabel,
+  isExpressionIndex,
   primaryKeyColumns,
+  sameExpression,
+  sameIndexMethod,
   type Column,
   type Index,
   type Relation,
@@ -66,7 +71,12 @@ export function normalizeSchema(input: Schema): Schema {
     const columnIds = new Set(table.columns.map((c) => c.id));
     table.indexes = table.indexes
       .map((i) => ({ ...i, columnIds: i.columnIds.filter((id) => columnIds.has(id)) }))
-      .filter((i) => i.columnIds.length > 0);
+      .filter((i) => i.columnIds.length > 0 || isExpressionIndex(i))
+      // 식이 컬럼 이름뿐이면 컬럼 인덱스로 본다 (DB는 그렇게 돌려준다)
+      .map((i) => {
+        const ids = isExpressionIndex(i) ? expressionColumns(table, i.expression) : null;
+        return ids ? { ...i, columnIds: ids, expression: undefined } : i;
+      });
     for (const column of table.columns) {
       if (!column.unique || column.primaryKey) continue;
       const exists = table.indexes.some((i) => i.unique && i.columnIds.length === 1 && i.columnIds[0] === column.id);
@@ -148,7 +158,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
       for (const index of table.indexes) {
         changes.push({
           kind: 'addIndex', id: `addIndex:${table.id}:${index.id}`, category: 'create', tableName: table.name,
-          summary: `${table.name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${columnList(table, index.columnIds)})`, table, index,
+          summary: `${table.name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${indexLabel(table, index)})`, table, index,
         });
       }
       continue;
@@ -227,7 +237,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
   for (const index of before.indexes) {
     const next = afterIndexes.get(index.id);
     if (!next || !sameIndex(index, next)) {
-      changes.push({ kind: 'dropIndex', id: `dropIndex:${after.id}:${index.id}`, category: 'alter', tableName: name, summary: `${name} 인덱스 삭제 (${columnList(before, index.columnIds)})`, table: before, index });
+      changes.push({ kind: 'dropIndex', id: `dropIndex:${after.id}:${index.id}`, category: 'alter', tableName: name, summary: `${name} 인덱스 삭제 (${indexLabel(before, index)})`, table: before, index });
     }
   }
 
@@ -294,7 +304,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     if (!old || !sameIndex(old, index)) {
       changes.push({
         kind: 'addIndex', id: `addIndex:${after.id}:${index.id}`, category: 'alter', tableName: name,
-        summary: `${name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${columnList(after, index.columnIds)})`,
+        summary: `${name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${indexLabel(after, index)})`,
         warning: index.unique ? '중복 값이 있으면 실패합니다' : undefined,
         table: after, index,
       });
@@ -303,5 +313,12 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
 }
 
 function sameIndex(a: Index, b: Index): boolean {
-  return a.unique === b.unique && sameList(a.columnIds, b.columnIds) && sameName(a.name, b.name);
+  return (
+    a.unique === b.unique &&
+    sameList(a.columnIds, b.columnIds) &&
+    sameName(a.name, b.name) &&
+    sameExpression(a.expression, b.expression) &&
+    sameIndexMethod(a.method, b.method) &&
+    sameExpression(a.where, b.where)
+  );
 }

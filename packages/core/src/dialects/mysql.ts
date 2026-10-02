@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength } from './common';
+import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys } from './common';
 import type { Dialect } from './types';
 
 const TYPE_MAP: Record<string, string> = {
@@ -97,8 +97,7 @@ export const mysql: Dialect = {
   },
 
   createIndex(table: Table, index) {
-    const cols = columnNames(table, index.columnIds).map(q).join(', ');
-    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${cols})`];
+    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})`];
   },
   fkNeedsIndex: true,
   dropIndex(table, index, keepForFk = []) {

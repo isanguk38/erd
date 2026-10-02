@@ -3,6 +3,7 @@ import { createColumn, createIndex, createRelation, createTable, emptySchema, ty
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
+import { indexDefinitionKeys, isPlainKeyList } from './indexDefinition';
 
 /** pg.Client, PGlite 등 query(sql, params)를 가진 무엇이든 */
 export interface Queryable {
@@ -87,9 +88,11 @@ const SQL_CONSTRAINTS = `
   ORDER BY c.relname, con.conname, k.ord`;
 
 const SQL_INDEXES = `
-  SELECT t.relname AS table_name, i.relname AS index_name, ix.indisunique AS is_unique, a.attname AS column_name, k.ord
+  SELECT t.relname AS table_name, i.relname AS index_name, ix.indisunique AS is_unique, a.attname AS column_name, k.ord,
+    am.amname AS method, pg_get_expr(ix.indpred, ix.indrelid) AS predicate, pg_get_indexdef(ix.indexrelid) AS definition
   FROM pg_index ix
   JOIN pg_class i ON i.oid = ix.indexrelid
+  JOIN pg_am am ON am.oid = i.relam
   JOIN pg_class t ON t.oid = ix.indrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
   CROSS JOIN LATERAL unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
@@ -100,7 +103,7 @@ const SQL_INDEXES = `
 
 interface ColumnRow { table_name: string; column_name: string; data_type: string; not_null: boolean; default_value: string | null; identity: string; comment: string | null }
 interface ConstraintRow { name: string; type: 'p' | 'f' | 'u'; table_name: string; column_name: string; ref_table: string | null; ref_column: string | null; ref_schema: string | null; on_delete: string; on_update: string }
-interface IndexRow { table_name: string; index_name: string; is_unique: boolean; column_name: string | null }
+interface IndexRow { table_name: string; index_name: string; is_unique: boolean; column_name: string | null; method: string; predicate: string | null; definition: string }
 
 /** 카탈로그(pg_catalog)를 읽어 스키마 모델을 만든다. 데이터 행은 읽지 않는다. */
 export async function introspectPostgres(db: Queryable, schemaName: string, options: IntrospectOptions = {}): Promise<{ schema: Schema; warnings: string[] }> {
@@ -180,10 +183,10 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
     }
   }
 
-  const indexes = new Map<string, { table: string; unique: boolean; columns: (string | null)[] }>();
+  const indexes = new Map<string, { table: string; unique: boolean; columns: (string | null)[]; method: string; predicate: string | null; definition: string }>();
   for (const row of (await db.query<IndexRow>(SQL_INDEXES, [schemaName])).rows) {
     const k = `${row.table_name}\u0000${row.index_name}`;
-    const entry = indexes.get(k) ?? { table: row.table_name, unique: row.is_unique, columns: [] };
+    const entry = indexes.get(k) ?? { table: row.table_name, unique: row.is_unique, columns: [], method: row.method, predicate: row.predicate, definition: row.definition };
     entry.columns.push(row.column_name);
     indexes.set(k, entry);
   }
@@ -191,12 +194,22 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
     const table = tables.get(entry.table);
     if (!table) continue;
     const name = k.split('\u0000')[1];
-    if (entry.columns.some((c) => !c)) {
-      warnings.push(`${table.name}.${name}: 식(expression) 인덱스는 가져오지 않습니다`);
+    const extra = {
+      ...(entry.method && entry.method !== 'btree' ? { method: entry.method } : {}),
+      ...(entry.predicate ? { where: entry.predicate } : {}),
+    };
+    // 식(함수)·연산자 클래스·정렬 규칙이 있는 인덱스는 인덱스 정의의 ( ... ) 원문을 그대로 담는다
+    const keys = indexDefinitionKeys(entry.definition);
+    if (entry.columns.some((c) => !c) || (keys !== null && !isPlainKeyList(keys))) {
+      if (keys === null) {
+        warnings.push(`${table.name}.${name}: 인덱스 정의를 읽지 못해 가져오지 않습니다`);
+        continue;
+      }
+      table.indexes.push(createIndex({ name, columnIds: [], unique: entry.unique, expression: keys, ...extra }));
       continue;
     }
     const ids = entry.columns.map((n) => columnId(table, n!)).filter((x): x is string => !!x);
-    table.indexes.push(createIndex({ name, columnIds: ids, unique: entry.unique }));
+    table.indexes.push(createIndex({ name, columnIds: ids, unique: entry.unique, ...extra }));
   }
 
   // 1:1 추정: FK 컬럼이 그대로 UNIQUE/PK이면 1:1

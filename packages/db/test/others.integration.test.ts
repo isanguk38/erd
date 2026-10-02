@@ -227,6 +227,22 @@ for (const target of [mariadb, oracle, mssql]) {
       expect(rows.map((r) => r.email ?? r.EMAIL)).toEqual(['a@a.com']);
     }, 120_000);
 
+    it.skipIf(dialect.id !== 'oracle' && dialect.id !== 'mssql')('함수 기반 인덱스(Oracle)·필터 인덱스(SQL Server)를 만들고 다시 읽으면 ERD와 같다', async () => {
+      const config = await target.fresh();
+      const schema = erd();
+      const member = schema.tables.find((t) => t.name === 'member')!;
+      if (dialect.id === 'oracle') addIndex(schema, member.id, { name: 'ix_member_email_upper', columnIds: [], expression: 'UPPER("EMAIL")' });
+      else addIndex(schema, member.id, { name: 'ix_member_grade_live', columnIds: [member.columns.find((c) => c.name === 'grade')!.id], where: 'created_at IS NOT NULL' });
+      const { result } = await push(config, schema);
+      expect(result.results.filter((r) => !r.ok)).toEqual([]);
+      expect(await remaining(config, schema)).toEqual([]);
+      const { schema: read, warnings } = await connector.introspect(config);
+      expect(warnings).toEqual([]);
+      const index = read.tables.find((t) => t.name === 'member')!.indexes.find((i) => /ix_member_(email_upper|grade_live)/.test(i.name))!;
+      if (dialect.id === 'oracle') expect(index).toMatchObject({ columnIds: [], expression: 'UPPER("EMAIL")' });
+      else expect(index.where).toMatch(/created_at\]? IS NOT NULL/i);
+    }, 120_000);
+
     it('FK 변경(ON DELETE SET NULL)과 UNIQUE 해제, 테이블 추가도 왕복된다', async () => {
       const config = await target.fresh();
       const schema = erd();

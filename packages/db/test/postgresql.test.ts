@@ -113,6 +113,48 @@ describe('PostgreSQL 연동 (PGlite)', () => {
     expect(await pendingChanges(db, merged)).toEqual([]);
   });
 
+  it('식(expression) 인덱스: 가져오고, 비교하고, 내보낼 수 있다', async () => {
+    const db = new PGlite();
+    await db.exec(`
+      CREATE TABLE customer (id BIGSERIAL PRIMARY KEY, email VARCHAR(100), metadata JSONB, deleted_at TIMESTAMP);
+      CREATE TABLE reviews (id BIGSERIAL PRIMARY KEY, body TEXT NOT NULL);
+      CREATE INDEX idx_customer_metadata_sitecd ON customer ((metadata ->> 'sitecd'));
+      CREATE INDEX idx_reviews_body_fts ON reviews USING gin (to_tsvector('simple', body));
+      CREATE UNIQUE INDEX ux_customer_email_live ON customer (email) WHERE deleted_at IS NULL;
+    `);
+    const { schema: dbSchema, warnings } = await introspectPostgres(db, 'public');
+    expect(warnings).toEqual([]);
+    const customer = dbSchema.tables.find((t) => t.name === 'customer')!;
+    const reviews = dbSchema.tables.find((t) => t.name === 'reviews')!;
+    expect(customer.indexes.find((i) => i.name === 'idx_customer_metadata_sitecd')).toMatchObject({ columnIds: [], expression: "((metadata ->> 'sitecd'::text))" });
+    expect(reviews.indexes[0]).toMatchObject({ name: 'idx_reviews_body_fts', method: 'gin', expression: "to_tsvector('simple'::regconfig, body)" });
+    const partial = customer.indexes.find((i) => i.name === 'ux_customer_email_live')!;
+    expect(partial).toMatchObject({ unique: true, where: '(deleted_at IS NULL)' });
+    expect(partial.columnIds).toHaveLength(1);
+
+    // 가져온 그대로면 차이가 없다
+    const erdSchema = cloneSchema(dbSchema);
+    expect(await pendingChanges(db, erdSchema)).toEqual([]);
+
+    // ERD에서 사람이 쓴 식(형 변환·공백 없이)으로 새 식 인덱스를 만들어 내보내면, 다시 읽어도 같다고 본다
+    const erdCustomer = erdSchema.tables.find((t) => t.name === 'customer')!;
+    addIndex(erdSchema, erdCustomer.id, { name: 'ix_customer_email_lower', columnIds: [], expression: 'lower(email)' });
+    addIndex(erdSchema, erdCustomer.id, { name: 'ix_customer_meta', columnIds: [], expression: 'metadata', method: 'gin' });
+    const { statements, result } = await push(db, erdSchema);
+    expect(statements.map((x) => x.sql)).toEqual([
+      'CREATE INDEX ix_customer_email_lower ON customer (lower(email))',
+      'CREATE INDEX ix_customer_meta ON customer USING gin (metadata)',
+    ]);
+    expect(result.results.filter((r) => !r.ok)).toEqual([]);
+    expect(await pendingChanges(db, erdSchema)).toEqual([]);
+
+    // 식을 바꾸면 다른 인덱스로 본다
+    erdCustomer.indexes.find((i) => i.name === 'ix_customer_email_lower')!.expression = 'upper(email)';
+    const changed = await pendingChanges(db, erdSchema);
+    // (DB에서 ERD 방향 비교: ERD의 upper 식은 DB에 없고, DB의 lower 식은 ERD에 없다)
+    expect(changed).toEqual(['customer 인덱스 삭제 (upper(email))', 'customer 인덱스 생성 (lower((email)::text))']);
+  });
+
   it('실패하면 트랜잭션을 되돌린다', async () => {
     const db = new PGlite();
     const result = await executePostgres(db, ['CREATE TABLE a (id INT)', 'CREATE TABLE a (id INT)', 'CREATE TABLE b (id INT)']);

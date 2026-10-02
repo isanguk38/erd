@@ -48,7 +48,7 @@ export type Command =
   | { op: 'addColumn'; table: string; column: ColumnSpec; after?: string }
   | { op: 'updateColumn'; table: string; column: string; changes: Partial<ColumnSpec> }
   | { op: 'dropColumn'; table: string; column: string }
-  | { op: 'addIndex'; table: string; columns: string[]; unique?: boolean; name?: string }
+  | { op: 'addIndex'; table: string; columns?: string[]; unique?: boolean; name?: string; expression?: string; method?: string; where?: string }
   | { op: 'dropIndex'; table: string; name?: string; columns?: string[] }
   | {
       op: 'addRelation';
@@ -145,9 +145,15 @@ function applyOne(schema: Schema, command: Command, created: string[]): string {
     }
     case 'addIndex': {
       const table = tableByName(schema, command.table);
-      if (!command.columns.length) throw new Error('인덱스 컬럼이 필요합니다');
-      addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: command.columns.map((n) => columnByName(table, n).id) });
-      return `${table.name} 인덱스 추가 (${command.columns.join(', ')})`;
+      const expression = command.expression?.trim();
+      if (!expression && !command.columns?.length) throw new Error('인덱스 컬럼(columns) 또는 식(expression)이 필요합니다');
+      const extra = { ...(command.method?.trim() ? { method: command.method.trim() } : {}), ...(command.where?.trim() ? { where: command.where.trim() } : {}) };
+      if (expression) {
+        addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: [], expression, ...extra });
+        return `${table.name} 식 인덱스 추가 (${expression})`;
+      }
+      addIndex(schema, table.id, { name: command.name ?? '', unique: Boolean(command.unique), columnIds: command.columns!.map((n) => columnByName(table, n).id), ...extra });
+      return `${table.name} 인덱스 추가 (${command.columns!.join(', ')})`;
     }
     case 'dropIndex': {
       const table = tableByName(schema, command.table);
@@ -236,7 +242,13 @@ export function describeSchema(schema: Schema) {
         comment: c.comment || undefined,
       })),
       indexes: t.indexes.length
-        ? t.indexes.map((i) => ({ name: i.name || undefined, unique: i.unique, columns: i.columnIds.map((id) => t.columns.find((c) => c.id === id)?.name) }))
+        ? t.indexes.map((i) => ({
+            name: i.name || undefined,
+            unique: i.unique,
+            ...(i.expression?.trim() ? { expression: i.expression } : { columns: i.columnIds.map((id) => t.columns.find((c) => c.id === id)?.name) }),
+            method: i.method || undefined,
+            where: i.where || undefined,
+          }))
         : undefined,
     })),
     relations: schema.relations.map((r) => {

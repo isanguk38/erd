@@ -132,9 +132,10 @@ export async function introspectOracle(query: OracleQuery, owner: string, option
   }
 
   for (const row of await query(
-    `SELECT i.INDEX_NAME, i.TABLE_NAME, i.UNIQUENESS, i.INDEX_TYPE, ic.COLUMN_NAME
+    `SELECT i.INDEX_NAME, i.TABLE_NAME, i.UNIQUENESS, i.INDEX_TYPE, ic.COLUMN_NAME, ie.COLUMN_EXPRESSION
      FROM ALL_INDEXES i
      JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME
+     LEFT JOIN ALL_IND_EXPRESSIONS ie ON ie.INDEX_OWNER = i.OWNER AND ie.INDEX_NAME = i.INDEX_NAME AND ie.COLUMN_POSITION = ic.COLUMN_POSITION
      WHERE i.OWNER = :owner AND i.INDEX_TYPE <> 'LOB'
      ORDER BY i.TABLE_NAME, i.INDEX_NAME, ic.COLUMN_POSITION`,
     { owner },
@@ -142,8 +143,10 @@ export async function introspectOracle(query: OracleQuery, owner: string, option
     if (constraintIndexes.has(row.name)) continue; // 기본키·UNIQUE 제약조건이 만든 인덱스
     const table = tables.get(row.table);
     if (!table) continue;
-    if (/FUNCTION/.test(row.indexType)) {
-      warnings.push(`${table.name}.${fromOracleName(row.name)}: 함수 기반 인덱스는 가져오지 않습니다`);
+    if (/FUNCTION/.test(row.indexType) || row.expressions.some(Boolean)) {
+      // 함수 기반 인덱스: 키마다 컬럼은 "이름", 식은 원문 그대로 (예: UPPER("EMAIL"))
+      const expression = row.columns.map((c, i) => row.expressions[i]?.trim() || `"${c}"`).join(', ');
+      table.indexes.push(createIndex({ name: fromOracleName(row.name), columnIds: [], unique: row.unique, expression }));
       continue;
     }
     const ids = row.columns.map((n) => columnId(table, n)).filter((x): x is string => !!x);
@@ -184,10 +187,13 @@ export async function introspectOracle(query: OracleQuery, owner: string, option
 }
 
 function groupIndexes(rows: Row[]) {
-  const map = new Map<string, { name: string; table: string; unique: boolean; indexType: string; columns: string[] }>();
+  const map = new Map<string, { name: string; table: string; unique: boolean; indexType: string; columns: string[]; expressions: (string | null)[] }>();
   for (const r of rows) {
-    const e = map.get(r.INDEX_NAME) ?? { name: r.INDEX_NAME, table: r.TABLE_NAME, unique: r.UNIQUENESS === 'UNIQUE', indexType: String(r.INDEX_TYPE ?? ''), columns: [] as string[] };
+    const e = map.get(r.INDEX_NAME) ?? {
+      name: r.INDEX_NAME, table: r.TABLE_NAME, unique: r.UNIQUENESS === 'UNIQUE', indexType: String(r.INDEX_TYPE ?? ''), columns: [] as string[], expressions: [] as (string | null)[],
+    };
     e.columns.push(r.COLUMN_NAME);
+    e.expressions.push(r.COLUMN_EXPRESSION ? String(r.COLUMN_EXPRESSION) : null);
     map.set(r.INDEX_NAME, e);
   }
   return [...map.values()];

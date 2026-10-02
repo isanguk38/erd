@@ -6,7 +6,7 @@
 
 import { diffSchemas, normalizeSchema, type Change, type DiffResult } from './diff';
 import type { Dialect } from './dialects/types';
-import { cloneSchema, findTable, type Column, type Index, type Relation, type Schema, type Table } from './model';
+import { cloneSchema, findTable, sameExpression, type Column, type Index, type Relation, type Schema, type Table } from './model';
 import { removeColumn, removeTable } from './operations';
 
 const key = (name: string) => name.toLowerCase();
@@ -52,7 +52,9 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema): Sch
     for (const index of table.indexes) {
       const m =
         match.indexes.find((i) => !used.has(i.id) && i.name && index.name && key(i.name) === key(index.name)) ??
-        match.indexes.find((i) => !used.has(i.id) && i.unique === index.unique && sameList(i.columnIds, index.columnIds));
+        match.indexes.find(
+          (i) => !used.has(i.id) && i.unique === index.unique && sameList(i.columnIds, index.columnIds) && sameExpression(i.expression, index.expression) && sameExpression(i.where, index.where),
+        );
       if (!m) continue;
       used.add(m.id);
       index.id = m.id;
@@ -202,7 +204,7 @@ function addIndexOrFlag(table: Table, index: Index) {
   }
   table.indexes = table.indexes.filter((i) => i.id !== index.id);
   const columnIds = index.columnIds.filter((id) => table.columns.some((c) => c.id === id));
-  if (columnIds.length) table.indexes.push({ ...index, columnIds });
+  if (columnIds.length || index.expression?.trim()) table.indexes.push({ ...index, columnIds });
 }
 
 function dropIndexOrFlag(table: Table, index: Index) {

@@ -172,57 +172,134 @@ function TableEditor({ table }: { table: Table }) {
   );
 }
 
+/** 식 인덱스 예시 (DB 종류별 문법) */
+const EXPRESSION_EXAMPLE: Record<string, (col: string) => string> = {
+  postgresql: (col) => `lower(${col})`,
+  mysql: (col) => `(lower(\`${col}\`))`,
+  mariadb: (col) => `(lower(\`${col}\`))`,
+  oracle: (col) => `UPPER("${col.toUpperCase()}")`,
+  mssql: (col) => col,
+};
+const EXPRESSION_HINT: Record<string, string> = {
+  postgresql: "예) lower(email), (metadata ->> 'sitecd'), to_tsvector('simple', body)",
+  mysql: '예) (lower(`email`)) — MySQL 8.0.13 이상, 식마다 괄호를 한 번 더 감쌉니다',
+  mariadb: 'MariaDB는 식 인덱스를 지원하지 않습니다 (가상 컬럼을 만들어 인덱스를 거세요)',
+  oracle: '예) UPPER("EMAIL"), TRUNC("CREATED_AT")',
+  mssql: 'SQL Server는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)',
+};
+const PG_METHODS = ['gin', 'gist', 'brin', 'hash', 'spgist'];
+
 function IndexEditor({ table }: { table: Table }) {
   const { edit } = useStore.getState();
+  const dialectId = useDialect();
+  const canMethod = dialectId === 'postgresql';
+  const canWhere = dialectId === 'postgresql' || dialectId === 'mssql';
   return (
     <div className="inspector__section">
       <div className="inspector__section-head">
         <h4>인덱스 ({table.indexes.length})</h4>
-        <button className="btn btn-sm" disabled={table.columns.length === 0} onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [table.columns[0].id] }))}>
-          + 인덱스
-        </button>
+        <span className="row-gap">
+          <button className="btn btn-sm" disabled={table.columns.length === 0} onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [table.columns[0].id] }))}>
+            + 인덱스
+          </button>
+          <button
+            className="btn btn-sm"
+            title="컬럼 대신 식(함수)으로 만드는 인덱스. 예) lower(email)"
+            disabled={table.columns.length === 0}
+            onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [], expression: (EXPRESSION_EXAMPLE[dialectId] ?? EXPRESSION_EXAMPLE.postgresql)(table.columns[0].name) }))}
+          >
+            + 식 인덱스
+          </button>
+        </span>
       </div>
       {table.indexes.length === 0 && <p className="muted">조회 조건에 자주 쓰는 컬럼에 인덱스를 추가하세요. 컬럼의 UQ 체크는 UNIQUE 인덱스로 만들어집니다.</p>}
-      {table.indexes.map((index) => (
-        <div key={index.id} className="index-card">
-          <div className="index-card__head">
-            <TextInput value={index.name} placeholder={indexName(table, { ...index, name: '' })} onCommit={(name) => edit((d) => updateIndex(d, table.id, index.id, { name }))} />
-            <label className="check">
-              <input type="checkbox" checked={index.unique} onChange={(e) => edit((d) => updateIndex(d, table.id, index.id, { unique: e.target.checked }))} />
-              UNIQUE
-            </label>
-            <button className="icon-btn danger" title="인덱스 삭제" onClick={() => edit((d) => removeIndex(d, table.id, index.id))}>×</button>
+      {table.indexes.map((index) => {
+        const isExpression = index.expression !== undefined;
+        const showMethod = canMethod || Boolean(index.method);
+        const showWhere = canWhere || Boolean(index.where);
+        return (
+          <div key={index.id} className="index-card">
+            <div className="index-card__head">
+              <TextInput value={index.name} placeholder={indexName(table, { ...index, name: '' })} onCommit={(name) => edit((d) => updateIndex(d, table.id, index.id, { name }))} />
+              <label className="check">
+                <input type="checkbox" checked={index.unique} onChange={(e) => edit((d) => updateIndex(d, table.id, index.id, { unique: e.target.checked }))} />
+                UNIQUE
+              </label>
+              <button className="icon-btn danger" title="인덱스 삭제" onClick={() => edit((d) => removeIndex(d, table.id, index.id))}>×</button>
+            </div>
+            {isExpression ? (
+              <div className="index-card__expression">
+                <label>
+                  <span>식</span>
+                  <TextInput
+                    className="mono"
+                    value={index.expression ?? ''}
+                    placeholder={(EXPRESSION_EXAMPLE[dialectId] ?? EXPRESSION_EXAMPLE.postgresql)(table.columns[0]?.name ?? 'name')}
+                    onCommit={(expression) => edit((d) => updateIndex(d, table.id, index.id, { expression }))}
+                  />
+                </label>
+                <p className="muted small">{EXPRESSION_HINT[dialectId] ?? EXPRESSION_HINT.postgresql}</p>
+              </div>
+            ) : (
+              <div className="index-card__columns">
+                {index.columnIds.map((cid, i) => {
+                  const column = table.columns.find((c) => c.id === cid);
+                  return (
+                    <span key={cid} className="chip">
+                      {i + 1}. {column?.name ?? '?'}
+                      <button
+                        title="빼기"
+                        onClick={() => edit((d) => updateIndex(d, table.id, index.id, { columnIds: index.columnIds.filter((x) => x !== cid) }))}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (id) edit((d) => updateIndex(d, table.id, index.id, { columnIds: [...index.columnIds, id] }));
+                  }}
+                >
+                  <option value="">+ 컬럼 추가</option>
+                  {table.columns.filter((c) => !index.columnIds.includes(c.id)).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(showMethod || showWhere) && (
+              <details className="index-card__more" open={Boolean(index.method || index.where) || undefined}>
+                <summary>방식·조건{index.method || index.where ? ` (${[index.method, index.where && 'WHERE'].filter(Boolean).join(', ')})` : ''}</summary>
+                {showMethod && (
+                  <label>
+                    <span>방식</span>
+                    <select value={index.method ?? ''} onChange={(e) => edit((d) => updateIndex(d, table.id, index.id, { method: e.target.value || undefined }))}>
+                      <option value="">기본 (btree)</option>
+                      {[...new Set([...PG_METHODS, ...(index.method ? [index.method] : [])])].map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {showWhere && (
+                  <label>
+                    <span>조건</span>
+                    <TextInput
+                      className="mono"
+                      value={index.where ?? ''}
+                      placeholder="WHERE 뒤 조건 (부분 인덱스). 예) deleted_at IS NULL"
+                      onCommit={(where) => edit((d) => updateIndex(d, table.id, index.id, { where: where.trim() || undefined }))}
+                    />
+                  </label>
+                )}
+              </details>
+            )}
           </div>
-          <div className="index-card__columns">
-            {index.columnIds.map((cid, i) => {
-              const column = table.columns.find((c) => c.id === cid);
-              return (
-                <span key={cid} className="chip">
-                  {i + 1}. {column?.name ?? '?'}
-                  <button
-                    title="빼기"
-                    onClick={() => edit((d) => updateIndex(d, table.id, index.id, { columnIds: index.columnIds.filter((x) => x !== cid) }))}
-                  >
-                    ×
-                  </button>
-                </span>
-              );
-            })}
-            <select
-              value=""
-              onChange={(e) => {
-                const id = e.target.value;
-                if (id) edit((d) => updateIndex(d, table.id, index.id, { columnIds: [...index.columnIds, id] }));
-              }}
-            >
-              <option value="">+ 컬럼 추가</option>
-              {table.columns.filter((c) => !index.columnIds.includes(c.id)).map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

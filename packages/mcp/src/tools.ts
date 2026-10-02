@@ -43,7 +43,19 @@ const command = z.discriminatedUnion('op', [
   z.object({ op: z.literal('addColumn'), table: z.string(), column: columnSpec, after: z.string().optional().describe('이 컬럼 뒤에 추가') }),
   z.object({ op: z.literal('updateColumn'), table: z.string(), column: z.string(), changes: columnSpec.partial() }),
   z.object({ op: z.literal('dropColumn'), table: z.string(), column: z.string() }),
-  z.object({ op: z.literal('addIndex'), table: z.string(), columns: z.array(z.string()).min(1), unique: z.boolean().optional(), name: z.string().optional() }),
+  z.object({
+    op: z.literal('addIndex'),
+    table: z.string(),
+    columns: z.array(z.string()).min(1).optional().describe('인덱스 컬럼. 식 인덱스면 비우고 expression을 쓴다'),
+    expression: z
+      .string()
+      .optional()
+      .describe("식(함수) 인덱스: ON 테이블 ( ... ) 괄호 안 원문. 예) PostgreSQL: lower(email), (metadata ->> 'sitecd') / MySQL 8: (lower(`email`))"),
+    method: z.string().optional().describe('PostgreSQL 인덱스 방식: gin, gist, brin, hash (비우면 btree)'),
+    where: z.string().optional().describe('부분 인덱스 조건 (WHERE 뒤 식)'),
+    unique: z.boolean().optional(),
+    name: z.string().optional(),
+  }),
   z.object({ op: z.literal('dropIndex'), table: z.string(), name: z.string().optional(), columns: z.array(z.string()).optional() }),
   z.object({
     op: z.literal('addRelation'),

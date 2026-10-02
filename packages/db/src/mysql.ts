@@ -132,15 +132,17 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
   }
 
   const indexRows = await query(
-    `SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, COLUMN_NAME FROM information_schema.STATISTICS
+    // SELECT *: EXPRESSION(식 인덱스) 열은 MySQL 8.0.13부터 있다 (MariaDB·이전 버전에는 없음)
+    `SELECT * FROM information_schema.STATISTICS
      WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`,
     [database],
   );
-  const indexes = new Map<string, { table: string; name: string; unique: boolean; columns: (string | null)[] }>();
+  const indexes = new Map<string, { table: string; name: string; unique: boolean; columns: (string | null)[]; expressions: (string | null)[] }>();
   for (const row of indexRows) {
     const k = `${row.TABLE_NAME}\u0000${row.INDEX_NAME}`;
-    const index = indexes.get(k) ?? { table: row.TABLE_NAME, name: row.INDEX_NAME, unique: Number(row.NON_UNIQUE) === 0, columns: [] as (string | null)[] };
+    const index = indexes.get(k) ?? { table: row.TABLE_NAME, name: row.INDEX_NAME, unique: Number(row.NON_UNIQUE) === 0, columns: [] as (string | null)[], expressions: [] as (string | null)[] };
     index.columns.push(row.COLUMN_NAME);
+    index.expressions.push(row.EXPRESSION ?? null);
     indexes.set(k, index);
   }
 
@@ -151,7 +153,13 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
     const table = tables.get(index.table);
     if (!table) continue;
     if (index.columns.some((c) => !c)) {
-      warnings.push(`${table.name}.${index.name}: 식(expression) 인덱스는 가져오지 않습니다`);
+      if (index.expressions.some((e, i) => !index.columns[i] && !e)) {
+        warnings.push(`${table.name}.${index.name}: 인덱스 정의를 읽지 못해 가져오지 않습니다`);
+        continue;
+      }
+      // 식 인덱스: 키마다 컬럼은 `이름`, 식은 (식) — MySQL 문법 그대로
+      const expression = index.columns.map((c, i) => (c ? `\`${c}\`` : `(${index.expressions[i]})`)).join(', ');
+      table.indexes.push(createIndex({ name: index.name, columnIds: [], unique: index.unique, expression }));
       continue;
     }
     const names = index.columns as string[];

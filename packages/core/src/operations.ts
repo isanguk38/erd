@@ -82,7 +82,7 @@ export function removeColumn(schema: Schema, tableId: string, columnId: string):
   table.columns = table.columns.filter((c) => c.id !== columnId);
   table.indexes = table.indexes
     .map((i) => ({ ...i, columnIds: i.columnIds.filter((id) => id !== columnId) }))
-    .filter((i) => i.columnIds.length > 0);
+    .filter((i) => i.columnIds.length > 0 || Boolean(i.expression?.trim()));
   schema.relations = schema.relations.filter(
     (r) => !(r.fromTableId === tableId && r.fromColumnIds.includes(columnId)) && !(r.toTableId === tableId && r.toColumnIds.includes(columnId)),
   );

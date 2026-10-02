@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength } from './common';
+import { columnNames, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect } from './types';
 
 // SQL Server 2016 이상. 이름은 [대괄호], 코멘트는 확장 속성(MS_Description),
@@ -175,8 +175,7 @@ export const mssql: Dialect = {
   },
 
   createIndex(table, index) {
-    const cols = columnNames(table, index.columnIds).map(q).join(', ');
-    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${cols})`];
+    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },
   dropIndex: (table, index) =>
     index.isConstraint

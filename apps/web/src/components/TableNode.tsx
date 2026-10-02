@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position, useConnection, type Node, type NodeProps } from '@xyflow/react';
-import type { Table } from '@erd/core';
+import { indexLabel, type Table } from '@erd/core';
 import type { ViewMode } from '../store';
 import { Icon } from './ui';
 
@@ -95,7 +95,7 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
           {table.indexes.map((i) => (
             <div key={i.id} className="table-node__index">
               <span className="badge badge-ix">{i.unique ? 'UQ' : 'IX'}</span>
-              {i.columnIds.map((cid) => table.columns.find((c) => c.id === cid)?.name ?? '?').join(', ')}
+              <span title={indexLabel(table, i)}>{indexLabel(table, i)}</span>
             </div>
           ))}
         </div>

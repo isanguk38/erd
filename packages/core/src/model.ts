@@ -30,6 +30,17 @@ export interface Index {
   unique: boolean;
   /** DB에서 읽은 UNIQUE 제약조건이면 true (PostgreSQL은 제약조건과 인덱스를 지우는 문법이 다르다) */
   isConstraint?: boolean;
+  /**
+   * 식(함수) 인덱스: 컬럼 대신 이 식으로 인덱스를 만든다. ON 테이블 ( ... ) 괄호 안에 들어갈 원문 그대로.
+   * 예) PostgreSQL: lower(email) / (metadata ->> 'sitecd') / to_tsvector('simple', body)
+   *     MySQL 8: (lower(`email`)) — 식마다 괄호를 한 번 더 감싼다
+   * 있으면 columnIds는 비워 둔다.
+   */
+  expression?: string;
+  /** 인덱스 방식 (PostgreSQL: gin, gist, brin, hash). 비우면 기본(btree) */
+  method?: string;
+  /** 부분 인덱스 조건 (WHERE 뒤에 오는 식) */
+  where?: string;
 }
 
 export interface Table {
@@ -137,8 +148,52 @@ export function primaryKeyColumns(table: Table): Column[] {
 /** 인덱스 이름이 비어 있을 때 쓰는 기본 이름 */
 export function indexName(table: Table, index: Index): string {
   if (index.name) return index.name;
+  if (index.expression?.trim()) {
+    const words = index.expression.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+    return `${index.unique ? 'ux' : 'ix'}_${table.name}_${words.join('_')}`.slice(0, 60);
+  }
   const cols = index.columnIds.map((id) => findColumn(table, id)?.name ?? id);
   return `${index.unique ? 'ux' : 'ix'}_${table.name}_${cols.join('_')}`;
+}
+
+/** 식 인덱스인지 */
+export function isExpressionIndex(index: Index): boolean {
+  return Boolean(index.expression?.trim());
+}
+
+/** 화면·요약에 보여 줄 인덱스 내용: 컬럼 이름들 또는 식 (방식·조건 포함) */
+export function indexLabel(table: Table, index: Index): string {
+  const keys = isExpressionIndex(index) ? index.expression!.trim() : index.columnIds.map((id) => findColumn(table, id)?.name ?? '?').join(', ');
+  return `${index.method?.trim() ? `${index.method.trim()} ` : ''}${keys}${index.where?.trim() ? ` WHERE ${index.where.trim()}` : ''}`;
+}
+
+/** 식이 사실 컬럼 이름 나열뿐이면 그 컬럼 id들 (예: "metadata", "a, b"). 아니면 null */
+export function expressionColumns(table: Table, expression: string | undefined): string[] | null {
+  if (!expression?.trim()) return null;
+  const ids: string[] = [];
+  for (const part of expression.split(',')) {
+    const m = part.trim().match(/^[`"[]?([\w$]+)[`"\]]?$/);
+    const column = m && table.columns.find((c) => c.name.toLowerCase() === m[1].toLowerCase());
+    if (!column) return null;
+    ids.push(column.id);
+  }
+  return ids;
+}
+
+/** 두 식이 같은지 (공백·따옴표·대소문자·괄호·PostgreSQL 형 변환(::text) 차이는 무시) */
+export function sameExpression(a: string | undefined, b: string | undefined): boolean {
+  const norm = (v: string | undefined) =>
+    (v ?? '')
+      .toLowerCase()
+      .replace(/::\s*(character varying|double precision|timestamp with(out)? time zone|[a-z_][a-z0-9_]*)(\[\])?/g, '')
+      .replace(/["`\[\]()\s]/g, '');
+  return norm(a) === norm(b);
+}
+
+/** 인덱스 방식이 같은지 (비어 있으면 btree) */
+export function sameIndexMethod(a: string | undefined, b: string | undefined): boolean {
+  const norm = (v: string | undefined) => (v?.trim().toLowerCase() || 'btree');
+  return norm(a) === norm(b);
 }
 
 /** 외래키 이름이 비어 있을 때 쓰는 기본 이름 */

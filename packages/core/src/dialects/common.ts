@@ -1,4 +1,4 @@
-import { findColumn, findTable, type Relation, type Schema, type Table } from '../model';
+import { findColumn, findTable, type Index, type Relation, type Schema, type Table } from '../model';
 
 /** SQL 문자열 리터럴 */
 export function literal(value: string, escapeBackslash = false): string {
@@ -14,6 +14,16 @@ export function sqlComment(item: { comment: string; logicalName: string }): stri
 
 export function columnNames(table: Table, ids: string[]): string[] {
   return ids.map((id) => findColumn(table, id)?.name ?? id);
+}
+
+/** CREATE INDEX ... ON 테이블 ( 여기 ): 식 인덱스면 식 원문, 아니면 컬럼 이름들 */
+export function indexKeys(table: Table, index: Index, q: (name: string) => string): string {
+  return index.expression?.trim() || columnNames(table, index.columnIds).map(q).join(', ');
+}
+
+/** 부분 인덱스 조건 ( WHERE ...) */
+export function indexWhere(index: Index): string {
+  return index.where?.trim() ? ` WHERE ${index.where.trim()}` : '';
 }
 
 export function relationTables(schema: Schema, relation: Relation): { from: Table; to: Table } {

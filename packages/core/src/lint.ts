@@ -126,6 +126,8 @@ export function lintSchema(schema: Schema, dialect: DialectId | string): LintIss
     const pk = t.columns.filter((c) => c.primaryKey).map((c) => c.id).join(',');
     if (pk) seen.set(pk, '기본키');
     for (const i of t.indexes) {
+      // 식·조건이 있는 인덱스는 컬럼 구성만으로 같다고 볼 수 없다
+      if (i.expression?.trim() || i.where?.trim()) continue;
       const key = i.columnIds.join(',');
       const prev = seen.get(key);
       if (prev) add('duplicate-index', t, `${t.name}: 인덱스 ${i.name || `(${i.columnIds.length}개 컬럼)`}가 ${prev}와 같은 컬럼입니다`);

@@ -104,9 +104,9 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
   const columnId = (table: Table, name: string) => table.columns.find((c) => c.name === name)?.id;
 
   // 인덱스 (기본키·UNIQUE 제약조건 포함)
-  const indexes = new Map<string, { table: string; name: string; pk: boolean; unique: boolean; constraint: boolean; columns: string[] }>();
+  const indexes = new Map<string, { table: string; name: string; pk: boolean; unique: boolean; constraint: boolean; where: string | null; columns: string[] }>();
   for (const row of await query(
-    `SELECT t.name AS table_name, i.name, i.is_primary_key, i.is_unique, i.is_unique_constraint, c.name AS column_name
+    `SELECT t.name AS table_name, i.name, i.is_primary_key, i.is_unique, i.is_unique_constraint, i.filter_definition, c.name AS column_name
      FROM sys.indexes i
      JOIN sys.tables t ON t.object_id = i.object_id JOIN sys.schemas s ON s.schema_id = t.schema_id
      JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0
@@ -116,7 +116,7 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
     p,
   )) {
     const k = `${row.table_name}\u0000${row.name}`;
-    const e = indexes.get(k) ?? { table: row.table_name, name: row.name, pk: Boolean(row.is_primary_key), unique: Boolean(row.is_unique), constraint: Boolean(row.is_unique_constraint), columns: [] as string[] };
+    const e = indexes.get(k) ?? { table: row.table_name, name: row.name, pk: Boolean(row.is_primary_key), unique: Boolean(row.is_unique), constraint: Boolean(row.is_unique_constraint), where: row.filter_definition ?? null, columns: [] as string[] };
     e.columns.push(row.column_name);
     indexes.set(k, e);
   }
@@ -129,7 +129,8 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
       continue;
     }
     const ids = e.columns.map((n) => columnId(table, n)).filter((x): x is string => !!x);
-    table.indexes.push(createIndex({ name: e.name, columnIds: ids, unique: e.unique, isConstraint: e.constraint || undefined }));
+    // 필터 인덱스(WHERE 조건)는 조건까지 담는다
+    table.indexes.push(createIndex({ name: e.name, columnIds: ids, unique: e.unique, isConstraint: e.constraint || undefined, ...(e.where ? { where: e.where } : {}) }));
   }
 
   // 외래키

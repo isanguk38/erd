@@ -1,5 +1,5 @@
 import type { Node, Rect } from '@xyflow/react';
-import { foreignKeyColumnIds, type Schema } from '@erd/core';
+import { foreignKeyColumnIds, indexLabel, type Schema } from '@erd/core';
 import { diagramToSvg, type ExportTarget } from './exportImage';
 
 // ERD를 HTML 파일 하나로 내보낸다. 인터넷·서버 없이 더블클릭으로 열리고,
@@ -41,7 +41,7 @@ function tableData(schema: Schema, ids: Set<string>): HtmlTable[] {
           def: c.defaultValue ?? '',
           comment: c.comment ?? '',
         })),
-        indexes: t.indexes.map((i) => ({ name: i.name ?? '', unique: i.unique, columns: i.columnIds.map(col) })),
+        indexes: t.indexes.map((i) => ({ name: i.name ?? '', unique: i.unique, columns: [indexLabel(t, i)] })),
         refs: schema.relations.flatMap((r) => {
           const out: HtmlTable['refs'] = [];
           if (r.fromTableId === t.id) out.push({ table: nameOf(r.toTableId), id: r.toTableId, columns: r.fromColumnIds.map(col).join(', '), dir: 'out' });
