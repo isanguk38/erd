@@ -283,7 +283,10 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
         )}
       </section>
 
-      {remote ? (
+      {/* 서버의 연결 방식(로그인 모드/로컬 모드)을 알기 전에는 안내를 그리지 않는다 (잘못된 안내가 잠깐 보이지 않게) */}
+      {!info ? (
+        <p className="muted small">연결 방법을 불러오는 중…</p>
+      ) : remote ? (
         <>
           <section className="ai-section">
             <h4>Claude Code에 연결</h4>
