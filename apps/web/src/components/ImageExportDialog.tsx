@@ -8,25 +8,24 @@ import { downloadBlob, safeFileName } from '../lib/download';
 import { exportDiagram, exportSize, pngScale, type ExportTarget } from '../lib/exportImage';
 import { Modal } from './Modal';
 
-type Range = 'all' | 'visible' | 'related';
+type Range = 'all' | 'visible';
 type Format = 'png' | 'svg' | 'html';
 
-const RANGE_LABEL: Record<Range, string> = { all: '전체 ERD', visible: '지금 화면에 보이는 부분', related: '선택한 테이블 + 연결된 테이블' };
+const RANGE_LABEL: Record<Range, string> = { all: '전체 ERD', visible: '지금 화면에 보이는 부분' };
 
-/** 이미지로 내보내기: 범위(전체 / 지금 화면 / 선택한 테이블 주변)와 형식을 고른다 */
+/** ERD 도면 내보내기: 범위(전체 / 지금 화면)와 형식(HTML·PNG·SVG)을 고른다 */
 export function ImageExportDialog({ onClose }: { onClose: () => void }) {
   const projectName = useProjectName();
   const dialect = useDialect();
-  const selection = useStore((s) => s.selection);
-  const selectedTable = selection?.type === 'table' ? selection.id : null;
   const { getNodes, getEdges, getNodesBounds, screenToFlowPosition } = useReactFlow();
-  const [range, setRange] = useState<Range>(selectedTable ? 'related' : 'all');
+  const [range, setRange] = useState<Range>('all');
   const [format, setFormat] = useState<Format>('html');
   const [busy, setBusy] = useState(false);
 
   // 범위마다 들어갈 테이블과 관계선
   const targets = useMemo(() => {
-    const nodes = getNodes();
+    // 접힌 영역 안의 테이블은 화면에 없으므로 빼고, 영역 상자는 도면에 함께 그린다
+    const nodes = getNodes().filter((n) => !n.hidden);
     const edges = getEdges();
     const withEdges = (picked: Node[]): ExportTarget => {
       const ids = new Set(picked.map((n) => n.id));
@@ -44,15 +43,12 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
         return n.position.x + w > a.x && n.position.x < b.x && n.position.y + h > a.y && n.position.y < b.y;
       });
     }
-    // 선택한 테이블과 관계로 바로 이어진 테이블
-    const related = new Set(selectedTable ? [selectedTable] : []);
-    if (selectedTable) for (const e of edges) if (e.source === selectedTable || e.target === selectedTable) related.add(e.source).add(e.target);
     return {
-      all: { nodes, edgeIds: null } as ExportTarget,
+      all: withEdges(nodes),
       visible: withEdges(visible),
-      related: withEdges(nodes.filter((n) => related.has(n.id))),
-    };
-  }, [getNodes, getEdges, screenToFlowPosition, selectedTable]);
+    } as Record<Range, ExportTarget>;
+  }, [getNodes, getEdges, screenToFlowPosition]);
+  const tableCount = (r: Range) => targets[r].nodes.filter((n) => n.type === 'table').length;
 
   const target = targets[range];
   const size = target.nodes.length ? exportSize(target, getNodesBounds) : null;
@@ -66,7 +62,7 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
         format === 'html'
           ? diagramToHtml(target, getNodesBounds, useStore.getState().schema, { projectName, dialect: getDialect(dialect).label })
           : await exportDiagram(target, getNodesBounds, format);
-      const suffix = range === 'all' ? '' : range === 'visible' ? '_화면' : `_${useStore.getState().schema.tables.find((t) => t.id === selectedTable)?.name ?? '선택'}`;
+      const suffix = range === 'all' ? '' : '_화면';
       downloadBlob(blob, `${safeFileName(projectName + suffix)}.${format}`);
       onClose();
     } catch (e) {
@@ -90,11 +86,11 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
       <div className="form-grid wide-label">
         <label>범위</label>
         <div className="radio-list">
-          {(['all', 'visible', 'related'] as Range[]).map((r) => (
-            <label key={r} className={r === 'related' && !selectedTable ? 'disabled' : ''}>
-              <input type="radio" name="range" checked={range === r} disabled={r === 'related' && !selectedTable} onChange={() => setRange(r)} />
+          {(['all', 'visible'] as Range[]).map((r) => (
+            <label key={r}>
+              <input type="radio" name="range" checked={range === r} onChange={() => setRange(r)} />
               {RANGE_LABEL[r]}
-              <span className="muted small"> · 테이블 {targets[r].nodes.length}개{r === 'related' && !selectedTable ? ' (먼저 테이블을 클릭하세요)' : ''}</span>
+              <span className="muted small"> · 테이블 {tableCount(r)}개</span>
             </label>
           ))}
         </div>

@@ -56,6 +56,7 @@ export function updateTable(schema: Schema, tableId: string, patch: Partial<Omit
 export function removeTable(schema: Schema, tableId: string): void {
   schema.tables = schema.tables.filter((t) => t.id !== tableId);
   schema.relations = schema.relations.filter((r) => r.fromTableId !== tableId && r.toTableId !== tableId);
+  if (schema.areas) for (const a of schema.areas) if (a.tableIds.includes(tableId)) a.tableIds = a.tableIds.filter((id) => id !== tableId);
 }
 
 export function addColumn(schema: Schema, tableId: string, partial: Partial<Column> = {}, position?: number): Column {

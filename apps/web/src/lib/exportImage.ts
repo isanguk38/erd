@@ -30,8 +30,8 @@ function flowMapper(viewportEl: HTMLElement) {
 const SKIP = '.react-flow__handle, .peer-tags';
 
 /** 테이블 하나를 SVG 조각으로 */
-function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, clipId: string, tableId: string): string {
-  const out: string[] = [`<g data-table-id="${esc(tableId)}">`];
+function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, clipId: string, id: string, kind: string): string {
+  const out: string[] = [`<g ${kind === 'area' ? 'data-area-id' : 'data-table-id'}="${esc(id)}">`];
   const nodeStyle = getComputedStyle(nodeEl);
   const box = toFlow(nodeEl.getBoundingClientRect());
   const radius = parseFloat(nodeStyle.borderTopLeftRadius) || 0;
@@ -164,7 +164,7 @@ export function diagramToSvg({ nodes, edgeIds }: ExportTarget, getNodesBounds: (
   const ids = new Set(nodes.map((n) => n.id));
   const parts = [...viewportEl.querySelectorAll<HTMLElement>('.react-flow__node')]
     .filter((el) => ids.has(el.dataset.id ?? ''))
-    .map((el, i) => nodeToSvg((el.firstElementChild as HTMLElement) ?? el, toFlow, `c${i}`, el.dataset.id ?? ''));
+    .map((el, i) => nodeToSvg((el.firstElementChild as HTMLElement) ?? el, toFlow, `c${i}`, el.dataset.id ?? '', el.classList.contains('react-flow__node-area') ? 'area' : 'table'));
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<rect width="100%" height="100%" fill="${background}"/>` +

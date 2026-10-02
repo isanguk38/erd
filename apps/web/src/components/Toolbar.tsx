@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addTable, dialectList, type DialectId } from '@erd/core';
+import { createArea, dialectList, fitAreasToTables, type ColumnTemplate, type DialectId } from '@erd/core';
+import { addTableWithTemplate, useTemplates } from '../lib/templates';
+import { measuredSizeOf } from '../lib/sizes';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
@@ -11,7 +13,7 @@ import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
 import { loadModule } from '../lib/appVersion';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -133,15 +135,32 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     const positions = await autoLayout(useStore.getState().schema);
     edit((d) => {
       for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
+      // 테이블이 옮겨졌으니 영역도 안의 테이블에 맞춘다
+      fitAreasToTables(d, measuredSizeOf());
     });
     setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 50);
   };
 
-  const addTableAtCenter = () => {
-    const center = screenToFlowPosition({ x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 });
+  const viewCenter = () => {
+    const c = screenToFlowPosition({ x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 });
+    return { x: Math.round(c.x), y: Math.round(c.y) };
+  };
+  // 템플릿을 고르지 않으면 "새 테이블 기본" 템플릿이 들어간다
+  const addTableAtCenter = (template?: ColumnTemplate | null) => {
     edit((d) => {
-      const t = addTable(d, { position: { x: Math.round(center.x), y: Math.round(center.y) } });
+      const t = addTableWithTemplate(d, { position: viewCenter() }, template);
       select({ type: 'table', id: t.id });
+    });
+  };
+  const templates = useTemplates((s) => s.templates);
+  const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
+  useEffect(() => void useTemplates.getState().load(), []);
+
+  // 영역: 고른 테이블이 있으면 그것을 감싸고, 없으면 화면 가운데에 빈 영역
+  const addArea = () => {
+    const ids = useStore.getState().selectedTables;
+    edit((d) => {
+      createArea(d, ids.length ? { tableIds: ids, sizeOf: measuredSizeOf() } : { at: viewCenter() });
     });
   };
 
@@ -184,9 +203,29 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
       {/* 아래: 편집 도구 · DB · 버전 · 내보내기 */}
       <div className="toolstrip">
         <div className="tool-group">
-          <button className="btn btn-primary" disabled={!synced || readOnly} onClick={addTableAtCenter} title="테이블 추가 (빈 곳 더블클릭으로도 추가)">
-            <Icon name="plus" />
-            <span>테이블</span>
+          <div className="split-btn">
+            <button className="btn btn-primary" disabled={!synced || readOnly} onClick={() => addTableAtCenter()} title={`테이블 추가 (빈 곳 더블클릭으로도 추가)${defaultTemplateId ? ' · 기본 템플릿이 들어갑니다' : ''}`}>
+              <Icon name="plus" />
+              <span>테이블</span>
+            </button>
+            <Dropdown
+              label=""
+              title="템플릿을 골라 테이블 만들기 · 컬럼 템플릿 관리"
+              items={[
+                { label: '빈 테이블', hint: '템플릿 없이', disabled: !synced || readOnly, onClick: () => addTableAtCenter(null) },
+                ...templates.map((t) => ({
+                  label: t.name + (t.id === defaultTemplateId ? ' (기본)' : ''),
+                  hint: [...t.top, ...t.bottom].map((c) => c.name).join(', '),
+                  disabled: !synced || readOnly,
+                  onClick: () => addTableAtCenter(t),
+                })),
+                { label: '컬럼 템플릿 관리…', hint: '내 공통 컬럼 규격', onClick: () => onOpen('templates') },
+              ]}
+            />
+          </div>
+          <button className="btn btn-tool" disabled={!synced || readOnly} onClick={addArea} title="영역 만들기: 고른 테이블(Shift+드래그로 여러 개)을 색깔 상자로 묶습니다">
+            <Icon name="area" />
+            <span className="hide-narrow">영역</span>
           </button>
           <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
             {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>관계: {t.label}</option>)}

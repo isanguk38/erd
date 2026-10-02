@@ -1,7 +1,11 @@
-import { diffSchemas, foreignKeyColumnIds, type Dialect, type Schema, type Table } from '@erd/core';
+import { diffSchemas, foreignKeyColumnIds, hiddenTableIds, type Dialect, type Schema, type Table } from '@erd/core';
 import type { Peer, ViewMode } from '../store';
 import type { TableNodeType } from '../components/TableNode';
 import type { RelationEdgeType } from '../components/RelationEdge';
+import type { AreaNodeType } from '../components/AreaNode';
+
+/** 캔버스의 노드: 테이블과 영역 */
+export type ErdNode = TableNodeType | AreaNodeType;
 
 /** 스키마 → React Flow 노드. 이전 노드의 측정 크기는 유지한다 (관계선 계산에 필요). */
 /** 검색 중 강조: 맞는 테이블·컬럼, 결과에서 고른 것 */
@@ -14,19 +18,22 @@ export interface SearchMarks {
 export function buildNodes(
   schema: Schema,
   viewMode: ViewMode,
-  selectedId: string | null,
-  prev: TableNodeType[] = [],
+  selectedIds: ReadonlySet<string>,
+  prev: ErdNode[] = [],
   peers: Peer[] = [],
   search: SearchMarks | null = null,
 ): TableNodeType[] {
   const measured = new Map(prev.map((n) => [n.id, n.measured]));
   const peerMarks = (tableId: string) =>
     peers.filter((p) => p.selection?.type === 'table' && p.selection.id === tableId).map((p) => ({ name: p.name, color: p.color }));
+  const hidden = hiddenTableIds(schema);
   return schema.tables.map((table) => ({
     id: table.id,
     type: 'table',
     position: table.position,
-    selected: table.id === selectedId,
+    selected: selectedIds.has(table.id),
+    // 접힌 영역 안의 테이블은 숨긴다
+    hidden: hidden.has(table.id),
     measured: measured.get(table.id),
     data: {
       table,
@@ -40,12 +47,32 @@ export function buildNodes(
   }));
 }
 
+/** 영역 노드. 테이블 뒤에 깔린다 */
+export function buildAreaNodes(schema: Schema, prev: ErdNode[] = []): AreaNodeType[] {
+  const measured = new Map(prev.map((n) => [n.id, n.measured]));
+  // 영역 선택은 캔버스가 정한 값을 그대로 둔다
+  const selected = new Set(prev.filter((n) => n.type === 'area' && n.selected).map((n) => n.id));
+  const names = new Map(schema.tables.map((t) => [t.id, t.name]));
+  return (schema.areas ?? []).map((area) => ({
+    id: area.id,
+    type: 'area',
+    position: area.position,
+    selected: selected.has(area.id),
+    zIndex: -1,
+    measured: measured.get(area.id),
+    style: { width: area.size.width, height: area.collapsed ? undefined : area.size.height },
+    data: { area, tableNames: area.tableIds.map((id) => names.get(id)).filter((n): n is string => Boolean(n)) },
+  }));
+}
+
 export function buildEdges(schema: Schema, selectedId: string | null): RelationEdgeType[] {
+  const hidden = hiddenTableIds(schema);
   return schema.relations.map((r) => ({
     id: r.id,
     type: 'relation',
     source: r.toTableId, // 부모
     target: r.fromTableId, // 자식
+    hidden: hidden.has(r.toTableId) || hidden.has(r.fromTableId),
     selected: r.id === selectedId,
     data: { cardinality: r.cardinality },
   }));

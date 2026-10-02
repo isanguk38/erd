@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { useStore } from './store';
 import { Canvas } from './components/Canvas';
@@ -18,6 +18,9 @@ import { ShareDialog } from './components/ShareDialog';
 import { authApi } from './lib/api';
 import { HelpDialog } from './components/HelpDialog';
 import { SearchBox } from './components/SearchBox';
+import { MultiSelectPanel } from './components/MultiSelectPanel';
+import { TemplateManagerDialog } from './components/TemplatePanels';
+import { copySelection, pasteClipboard, selectAllTables } from './lib/tableClipboard';
 import { ImageExportDialog } from './components/ImageExportDialog';
 
 function isTyping(target: EventTarget | null): boolean {
@@ -128,6 +131,9 @@ function Editor({ projectId }: { projectId: string }) {
   const comparing = useStore((s) => Boolean(s.compare));
   const openError = useStore((s) => s.openError);
   const hasSelection = useStore((s) => Boolean(s.selection));
+  const multiSelected = useStore((s) => s.selectedTables.length > 1);
+  const dialogOpen = useRef(false);
+  dialogOpen.current = dialog !== null;
   const isEmpty = useStore((s) => s.schema.tables.length === 0);
   const role = useStore((s) => s.role);
 
@@ -157,6 +163,20 @@ function Editor({ projectId }: { projectId: string }) {
       } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
         e.preventDefault();
         useStore.getState().redo();
+      } else if (key === 'c' || key === 'v' || key === 'a') {
+        // 대화상자가 열려 있거나 글자를 고른 상태면 브라우저 기본 동작
+        if (dialogOpen.current || window.getSelection()?.toString()) return;
+        if (key === 'c') {
+          if (copySelection()) e.preventDefault();
+        } else if (key === 'v') {
+          const { role, compare } = useStore.getState();
+          if (role === 'viewer' || compare) return;
+          e.preventDefault();
+          void pasteClipboard();
+        } else {
+          e.preventDefault();
+          selectAllTables();
+        }
       }
     };
     window.addEventListener('keydown', onKey);
@@ -199,7 +219,7 @@ function Editor({ projectId }: { projectId: string }) {
             )}
             <Canvas fitRequest={fitRequest} />
           </div>
-          {comparing ? <ComparePanel /> : hasSelection ? <Inspector /> : null}
+          {comparing ? <ComparePanel /> : multiSelected ? <MultiSelectPanel /> : hasSelection ? <Inspector /> : null}
         </main>
         {dialog === 'sql' && <SqlDialog onClose={close} />}
         {dialog === 'versions' && <VersionsDialog onClose={close} />}
@@ -211,6 +231,7 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'share' && <ShareDialog onClose={close} />}
         {dialog === 'help' && <HelpDialog onClose={close} />}
         {dialog === 'image' && <ImageExportDialog onClose={close} />}
+        {dialog === 'templates' && <TemplateManagerDialog onClose={close} />}
       </div>
     </ReactFlowProvider>
   );

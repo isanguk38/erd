@@ -10,3 +10,6 @@ export * from './placement';
 export * from './commands';
 export * from './ydoc';
 export * from './syncPlan';
+export * from './areas';
+export * from './clipboard';
+export * from './templates';

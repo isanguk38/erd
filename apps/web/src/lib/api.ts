@@ -211,3 +211,8 @@ export const authApi = {
   revokeToken: (id: string) => request('DELETE', `/api/tokens/${id}`),
   project: (id: string) => request<{ role: Role }>('GET', `/api/projects/${id}`),
 };
+
+export const templateApi = {
+  get: () => request<import('@erd/core').TemplateSettings>('GET', '/api/templates'),
+  save: (settings: import('@erd/core').TemplateSettings) => request<import('@erd/core').TemplateSettings>('PUT', '/api/templates', settings),
+};

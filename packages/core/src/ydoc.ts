@@ -5,14 +5,16 @@
 // erd (Y.Map)
 //  ├ meta (Y.Map): name, dialect, aiMode ...
 //  ├ tables (Y.Map<tableId, Y.Map>): 테이블 필드 + columns(Y.Array<Y.Map>) + indexes(Y.Array<Index>)
-//  └ relations (Y.Map<relationId, Y.Map>)
+//  ├ relations (Y.Map<relationId, Y.Map>)
+//  └ areas (Y.Map<areaId, Y.Map>): 영역 (화면 정리용)
 
 import * as Y from 'yjs';
-import type { Column, Index, Relation, Schema, Table } from './model';
+import type { Area, Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
 const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'comment'] as const;
 const RELATION_FIELDS = ['name', 'fromTableId', 'fromColumnIds', 'toTableId', 'toColumnIds', 'cardinality', 'onDelete', 'onUpdate'] as const;
+const AREA_FIELDS = ['name', 'color', 'position', 'size', 'tableIds', 'collapsed'] as const;
 
 export function rootMap(doc: Y.Doc): Y.Map<unknown> {
   return doc.getMap('erd');
@@ -38,6 +40,10 @@ function tablesMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 
 function relationsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return child(rootMap(doc), 'relations', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
+}
+
+function areasMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return child(rootMap(doc), 'areas', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
 }
 
 function same(a: unknown, b: unknown): boolean {
@@ -106,6 +112,22 @@ export function writeSchema(doc: Y.Doc, schema: Schema): void {
     writeTable(map, table, order);
   });
 
+  // 영역은 schema.areas가 있을 때만 맞춘다 (없으면 기존 영역 유지)
+  if (schema.areas) {
+    const areas = areasMap(doc);
+    const wantedAreas = new Set(schema.areas.map((a) => a.id));
+    for (const id of [...areas.keys()]) if (!wantedAreas.has(id)) areas.delete(id);
+    for (const area of schema.areas) {
+      let map = areas.get(area.id);
+      if (!map) {
+        map = new Y.Map();
+        areas.set(area.id, map);
+      }
+      setIfChanged(map, 'id', area.id);
+      for (const f of AREA_FIELDS) setIfChanged(map, f, f === 'collapsed' ? area.collapsed || undefined : area[f]);
+    }
+  }
+
   const relations = relationsMap(doc);
   const wantedRelations = new Set(schema.relations.map((r) => r.id));
   for (const id of [...relations.keys()]) if (!wantedRelations.has(id)) relations.delete(id);
@@ -159,7 +181,24 @@ export function readSchema(doc: Y.Doc): Schema {
   });
   relations.sort((a, b) => a.id.localeCompare(b.id));
 
-  return { tables: tables.map(({ order: _order, ...t }) => t), relations };
+  const schema: Schema = { tables: tables.map(({ order: _order, ...t }) => t), relations };
+  // 영역이 하나라도 있을 때만 넣는다 (영역을 안 쓰는 프로젝트의 스키마 모양은 그대로)
+  const areasY = root.get('areas') as Y.Map<Y.Map<unknown>> | undefined;
+  if (areasY && areasY.size > 0) {
+    const areas: Area[] = [];
+    areasY.forEach((map, id) => {
+      const area = { id } as Area;
+      for (const f of AREA_FIELDS) {
+        const v = map.get(f);
+        if (v !== undefined) (area as unknown as Record<string, unknown>)[f] = structuredClone(v);
+      }
+      area.tableIds ??= [];
+      areas.push(area);
+    });
+    areas.sort((a, b) => a.id.localeCompare(b.id));
+    schema.areas = areas;
+  }
+  return schema;
 }
 
 export interface ProjectMeta {

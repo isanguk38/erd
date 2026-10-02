@@ -36,6 +36,8 @@ interface State extends LocalPrefs {
   schema: Schema;
   meta: ProjectMeta;
   selection: Selection;
+  /** 여러 테이블을 골랐을 때 (Shift 드래그, Ctrl 클릭). 하나만 골랐으면 selection과 같다 */
+  selectedTables: string[];
   status: SyncStatus;
   synced: boolean;
   peers: Peer[];
@@ -68,6 +70,8 @@ interface State extends LocalPrefs {
   undo: () => void;
   redo: () => void;
   select: (selection: Selection) => void;
+  /** 여러 테이블 고르기. 하나면 그 테이블을 고른 것과 같다 */
+  selectTables: (ids: string[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
   setViewMode: (mode: ViewMode) => void;
   setRelationTool: (tool: RelationTool) => void;
@@ -110,6 +114,7 @@ export const useStore = create<State>()(
         schema: emptySchema(),
         meta: emptyMeta,
         selection: null,
+        selectedTables: [],
         status: 'connecting',
         synced: false,
         peers: [],
@@ -131,7 +136,7 @@ export const useStore = create<State>()(
           if (me?.authEnabled && me.user) get().setUserName(me.user.name);
         },
 
-        setCompare: (compare) => set({ compare, selection: null }),
+        setCompare: (compare) => set({ compare, selection: null, selectedTables: [] }),
 
         open(projectId) {
           if (get().projectId === projectId) return;
@@ -167,7 +172,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, selection: null, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, selection: null, selectedTables: [], synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
           publishPresence();
           authApi
             .project(projectId)
@@ -207,7 +212,7 @@ export const useStore = create<State>()(
             draft.tables = copy.tables;
             draft.relations = copy.relations;
           });
-          set({ selection: null });
+          set({ selection: null, selectedTables: [] });
         },
 
         undo() {
@@ -218,8 +223,14 @@ export const useStore = create<State>()(
         },
 
         select(selection) {
-          set({ selection });
+          set({ selection, selectedTables: selection?.type === 'table' ? [selection.id] : [] });
           provider?.awareness.setLocalStateField('selection', selection);
+        },
+
+        selectTables(ids) {
+          if (ids.length === 1) return get().select({ type: 'table', id: ids[0] });
+          set({ selection: null, selectedTables: ids });
+          provider?.awareness.setLocalStateField('selection', null);
         },
 
         setCursor(cursor) {

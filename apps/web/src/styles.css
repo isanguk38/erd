@@ -510,3 +510,63 @@ label.btn { display: inline-flex; align-items: center; }
 .radio-list { display: flex; flex-direction: column; gap: 6px; }
 .form-grid .radio-list label { color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .form-grid .radio-list label.disabled { color: var(--muted); cursor: default; }
+
+/* 영역 (테이블 묶음) */
+.react-flow__node-area { padding: 0; border: none; background: transparent; }
+.area-node {
+  width: 100%; height: 100%; border: 2px solid var(--area-color); border-radius: 12px;
+  background: color-mix(in srgb, var(--area-color) 7%, transparent);
+}
+.area-node.selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--area-color) 40%, transparent); }
+.area-node__header {
+  position: relative; display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  background: color-mix(in srgb, var(--area-color) 16%, var(--panel)); border-radius: 10px 10px 0 0;
+  color: var(--text); font-size: 13px;
+}
+.area-node.collapsed .area-node__header { border-radius: 10px; }
+.area-node__toggle { border: none; background: none; cursor: pointer; color: var(--area-color); font-size: 14px; width: 18px; padding: 0; }
+.area-node__name { font-weight: 700; color: var(--area-color); cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.area-node__name-input { font: inherit; font-weight: 700; border: 1px solid var(--area-color); border-radius: 4px; padding: 1px 4px; min-width: 0; flex: 1; }
+.area-node__count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.area-node__tools { margin-left: auto; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
+.area-node:hover .area-node__tools, .area-node.selected .area-node__tools { opacity: 1; }
+.area-node__tools button { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 14px; padding: 0 4px; }
+.area-node__tools button:first-child { color: var(--area-color); }
+.area-node__tools button:hover { color: var(--text); }
+.area-node__colors { position: absolute; right: 6px; top: 100%; z-index: 5; display: flex; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.area-node__colors button { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.area-node__colors button.active { border-color: var(--text); }
+.area-node__list { padding: 6px 12px 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* + 테이블 ▾ */
+.split-btn { display: inline-flex; }
+.split-btn > .btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-btn .dropdown > .btn { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid rgba(255,255,255,.35); padding: 0 6px; background: var(--accent); color: #fff; border-color: var(--accent); }
+.split-btn .dropdown > .btn span:empty { display: none; }
+
+/* 여러 테이블 선택 */
+.multi-panel { width: 300px; }
+.multi-panel__list { list-style: none; padding: 0; margin: 0 0 12px; max-height: 40vh; overflow: auto; font-size: 13px; }
+.multi-panel__list li { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.multi-panel__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.react-flow__nodesselection-rect, .react-flow__selection { background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px dashed var(--accent); }
+
+/* 컬럼 템플릿 */
+.tpl-layout { display: grid; grid-template-columns: 200px 1fr; gap: 16px; min-height: 320px; }
+.tpl-list { display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); padding-right: 12px; }
+.tpl-list > button:not(.btn) { text-align: left; border: none; background: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; color: var(--text); font: inherit; }
+.tpl-list > button:not(.btn):hover { background: var(--hover, #f1f5f9); }
+.tpl-list > button.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tpl-list .tag { font-size: 11px; background: var(--accent); color: #fff; border-radius: 4px; padding: 0 5px; }
+.tpl-samples { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.tpl-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tpl-name { flex: 1; font-size: 15px; font-weight: 600; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+.tpl-default { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tpl-section { margin-top: 12px; }
+.tpl-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tpl-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 3px; }
+.tpl-table td { padding: 2px 3px; }
+.tpl-table input:not([type]) , .tpl-table input[type="text"] { width: 100%; min-width: 60px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--text); font: inherit; }
+.tpl-table input.narrow { min-width: 44px; width: 52px; }
+.btn-danger-text { color: var(--drop, #dc2626); }
+.btn.small { font-size: 12px; padding: 2px 6px; }

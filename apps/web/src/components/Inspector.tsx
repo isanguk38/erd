@@ -22,6 +22,7 @@ import {
   type Table,
 } from '@erd/core';
 import { useStore } from '../store';
+import { TemplateApplyMenu } from './TemplatePanels';
 import { useDialect } from '../lib/hooks';
 
 const ACTIONS: ReferentialAction[] = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
@@ -93,16 +94,19 @@ function TableEditor({ table }: { table: Table }) {
     <aside className="inspector">
       <div className="inspector__head">
         <h3>테이블</h3>
-        <button
-          className="btn btn-danger btn-sm"
-          onClick={() => {
-            if (!confirm(`${table.name} 테이블을 삭제할까요?`)) return;
-            edit((d) => removeTable(d, table.id));
-            select(null);
-          }}
-        >
-          삭제
-        </button>
+        <div className="btn-row">
+          <TemplateApplyMenu tableIds={[table.id]} />
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={() => {
+              if (!confirm(`${table.name} 테이블을 삭제할까요?`)) return;
+              edit((d) => removeTable(d, table.id));
+              select(null);
+            }}
+          >
+            삭제
+          </button>
+        </div>
       </div>
       <div className="form-grid">
         <label>물리명</label>

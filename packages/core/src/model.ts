@@ -59,9 +59,26 @@ export interface Relation {
   onUpdate: ReferentialAction;
 }
 
+/**
+ * 영역: 관련 테이블을 색깔 상자로 묶는다 (화면 정리용, SQL에는 영향 없음).
+ * 상자를 옮기면 안의 테이블도 함께 옮겨지고, 접으면 안의 테이블을 숨긴다.
+ */
+export interface Area {
+  id: string;
+  name: string;
+  color: string;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  /** 이 영역에 속한 테이블 */
+  tableIds: string[];
+  collapsed?: boolean;
+}
+
 export interface Schema {
   tables: Table[];
   relations: Relation[];
+  /** 영역. undefined면 "영역은 건드리지 않음"으로 다룬다 (DB 가져오기·버전 복원 등이 영역을 지우지 않게) */
+  areas?: Area[];
 }
 
 export function emptySchema(): Schema {

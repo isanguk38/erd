@@ -9,6 +9,7 @@ import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
 import { ProjectStore } from './projects';
 import { registerProjectRoutes } from './routes/projects';
 import { registerAuthRoutes, requiredRole } from './routes/auth';
+import { registerTemplateRoutes } from './routes/templates';
 import { createSyncServer } from './ws';
 import { loadMcpToken, registerMcpRoute } from './mcp';
 import { atLeast, Auth, DESKTOP_ONLY_MESSAGE, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
@@ -217,6 +218,7 @@ export function buildApp(options: AppOptions): ErdApp {
   });
 
   registerAuthRoutes(app, auth, projects, serverDb);
+  registerTemplateRoutes(app, storage);
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
   registerMcpRoute(app, { auth, localToken: mcpToken, webUrl: publicUrl });
 
