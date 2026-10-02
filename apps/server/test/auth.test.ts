@@ -212,5 +212,5 @@ describe('PostgreSQL 저장소 (배포용)', () => {
     expect(conns).toMatchObject([{ name: 'c', hasPassword: true }]);
     // 같은 키로 비밀번호를 복호화할 수 있다
     expect(second.connections.config(conns[0].id, 'local').password).toBe('pw');
-  });
+  }, 20000); // PGlite(WASM)를 두 번 띄워 느린 PC에서는 5초를 넘길 수 있다
 });
