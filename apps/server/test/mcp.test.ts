@@ -59,6 +59,28 @@ describe('MCP', () => {
     expect(sql).toContain('CREATE TABLE member');
     expect(sql).toContain('FOREIGN KEY (member_id) REFERENCES member (member_id) ON DELETE CASCADE');
 
+    // 설계 검사: 컬럼 논리명이 비어 있는 것을 알려주고, 고치면 사라진다
+    const lint = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
+    expect(lint.summary).toContain('참고');
+    expect(lint.issues.map((i: { table: string; column?: string }) => `${i.table}.${i.column ?? ''}`)).toEqual(
+      expect.arrayContaining(['member.member_id', 'member.email', 'orders.order_id', 'orders.member_id']),
+    );
+    await client.callTool({
+      name: 'edit_schema',
+      arguments: {
+        project: '쇼핑몰',
+        commands: [
+          { op: 'updateColumn', table: 'member', column: 'member_id', changes: { logicalName: '회원번호' } },
+          { op: 'updateColumn', table: 'member', column: 'email', changes: { logicalName: '이메일' } },
+          { op: 'updateColumn', table: 'orders', column: 'order_id', changes: { logicalName: '주문번호' } },
+        ],
+      },
+    });
+    // FK 컬럼은 관계를 만들 때 부모 논리명(그때는 비어 있음)을 물려받았으므로 그것만 남는다
+    const remaining = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
+    expect(remaining.summary).toBe('오류 0 · 경고 0 · 참고 1');
+    expect(remaining.issues[0].message).toContain('orders.member_id');
+
     // 화면(서버 문서)에도 반영됨 + AI 작업으로 기록됨
     const id = erd.projects.list()[0].id;
     expect(erd.projects.meta(id).aiSession?.changeCount).toBeGreaterThan(0);

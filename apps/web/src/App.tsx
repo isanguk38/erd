@@ -20,6 +20,7 @@ import { HelpDialog } from './components/HelpDialog';
 import { SearchBox } from './components/SearchBox';
 import { MultiSelectPanel } from './components/MultiSelectPanel';
 import { TemplateManagerDialog } from './components/TemplatePanels';
+import { LintPanel } from './components/LintPanel';
 import { copySelection, pasteClipboard, selectAllTables } from './lib/tableClipboard';
 import { ImageExportDialog } from './components/ImageExportDialog';
 
@@ -132,6 +133,9 @@ function Editor({ projectId }: { projectId: string }) {
   const openError = useStore((s) => s.openError);
   const hasSelection = useStore((s) => Boolean(s.selection));
   const multiSelected = useStore((s) => s.selectedTables.length > 1);
+  const [lintOpen, setLintOpen] = useState(false);
+  // 설계 검사는 캔버스 옆 패널(열고 닫기), 나머지는 대화상자
+  const openDialog = (name: DialogName | null) => (name === 'lint' ? setLintOpen((v) => !v) : setDialog(name));
   const dialogOpen = useRef(false);
   dialogOpen.current = dialog !== null;
   const isEmpty = useStore((s) => s.schema.tables.length === 0);
@@ -192,7 +196,7 @@ function Editor({ projectId }: { projectId: string }) {
   return (
     <ReactFlowProvider>
       <div className="app">
-        <Toolbar onOpen={setDialog} />
+        <Toolbar onOpen={openDialog} />
         <main className="workspace">
           <div className="canvas">
             {comparing ? <CompareBanner /> : <AiBanner onOpenProposals={() => setDialog('proposals')} />}
@@ -210,6 +214,7 @@ function Editor({ projectId }: { projectId: string }) {
               </div>
             )}
             <SearchBox />
+            {lintOpen && !comparing && <LintPanel onClose={() => setLintOpen(false)} onOpenAi={() => setDialog('ai')} />}
             {synced && isEmpty && !comparing && (
               <div className="empty-canvas">
                 <h3>빈 ERD입니다</h3>

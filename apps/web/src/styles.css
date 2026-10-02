@@ -570,3 +570,40 @@ label.btn { display: inline-flex; align-items: center; }
 .tpl-table input.narrow { min-width: 44px; width: 52px; }
 .btn-danger-text { color: var(--drop, #dc2626); }
 .btn.small { font-size: 12px; padding: 2px 6px; }
+
+/* 설계 검사 */
+.lint-panel {
+  position: absolute; top: 12px; left: 12px; z-index: 20; width: 380px; max-height: calc(100% - 24px);
+  display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(15 23 42 / 0.18);
+}
+.lint-panel__head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.lint-panel__head h3 { margin: 0; font-size: 14px; }
+.lint-panel__head .icon-btn { margin-left: auto; }
+.lint-summary { display: flex; gap: 6px; font-size: 12px; }
+.sev { padding: 1px 6px; border-radius: 10px; }
+.sev-error { background: var(--danger-soft); color: var(--danger); }
+.sev-warning { background: var(--warning-soft); color: var(--warning); }
+.sev-info { background: var(--accent-soft); color: var(--accent); }
+.sev-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.sev-dot.sev-error { background: var(--danger); }
+.sev-dot.sev-warning { background: var(--warning); }
+.sev-dot.sev-info { background: var(--accent); }
+.lint-groups { overflow: auto; padding: 6px 8px; }
+.lint-group { border-bottom: 1px solid var(--border); }
+.lint-group:last-child { border-bottom: none; }
+.lint-group__head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 4px; border: none; background: none; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
+.lint-group__chev { margin-left: auto; color: var(--muted); }
+.lint-group__desc { margin: 0 4px 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.lint-group ul { list-style: none; margin: 0 0 8px; padding: 0; }
+.lint-group li { display: flex; align-items: center; gap: 6px; }
+.lint-item { flex: 1; text-align: left; border: none; background: none; padding: 4px 6px; border-radius: 6px; cursor: pointer; color: var(--text); font: inherit; font-size: 12px; }
+.lint-item:hover { background: var(--accent-soft); }
+.lint-empty { display: flex; flex-direction: column; align-items: center; padding: 24px; color: var(--create); }
+.lint-empty p { margin: 6px 0 0; color: var(--text); }
+.lint-panel__foot { display: flex; gap: 6px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--border); }
+.db-badge.lint { background: var(--warning); }
+@media (max-width: 1150px) {
+  .desktop-link span { display: none; }
+  .tool-select { max-width: 132px; }
+}

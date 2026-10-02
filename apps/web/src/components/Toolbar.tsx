@@ -3,6 +3,7 @@ import { useReactFlow } from '@xyflow/react';
 import { createArea, dialectList, fitAreasToTables, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { measuredSizeOf } from '../lib/sizes';
+import { useLintCount } from './LintPanel';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
@@ -13,7 +14,7 @@ import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
 import { loadModule } from '../lib/appVersion';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -152,6 +153,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
       select({ type: 'table', id: t.id });
     });
   };
+  const lintCount = useLintCount();
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -184,6 +186,11 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <Icon name="search" />
           <span className="hide-narrow">검색</span>
           <kbd className="hide-narrow">Ctrl F</kbd>
+        </button>
+        <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('lint')} title="설계 검사: 기본키·FK·인덱스·이름 규칙·논리명 등">
+          <Icon name="check" />
+          <span className="hide-narrow">설계 검사</span>
+          {lintCount > 0 && <span className="db-badge lint">{lintCount}</span>}
         </button>
         <button className="btn btn-ghost icon-only" onClick={() => onOpen('help')} title="사용 방법 · 단축키">
           <Icon name="help" />

@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { describeSchema, type Schema } from '@erd/core';
+import { describeSchema, LINT_RULES, lintSchema, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -118,6 +118,31 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       const p = await resolveProject(project);
       const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
       return text({ project: { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id) }, ...describeSchema(schema) });
+    }),
+  );
+
+  server.registerTool(
+    'check_design',
+    {
+      title: '설계 검사',
+      description: [
+        'ERD의 설계 문제(기본키 없음, FK 타입 불일치, FK 인덱스 없음, 이름 규칙 섞임, 논리명 없음, 중복 인덱스, 문자 길이 없음)를 찾는다.',
+        '고칠 때는 edit_schema를 쓰고, 고친 뒤 다시 호출해 남은 문제를 확인한다. 논리명은 한글로 넣는다.',
+      ].join(' '),
+      inputSchema: { project: projectArg },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async ({ project }: { project: string }) => {
+      const p = await resolveProject(project);
+      const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
+      const issues = lintSchema(schema, String(meta.dialect ?? 'mysql'));
+      if (!issues.length) return text('설계 검사: 문제 없음');
+      const counts = { error: 0, warning: 0, info: 0 };
+      for (const i of issues) counts[i.severity]++;
+      return text({
+        summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}`,
+        issues: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
+      });
     }),
   );
 

@@ -13,3 +13,4 @@ export * from './syncPlan';
 export * from './areas';
 export * from './clipboard';
 export * from './templates';
+export * from './lint';
