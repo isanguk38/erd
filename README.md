@@ -1,9 +1,11 @@
 # ERD
 
+[![CI](https://github.com/isanguk38/erd/actions/workflows/ci.yml/badge.svg)](https://github.com/isanguk38/erd/actions/workflows/ci.yml)
+
 **DB와 바로 동기화하고, 여러 사람·AI와 함께 설계하는 ERD 도구.**
 
 ERD를 그리는 도구는 많지만, 실무에서 가장 귀찮은 건 **DB를 고친 뒤 ERD를 다시 맞추는 일**과 **ERD를 고친 뒤 ALTER 문을 손으로 짜는 일**입니다.
-이 도구는 MySQL·PostgreSQL에 직접 연결해 두 방향을 모두 자동으로 처리하고, 그 과정에서 **데이터를 잃지 않도록** 설계했습니다.
+이 도구는 MySQL·MariaDB·PostgreSQL·Oracle·SQL Server에 직접 연결해 두 방향을 모두 자동으로 처리하고, 그 과정에서 **데이터를 잃지 않도록** 설계했습니다.
 
 ![AI가 ERD를 고치는 모습이 실시간으로 반영되고, 한 번에 되돌린다](docs/images/ai-live.gif)
 
@@ -22,6 +24,23 @@ ERD를 그리는 도구는 많지만, 실무에서 가장 귀찮은 건 **DB를 
 | **테이블 정의서 Excel** | 표지·목록·테이블별 컬럼/인덱스/FK·변경 이력 (국내 SI·공공 산출물 양식) |
 | **버전 비교** | 이전 버전과 지금 ERD를 캔버스에 겹쳐 추가(초록)/변경(노랑)/삭제(빨강)로 표시 |
 | **로그인·공유** | GitHub 로그인, 프로젝트별 소유자/편집/보기 권한, 초대 링크 |
+| **설계 검사** | 기본키 없음, FK 타입 불일치, FK 인덱스 없음, 이름 규칙(snake_case/camelCase) 섞임, 논리명 없음, 중복 인덱스를 찾아 목록으로. 클릭하면 이동, FK 인덱스는 바로 추가, AI에게 고쳐 달라고 할 수 있음(MCP `check_design`) |
+| **영역 · 여러 개 선택** | 관련 테이블을 색깔 상자로 묶고(접기·함께 옮기기), Shift+드래그·Ctrl+클릭으로 여러 개 골라 옮기기·복사/붙여넣기 |
+| **컬럼 템플릿** | 계정별 공통 컬럼 규격(id, created_at …)을 저장해 새 테이블에 자동으로, 기존 테이블에 골라서 적용 |
+| **댓글 · 변경 강조** | 테이블·컬럼 댓글과 "확인 요청", 다른 사람·AI가 바꾼 곳을 잠깐 강조 |
+| **도면 내보내기** | HTML 한 파일(확대·검색·컬럼 상세), 벡터 SVG, 고해상도 PNG |
+| **다크 모드** | 시스템 설정 따르기 / 라이트 / 다크 |
+
+### 지원 DB
+
+| DB | SQL 추출 | DB에서 가져오기 · DB로 내보내기 | 실행 방식 |
+|---|---|---|---|
+| MySQL 8 · MariaDB 10.5+ | ✅ | ✅ (mysql2) | 한 문장씩, 실패하면 멈춤 (DDL은 되돌릴 수 없음) |
+| PostgreSQL 12+ | ✅ | ✅ (pg) | 한 트랜잭션, 실패하면 모두 되돌림 |
+| SQL Server 2016+ · Azure SQL | ✅ | ✅ (mssql) | 한 트랜잭션, 실패하면 모두 되돌림 |
+| Oracle 12c+ | ✅ | ✅ (oracledb Thin, 클라이언트 설치 불필요) | 한 문장씩, 실패하면 멈춤 |
+
+CI에서 MySQL·MariaDB·Oracle·SQL Server 실제 컨테이너로 "ERD로 만들기 → 다시 읽기 → 차이 0", "바뀐 부분만 ALTER, 데이터 보존"을 매번 확인합니다.
 
 ### DB로 내보내기 — 바뀐 부분만, 누가 바꿨는지 구분해서
 
@@ -174,5 +193,8 @@ AI가 DB에 SQL을 실행하는 것은 기본으로 막혀 있습니다.
 npm test                                             # 단위 + PostgreSQL(PGlite) + 서버·권한·MCP
 ERD_TEST_MYSQL=mysql://root@127.0.0.1:3306 npm test  # 실제 MySQL 통합 테스트 포함 (임시 DB를 만들고 지움)
 ```
+
+실제 DB 테스트는 주소를 주면 실행합니다 (`ERD_TEST_MARIADB`, `ERD_TEST_ORACLE=oracle://system:pw@host:1521/FREEPDB1`, `ERD_TEST_MSSQL`).
+GitHub Actions(`.github/workflows/ci.yml`)는 푸시할 때마다 타입 검사·전체 테스트·빌드와 네 가지 DB 컨테이너 왕복 테스트를 실행합니다.
 
 자세한 설계는 [docs/DESIGN.md](docs/DESIGN.md).
