@@ -593,7 +593,7 @@ label.btn { display: inline-flex; align-items: center; }
 .sev-dot.sev-error { background: var(--danger); }
 .sev-dot.sev-warning { background: var(--warning); }
 .sev-dot.sev-info { background: var(--accent); }
-.lint-groups { overflow: auto; padding: 6px 8px; }
+.lint-groups { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 8px; }
 .lint-group { border-bottom: 1px solid var(--border); }
 .lint-group:last-child { border-bottom: none; }
 .lint-group__head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 4px; border: none; background: none; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
@@ -643,8 +643,10 @@ label.btn { display: inline-flex; align-items: center; }
 .theme-auto { font-size: 9px; font-weight: 700; margin-left: -4px; align-self: flex-end; color: var(--muted); }
 .lint-ignore { opacity: 0; transition: opacity .15s; }
 .lint-group li:hover .lint-ignore, .lint-ignore:focus { opacity: 1; }
-.lint-ignored { border-top: 1px solid var(--border); padding: 0 8px 6px; max-height: 30%; overflow: auto; }
-.lint-ignored ul { list-style: none; margin: 0; padding: 0; }
+/* 무시한 항목: 머리줄은 줄어들지 않고, 펼친 목록만 스크롤 */
+.lint-ignored { flex: none; border-top: 1px solid var(--border); padding: 0 8px; }
+.lint-ignored ul { list-style: none; margin: 0 0 6px; padding: 0; max-height: 180px; overflow: auto; }
+.lint-group__head:focus:not(:focus-visible) { outline: none; }
 .lint-ignored li { display: flex; align-items: center; gap: 6px; }
 .multi-comment { margin: 12px 0; }
 .multi-comment h4 { margin: 0 0 6px; }
