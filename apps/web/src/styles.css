@@ -677,3 +677,4 @@ label.btn { display: inline-flex; align-items: center; }
 .release-notes p { margin: 4px 0; }
 .notice-box { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, #16a34a 12%, transparent); font-size: 13px; }
 .projects-page__title .btn-update { margin-left: auto; }
+.token-list .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }

@@ -169,12 +169,14 @@ describe('로그인 모드: 실시간 편집 권한', () => {
 
 describe('로그인 모드: 개인 MCP 토큰', () => {
   it('토큰 주인의 프로젝트만 다루고, 취소하면 쓸 수 없다', async () => {
-    const { app } = setup();
+    const erd = setup();
+    const { app } = erd;
     const a = await login(app, 'a');
+    const userA = (await app.inject({ method: 'GET', url: '/api/me', headers: { cookie: a } })).json().user;
     const b = await login(app, 'b');
     await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'A 프로젝트' }, headers: { cookie: a } });
     await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'B 프로젝트' }, headers: { cookie: b } });
-    const token = (await app.inject({ method: 'POST', url: '/api/tokens', payload: { name: 'Claude' }, headers: { cookie: a } })).json();
+    const token = erd.auth.createToken(userA.id, 'Claude'); // 예전 방식 토큰 (새로 만드는 화면은 없어졌다)
     expect(token.token).toMatch(/^erd_/);
     // 목록에는 원문이 없다
     expect(JSON.stringify((await app.inject({ method: 'GET', url: '/api/tokens', headers: { cookie: a } })).json())).not.toContain(token.token);

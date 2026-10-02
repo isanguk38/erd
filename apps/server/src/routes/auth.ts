@@ -74,9 +74,8 @@ export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: P
     return { ok: true };
   });
 
-  // ── 개인 액세스 토큰 (MCP 연결용) ─────────────────────────────
+  // ── 예전 방식 개인 토큰: 새로 만들지 않는다 (MCP는 로그인으로 연결). 이미 있는 토큰은 보고 끊을 수 있다 ──
   app.get('/api/tokens', async (req) => auth.listTokens(req.user.id));
-  app.post<{ Body: { name?: string } }>('/api/tokens', async (req) => auth.createToken(req.user.id, req.body?.name ?? 'MCP'));
   app.delete<{ Params: { tokenId: string } }>('/api/tokens/:tokenId', async (req) => {
     auth.revokeToken(req.user.id, req.params.tokenId);
     return { ok: true };

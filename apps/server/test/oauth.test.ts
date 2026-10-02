@@ -149,10 +149,27 @@ describe('MCP 로그인 (OAuth)', () => {
     expect(noLogin.statusCode).toBe(401);
   });
 
-  it('기존 개인 토큰(erd_...)도 그대로 쓴다', async () => {
+  it('같은 앱으로 다시 로그인(재인증)하면 연결이 쌓이지 않고 바뀐다', async () => {
     const { app } = setup();
+    const exchange = async (c: Awaited<ReturnType<typeof connect>>) =>
+      (await app.inject({ method: 'POST', url: '/oauth/token', ...form({ grant_type: 'authorization_code', code: c.code, client_id: c.client.client_id, redirect_uri: REDIRECT, code_verifier: c.verifier }) })).json();
+    const first = await connect(app);
+    const t1 = await exchange(first);
+    const second = await connect(app); // 재인증: 클라이언트가 다시 등록·로그인한다
+    const t2 = await exchange(second);
+    const grants = (await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: second.cookie } })).json();
+    expect(grants.map((g: { clientName: string }) => g.clientName)).toEqual(['Claude Code']);
+    expect((await mcpList(app, t1.access_token)).statusCode).toBe(401);
+    expect((await mcpList(app, t2.access_token)).statusCode).toBe(200);
+  });
+
+  it('예전 방식 토큰(erd_...)은 새로 만들 수 없지만, 이미 있는 것은 그대로 쓴다', async () => {
+    const erd = setup();
+    const { app } = erd;
     const cookie = ((await app.inject({ method: 'POST', url: '/auth/dev', payload: { name: 'b' } })).headers['set-cookie'] as string).split(';')[0];
-    const { token } = (await app.inject({ method: 'POST', url: '/api/tokens', headers: { cookie }, payload: { name: 'MCP' } })).json();
+    expect((await app.inject({ method: 'POST', url: '/api/tokens', headers: { cookie }, payload: { name: 'MCP' } })).statusCode).toBe(404);
+    const me = (await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json().user;
+    const { token } = erd.auth.createToken(me.id, 'MCP');
     expect((await mcpList(app, token)).statusCode).toBe(200);
   });
 });

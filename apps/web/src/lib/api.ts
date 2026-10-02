@@ -207,7 +207,6 @@ export const authApi = {
   setMemberRole: (projectId: string, userId: string, role: 'editor' | 'viewer') => request('PATCH', `/api/projects/${projectId}/members/${userId}`, { role }),
   removeMember: (projectId: string, userId: string) => request('DELETE', `/api/projects/${projectId}/members/${userId}`),
   tokens: () => request<TokenInfo[]>('GET', '/api/tokens'),
-  createToken: (name: string) => request<TokenInfo & { token: string }>('POST', '/api/tokens', { name }),
   revokeToken: (id: string) => request('DELETE', `/api/tokens/${id}`),
   /** MCP 로그인(OAuth)으로 연결된 앱 */
   oauthGrants: () => request<{ id: string; clientName: string; createdAt: string; lastUsedAt?: string }[]>('GET', '/api/oauth/grants'),

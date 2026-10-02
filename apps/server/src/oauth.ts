@@ -159,6 +159,10 @@ export class OAuthStore {
     if (!verifier || !safeEqual(challenge, record.codeChallenge)) throw new OAuthError('invalid_grant', 'code_verifier가 맞지 않습니다');
     const client = this.client(record.clientId);
     const grant: OAuthGrant = { id: randomUUID(), userId: record.userId, clientId: record.clientId, clientName: client?.client_name ?? 'MCP 클라이언트', createdAt: new Date().toISOString() };
+    // 같은 사람이 같은 앱으로 다시 로그인(재인증)하면 이전 연결을 이 연결로 바꾼다 (목록에 쌓이지 않게, 이전 토큰은 무효)
+    for (const old of this.listGrants(grant.userId)) {
+      if (old.clientName === grant.clientName) this.storage.delete(`oauth/grants/${old.id}.json`);
+    }
     putJson(this.storage, `oauth/grants/${grant.id}.json`, grant);
     return this.issue(grant, record.scope);
   }

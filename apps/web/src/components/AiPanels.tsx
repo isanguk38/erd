@@ -160,83 +160,50 @@ function ProposalChanges({ changes, chosen, onToggle }: { changes: ChangeSummary
   );
 }
 
-/** 개인 액세스 토큰 (로그인 모드). 만든 직후 한 번만 원문을 보여준다. */
-function TokenManager({ onCreated }: { onCreated: (token: string) => void }) {
-  const [tokens, setTokens] = useState<TokenInfo[]>([]);
-  const [name, setName] = useState('Claude');
-  const [fresh, setFresh] = useState('');
-  const load = () => authApi.tokens().then(setTokens).catch(() => setTokens([]));
-  useEffect(() => {
-    load();
-  }, []);
-  return (
-    <div className="token-manager">
-      <div className="toolbar-row">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="토큰 이름 (예: 회사 노트북 Claude)" />
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={async () => {
-            const t = await authApi.createToken(name);
-            setFresh(t.token);
-            onCreated(t.token);
-            load();
-          }}
-        >
-          새 토큰 만들기
-        </button>
-      </div>
-      {fresh && (
-        <div className="ok-box">
-          지금만 보여드립니다. 복사해 두세요: <code>{fresh}</code>
-          <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(fresh)}>복사</button>
-        </div>
-      )}
-      <ul className="token-list">
-        {tokens.map((t) => (
-          <li key={t.id}>
-            <b>{t.name}</b>
-            <code>{t.prefix}…</code>
-            <span className="muted small">
-              {new Date(t.createdAt).toLocaleDateString()} 생성{t.lastUsedAt ? ` · ${new Date(t.lastUsedAt).toLocaleDateString()} 사용` : ''}
-            </span>
-            <button
-              className="btn btn-sm btn-danger"
-              onClick={async () => {
-                if (!confirm(`"${t.name}" 토큰을 취소할까요? 이 토큰을 쓰는 AI는 더 이상 연결할 수 없습니다.`)) return;
-                await authApi.revokeToken(t.id);
-                load();
-              }}
-            >
-              취소
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+type Grant = Awaited<ReturnType<typeof authApi.oauthGrants>>[number];
 
-/** MCP 로그인(OAuth)으로 연결된 앱. 끊으면 그 앱은 다시 로그인해야 한다 */
-function ConnectedApps() {
-  const [grants, setGrants] = useState<Awaited<ReturnType<typeof authApi.oauthGrants>>>([]);
-  const load = () => authApi.oauthGrants().then(setGrants).catch(() => setGrants([]));
+/** 연결된 AI 목록 (로그인으로 연결한 앱, 예전 방식 토큰). 끊으면 그 AI는 더 이상 ERD를 쓸 수 없다 */
+function AiConnections() {
+  const [grants, setGrants] = useState<Grant[]>([]);
+  const [tokens, setTokens] = useState<TokenInfo[]>([]);
+  const load = () => {
+    authApi.oauthGrants().then(setGrants).catch(() => setGrants([]));
+    authApi.tokens().then(setTokens).catch(() => setTokens([]));
+  };
   useEffect(() => {
     load();
   }, []);
-  if (!grants.length) return <p className="muted small">아직 로그인으로 연결한 앱이 없습니다.</p>;
+  const date = (v?: string) => (v ? new Date(v).toLocaleDateString() : '');
+  if (!grants.length && !tokens.length) return <p className="muted small">아직 연결된 AI가 없습니다.</p>;
   return (
     <ul className="token-list">
       {grants.map((g) => (
         <li key={g.id}>
           <b>{g.clientName}</b>
-          <span className="muted small">
-            {new Date(g.createdAt).toLocaleDateString()} 연결{g.lastUsedAt ? ` · ${new Date(g.lastUsedAt).toLocaleDateString()} 사용` : ''}
-          </span>
+          <span className="tag">로그인</span>
+          <span className="muted small">{date(g.createdAt)} 연결{g.lastUsedAt ? ` · ${date(g.lastUsedAt)} 사용` : ''}</span>
           <button
             className="btn btn-sm btn-danger"
             onClick={async () => {
               if (!confirm(`"${g.clientName}" 연결을 끊을까요? 그 앱은 다시 로그인해야 ERD를 쓸 수 있습니다.`)) return;
               await authApi.revokeOauthGrant(g.id);
+              load();
+            }}
+          >
+            연결 끊기
+          </button>
+        </li>
+      ))}
+      {tokens.map((t) => (
+        <li key={t.id}>
+          <b>{t.name}</b>
+          <span className="tag" title="예전 방식(토큰 직접 붙이기). 로그인으로 다시 연결했다면 끊어도 됩니다">예전 방식 토큰 {t.prefix}…</span>
+          <span className="muted small">{date(t.createdAt)} 생성{t.lastUsedAt ? ` · ${date(t.lastUsedAt)} 사용` : ''}</span>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={async () => {
+              if (!confirm(`"${t.name}" 토큰을 취소할까요? 이 토큰을 쓰는 AI는 더 이상 연결할 수 없습니다.`)) return;
+              await authApi.revokeToken(t.id);
               load();
             }}
           >
@@ -255,7 +222,6 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
   const role = useStore((s) => s.role);
   const [info, setInfo] = useState<{ authEnabled: boolean; url: string; token: string | null; serverUrl: string; mcpCommand: string[] } | null>(null);
   const [showToken, setShowToken] = useState(false);
-  const [newToken, setNewToken] = useState('');
   const [copied, setCopied] = useState('');
 
   useEffect(() => {
@@ -270,17 +236,6 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
 
   const remote = Boolean(info?.authEnabled);
   const mcpUrl = info?.url ?? '';
-
-  // 배포(로그인) 모드: 코드를 내려받지 않고 주소 + 개인 토큰만으로 연결한다 (원격 MCP)
-  const tokenText = newToken || '<위에서 만든 토큰>';
-  const remoteClaudeCode = `claude mcp add --transport http erd ${mcpUrl} --header "Authorization: Bearer ${tokenText}"`;
-  const remoteCursor = JSON.stringify({ mcpServers: { erd: { url: mcpUrl, headers: { Authorization: `Bearer ${tokenText}` } } } }, null, 2);
-  // Claude Desktop 설정 파일은 원격 주소를 직접 못 받아서, npm의 mcp-remote가 대신 연결해 준다 (Node.js만 있으면 됨)
-  const remoteDesktop = JSON.stringify(
-    { mcpServers: { erd: { command: 'npx', args: ['-y', 'mcp-remote', mcpUrl, '--header', 'Authorization:${ERD_AUTH}'], env: { ERD_AUTH: `Bearer ${tokenText}` } } } },
-    null,
-    2,
-  );
 
   // 로컬 모드: 이 PC에서 ERD를 실행 중이므로 저장소의 MCP 프로그램을 직접 실행한다
   const localEnv: Record<string, string> = { ERD_SERVER_URL: info?.serverUrl ?? 'http://127.0.0.1:4000' };
@@ -328,44 +283,23 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
         )}
       </section>
 
-      {info?.authEnabled && (
+      {remote ? (
         <>
           {block(
             'oauth',
-            '로그인으로 연결 (추천) — Claude Code',
+            'Claude Code에 연결',
             `claude mcp add --transport http erd ${mcpUrl}`,
-            '토큰 없이 주소만 등록합니다. 처음 쓸 때 브라우저가 열리면 ERD에 로그인하고 "허용"을 누르세요. 연결이 오래되면 MCP 설정의 "재인증"으로 다시 로그인할 수 있습니다.',
+            '터미널에서 한 번 실행하세요. 처음 쓸 때 브라우저가 열리면 ERD에 로그인하고 "허용"을 누르면 됩니다. MCP 기능이 바뀌면 MCP 설정의 "재인증"을 누르세요. 같은 앱은 연결이 새로 쌓이지 않고 기존 연결을 덮어씁니다.',
           )}
           <section className="ai-section">
-            <h4>로그인으로 연결 — Claude 앱 · claude.ai</h4>
+            <h4>Claude 앱 · claude.ai에 연결</h4>
             <p className="muted small">설정 → 커넥터 → 사용자 지정 커넥터 추가에서 아래 주소를 넣으면 로그인 화면이 열립니다.</p>
             <div className="kv"><span>주소</span><code>{mcpUrl}</code></div>
           </section>
           <section className="ai-section">
-            <h4>로그인으로 연결된 앱</h4>
-            <ConnectedApps />
-          </section>
-        </>
-      )}
-
-      {info?.authEnabled && (
-        <section className="ai-section">
-          <h4>토큰으로 연결 (스크립트·다른 도구용)</h4>
-          <p className="muted small">AI는 이 토큰의 주인(나)이 볼 수 있는 프로젝트만 다룹니다. 토큰마다 언제든 취소할 수 있습니다.</p>
-          <TokenManager onCreated={setNewToken} />
-        </section>
-      )}
-
-      {remote ? (
-        <>
-          {!newToken && <div className="baseline-info none">먼저 위에서 <b>새 토큰 만들기</b>를 누르면 아래 설정에 토큰이 자동으로 들어갑니다.</div>}
-          {block('cc', 'Claude Code에 토큰으로 연결', remoteClaudeCode, '로그인 창을 띄울 수 없는 환경(서버, 자동화)에서 씁니다.')}
-          {block('cursor', 'Cursor · VS Code 등 (mcp.json의 mcpServers에 추가)', remoteCursor)}
-          {block('desktop', 'Claude Desktop (claude_desktop_config.json에 추가)', remoteDesktop, 'Claude Desktop은 설정 파일로 원격 주소를 바로 연결하지 못해 mcp-remote가 중간에서 이어 줍니다. PC에 Node.js가 있어야 합니다.')}
-          <section className="ai-section">
-            <h4>그 밖의 MCP 클라이언트</h4>
-            <div className="kv"><span>주소</span><code>{mcpUrl}</code></div>
-            <div className="kv"><span>헤더</span><code>Authorization: Bearer {tokenText}</code></div>
+            <h4>연결된 AI</h4>
+            <p className="muted small">AI는 나(이 계정)가 볼 수 있는 프로젝트만 다룹니다. 필요 없는 연결은 끊으세요.</p>
+            <AiConnections />
           </section>
         </>
       ) : (
