@@ -80,7 +80,7 @@ const oracle: Target = (() => {
       const password = 'ErdTest_123';
       const conn = await admin(this.url!);
       await conn.execute(`CREATE USER ${user} IDENTIFIED BY "${password}"`);
-      await conn.execute(`GRANT CREATE SESSION, CREATE TABLE, UNLIMITED TABLESPACE TO ${user}`);
+      await conn.execute(`GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, UNLIMITED TABLESPACE TO ${user}`);
       await conn.close();
       made.push(user);
       return { dialect: 'oracle', host: p.host, port: p.port, user, password, database: p.path };

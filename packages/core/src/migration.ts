@@ -1,7 +1,7 @@
 import type { Change, ChangeCategory, ChangeKind, DiffResult } from './diff';
 import { diffSchemas } from './diff';
 import type { Dialect } from './dialects/types';
-import { emptySchema, type Schema } from './model';
+import { emptySchema, relationName, type Index, type Schema, type Table } from './model';
 
 export interface Statement {
   changeId: string;
@@ -30,7 +30,23 @@ const PHASE: Record<ChangeKind, number> = {
   dropTable: 11,
 };
 
-function statementsFor(change: Change, diff: DiffResult, dialect: Dialect): string[] {
+/**
+ * MySQL·MariaDB는 외래키가 쓰는 인덱스를 지울 수 없다 (그 FK를 받쳐 줄 다른 인덱스가 없으면).
+ * 이번에 지우지 않는 FK가 이 인덱스에 기대고 있으면, 같은 문장에서 FK용 인덱스를 새로 만들게 알려준다.
+ */
+function fkIndexesToKeep(table: Table, index: Index, diff: DiffResult, chosen: Change[]): { name: string; columnIds: string[] }[] {
+  const droppedFks = new Set(chosen.filter((c) => c.kind === 'dropForeignKey').map((c) => (c as { relation: { id: string } }).relation.id));
+  const droppedIndexes = new Set(chosen.filter((c) => c.kind === 'dropIndex' && (c as { table: Table }).table.id === table.id).map((c) => (c as { index: Index }).index.id));
+  const startsWith = (cols: string[], prefix: string[]) => prefix.length > 0 && prefix.every((id, i) => cols[i] === id);
+  const pk = table.columns.filter((c) => c.primaryKey).map((c) => c.id);
+  const remaining = [pk, ...table.indexes.filter((i) => i.id !== index.id && !droppedIndexes.has(i.id)).map((i) => i.columnIds)];
+  return diff.base.relations
+    .filter((r) => r.fromTableId === table.id && !droppedFks.has(r.id))
+    .filter((r) => startsWith(index.columnIds, r.fromColumnIds) && !remaining.some((cols) => startsWith(cols, r.fromColumnIds)))
+    .map((r) => ({ name: relationName(diff.base, r), columnIds: r.fromColumnIds }));
+}
+
+function statementsFor(change: Change, diff: DiffResult, dialect: Dialect, chosen: Change[]): string[] {
   switch (change.kind) {
     case 'createTable': return dialect.createTable(change.table);
     case 'dropTable': return dialect.dropTable(change.table);
@@ -41,7 +57,8 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect): stri
     case 'alterColumn': return dialect.alterColumn(change.table, change.before, change.after, change.fields, change.beforeTable);
     case 'primaryKey': return dialect.changePrimaryKey(change.before, change.after);
     case 'addIndex': return dialect.createIndex(change.table, change.index);
-    case 'dropIndex': return dialect.dropIndex(change.table, change.index);
+    case 'dropIndex':
+      return dialect.dropIndex(change.table, change.index, dialect.fkNeedsIndex ? fkIndexesToKeep(change.table, change.index, diff, chosen) : undefined);
     case 'addForeignKey': return dialect.addForeignKey(diff.target, change.relation);
     case 'dropForeignKey': return dialect.dropForeignKey(diff.base, change.relation);
   }
@@ -57,10 +74,11 @@ export function generateStatements(diff: DiffResult, dialect: Dialect, selected?
     .map((change, order) => ({ change, order }))
     .sort((a, b) => PHASE[a.change.kind] - PHASE[b.change.kind] || a.order - b.order);
 
+  const chosen = changes.map((c) => c.change);
   const statements: Statement[] = [];
   for (const { change } of changes) {
     statements.push(
-      ...statementsFor(change, diff, dialect).map((sql, i) => ({
+      ...statementsFor(change, diff, dialect, chosen).map((sql, i) => ({
         changeId: change.id,
         category: change.category,
         tableName: change.tableName,

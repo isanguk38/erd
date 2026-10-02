@@ -100,7 +100,13 @@ export const mysql: Dialect = {
     const cols = columnNames(table, index.columnIds).map(q).join(', ');
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${cols})`];
   },
-  dropIndex: (table, index) => [`DROP INDEX ${q(indexName(table, index))} ON ${q(table.name)}`],
+  fkNeedsIndex: true,
+  dropIndex(table, index, keepForFk = []) {
+    if (!keepForFk.length) return [`DROP INDEX ${q(indexName(table, index))} ON ${q(table.name)}`];
+    // FK가 이 인덱스를 쓰고 있으면 같은 문장에서 FK 이름의 인덱스를 만든다 (MySQL이 FK용으로 자동으로 만드는 것과 같은 모양 → ERD에는 안 보임)
+    const adds = keepForFk.map((k) => `ADD INDEX ${q(k.name)} (${columnNames(table, k.columnIds).map(q).join(', ')})`);
+    return [`ALTER TABLE ${q(table.name)} DROP INDEX ${q(indexName(table, index))}, ${adds.join(', ')}`];
+  },
 
   addForeignKey(schema, relation) {
     const { from, to } = relationTables(schema, relation);

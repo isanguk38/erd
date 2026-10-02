@@ -152,3 +152,30 @@ describe('모든 DB 공통', () => {
     expect(generateCreateSql(erd(), d).length).toBeGreaterThan(100);
   });
 });
+
+describe('MySQL·MariaDB: FK가 쓰는 인덱스 지우기', () => {
+  it.each(['mysql', 'mariadb'] as const)('%s: 그 FK를 받쳐 줄 인덱스가 없으면 같은 문장에서 FK용 인덱스를 만든다', (id) => {
+    const d = getDialect(id);
+    const base = erd();
+    const next = cloneSchema(base);
+    next.tables[1].indexes = []; // (member_id, amount) 인덱스 삭제, FK는 그대로
+    const sql = generateStatements(diffSchemas(base, next, d), d).map((s) => s.sql);
+    expect(sql).toEqual(['ALTER TABLE `orders` DROP INDEX `ix_orders_member_amount`, ADD INDEX `fk_orders_member` (`member_id`)']);
+  });
+
+  it('FK도 같이 지우거나, 다른 인덱스가 FK를 받쳐 주면 그냥 지운다', () => {
+    const d = getDialect('mysql');
+    const base = erd();
+    const dropBoth = cloneSchema(base);
+    dropBoth.tables[1].indexes = [];
+    dropBoth.relations = [];
+    expect(generateStatements(diffSchemas(base, dropBoth, d), d).map((s) => s.sql)).toContain('DROP INDEX `ix_orders_member_amount` ON `orders`');
+
+    const withOther = cloneSchema(base);
+    const fkCol = withOther.tables[1].columns.find((c) => c.name === 'member_id')!.id;
+    withOther.tables[1].indexes = [{ id: 'idx_only_fk', name: 'ix_orders_member', columnIds: [fkCol], unique: false }];
+    const base2 = cloneSchema(base);
+    base2.tables[1].indexes.push({ id: 'idx_only_fk', name: 'ix_orders_member', columnIds: [fkCol], unique: false });
+    expect(generateStatements(diffSchemas(base2, withOther, d), d).map((s) => s.sql)).toEqual(['DROP INDEX `ix_orders_member_amount` ON `orders`']);
+  });
+});

@@ -24,6 +24,8 @@ export interface Dialect {
   normalizeAction(action: ReferentialAction): ReferentialAction;
   /** 외래키 ON UPDATE를 지원하는지 (Oracle은 없음 → 비교·SQL에서 빼고 본다). 기본 true */
   supportsOnUpdate?: boolean;
+  /** 외래키에 인덱스가 꼭 있어야 해서, FK가 쓰는 인덱스를 그냥 지울 수 없는 DB (MySQL·MariaDB) */
+  fkNeedsIndex?: boolean;
 
   createTable(table: Table): string[];
   dropTable(table: Table): string[];
@@ -37,7 +39,8 @@ export interface Dialect {
   changePrimaryKey(before: Table, after: Table): string[];
 
   createIndex(table: Table, index: Index): string[];
-  dropIndex(table: Table, index: Index): string[];
+  /** keepForFk: 이 인덱스에 기대는 FK가 있으면 같은 문장에서 FK용 인덱스를 만든다 (fkNeedsIndex인 DB) */
+  dropIndex(table: Table, index: Index, keepForFk?: { name: string; columnIds: string[] }[]): string[];
 
   addForeignKey(schema: Schema, relation: Relation): string[];
   dropForeignKey(schema: Schema, relation: Relation): string[];
