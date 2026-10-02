@@ -38,7 +38,7 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect): stri
     case 'tableComment': return dialect.setTableComment(change.table);
     case 'addColumn': return dialect.addColumn(change.table, change.column, change.previous);
     case 'dropColumn': return dialect.dropColumn(change.table, change.column);
-    case 'alterColumn': return dialect.alterColumn(change.table, change.before, change.after, change.fields);
+    case 'alterColumn': return dialect.alterColumn(change.table, change.before, change.after, change.fields, change.beforeTable);
     case 'primaryKey': return dialect.changePrimaryKey(change.before, change.after);
     case 'addIndex': return dialect.createIndex(change.table, change.index);
     case 'dropIndex': return dialect.dropIndex(change.table, change.index);

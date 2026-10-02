@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getConnector, type ConnectionConfig } from '@erd/db';
-import type { DialectId } from '@erd/core';
+import { dialects, type DialectId } from '@erd/core';
 
 const DEFAULT_SERVER = 'https://erd-hgcp.onrender.com';
 
@@ -99,7 +99,7 @@ function toConfig(c: Omit<SavedConnection, 'id' | 'name' | 'passwordEnc' | 'crea
   return { dialect: c.dialect, host: c.host, port: Number(c.port), user: c.user, password, database: c.database, schema: c.schema || undefined, ssl: Boolean(c.ssl) };
 }
 
-const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
+const DIALECTS = Object.keys(dialects) as DialectId[];
 
 function validate(input: ConnectionInput): ConnectionInput {
   if (!DIALECTS.includes(input?.dialect)) throw new Error('DB 종류가 올바르지 않습니다');

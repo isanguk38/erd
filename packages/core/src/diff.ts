@@ -37,7 +37,7 @@ export type Change = ChangeBase &
     | { kind: 'tableComment'; table: Table }
     | { kind: 'addColumn'; table: Table; column: Column; previous: Column | null }
     | { kind: 'dropColumn'; table: Table; column: Column }
-    | { kind: 'alterColumn'; table: Table; before: Column; after: Column; fields: ColumnField[] }
+    | { kind: 'alterColumn'; table: Table; before: Column; after: Column; fields: ColumnField[]; beforeTable?: Table }
     | { kind: 'primaryKey'; before: Table; after: Table }
     | { kind: 'addIndex'; table: Table; index: Index }
     | { kind: 'dropIndex'; table: Table; index: Index }
@@ -192,7 +192,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     sameList(a.fromColumnIds, b.fromColumnIds) &&
     sameList(a.toColumnIds, b.toColumnIds) &&
     dialect.normalizeAction(a.onDelete) === dialect.normalizeAction(b.onDelete) &&
-    dialect.normalizeAction(a.onUpdate) === dialect.normalizeAction(b.onUpdate) &&
+    (dialect.supportsOnUpdate === false || dialect.normalizeAction(a.onUpdate) === dialect.normalizeAction(b.onUpdate)) &&
     sameName(a.name, b.name);
 
   for (const relation of base.relations) {
@@ -266,7 +266,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       kind: 'alterColumn', id: `alterColumn:${after.id}:${column.id}`, category: 'alter', tableName: name,
       summary: `${name}.${column.name} 변경: ${detail}`,
       warning: columnWarning(old, column, fields),
-      table: after, before: old, after: column, fields,
+      table: after, before: old, after: column, fields, beforeTable: before,
     });
   });
 

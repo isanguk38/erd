@@ -3,11 +3,11 @@ import type { DialectId } from '@erd/core';
 import { api, type Connection, type ConnectionInput } from '../lib/api';
 import { useStore } from '../store';
 import { useDialect } from '../lib/hooks';
+import { DB_INFO, DB_ORDER, dbLabel } from '../lib/dbInfo';
 
-const DEFAULT_PORT: Record<DialectId, number> = { mysql: 3306, postgresql: 5432 };
 
 function emptyInput(dialect: DialectId): ConnectionInput {
-  return { name: '', dialect, host: 'localhost', port: DEFAULT_PORT[dialect], user: '', password: '', database: '', schema: '', ssl: false };
+  return { name: '', dialect, host: 'localhost', port: DB_INFO[dialect].port, user: '', password: '', database: '', schema: '', ssl: false };
 }
 
 /**
@@ -81,7 +81,7 @@ export function ConnectionPicker({ onChange }: { onChange?: (connection: Connect
           <option value="">연결을 고르세요</option>
           {connections.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name} · {c.dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} · {c.host}:{c.port}/{c.database}
+              {c.name} · {dbLabel(c.dialect)} · {c.host}:{c.port}/{c.database}
             </option>
           ))}
         </select>
@@ -114,7 +114,7 @@ function ConnectionForm({
   const [input, setInput] = useState<ConnectionInput>(initial);
   const [status, setStatus] = useState<{ kind: 'ok' | 'error' | 'busy'; text: string } | null>(null);
   const set = (patch: Partial<ConnectionInput>) => setInput((prev) => ({ ...prev, ...patch }));
-  const isPg = input.dialect === 'postgresql';
+  const info = DB_INFO[input.dialect];
 
   const test = async () => {
     setStatus({ kind: 'busy', text: '연결 확인 중…' });
@@ -141,9 +141,9 @@ function ConnectionForm({
       <div className="form-grid wide-label">
         <label>DB 종류</label>
         <div className="segmented">
-          {(['mysql', 'postgresql'] as const).map((d) => (
-            <button key={d} className={input.dialect === d ? 'active' : ''} onClick={() => set({ dialect: d, port: DEFAULT_PORT[d] })}>
-              {d === 'mysql' ? 'MySQL / MariaDB' : 'PostgreSQL'}
+          {DB_ORDER.map((d) => (
+            <button key={d} className={input.dialect === d ? 'active' : ''} onClick={() => set({ dialect: d, port: DB_INFO[d].port })}>
+              {dbLabel(d)}
             </button>
           ))}
         </div>
@@ -154,12 +154,12 @@ function ConnectionForm({
           <input value={input.host} onChange={(e) => set({ host: e.target.value })} placeholder="localhost" />
           <input className="port" type="number" value={input.port} onChange={(e) => set({ port: Number(e.target.value) })} />
         </div>
-        <label>{isPg ? '데이터베이스' : '스키마(DB)'}</label>
-        <input value={input.database} onChange={(e) => set({ database: e.target.value })} placeholder={isPg ? 'postgres' : 'shop'} />
-        {isPg && (
+        <label>{info.databaseLabel}</label>
+        <input value={input.database} onChange={(e) => set({ database: e.target.value })} placeholder={info.databasePlaceholder} />
+        {info.schemaPlaceholder && (
           <>
             <label>스키마</label>
-            <input value={input.schema ?? ''} onChange={(e) => set({ schema: e.target.value })} placeholder="public" />
+            <input value={input.schema ?? ''} onChange={(e) => set({ schema: e.target.value })} placeholder={info.schemaPlaceholder} />
           </>
         )}
         <label>아이디</label>

@@ -6,9 +6,9 @@ export interface ConnectionConfig {
   port: number;
   user: string;
   password: string;
-  /** MySQL: 스키마(DB) 이름, PostgreSQL: 데이터베이스 이름 */
+  /** MySQL·MariaDB: 스키마(DB) 이름, PostgreSQL·SQL Server: 데이터베이스 이름, Oracle: 서비스 이름 */
   database: string;
-  /** PostgreSQL 스키마 (기본 public) */
+  /** 스키마: PostgreSQL(기본 public), SQL Server(기본 dbo), Oracle(기본 접속 사용자) */
   schema?: string;
   ssl?: boolean;
 }

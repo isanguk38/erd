@@ -8,6 +8,7 @@ import { Modal } from './Modal';
 import { ConnectionPicker } from './ConnectionPicker';
 import { MigrationPreview } from './MigrationPreview';
 import { BaselineInfo, RenamePanel } from './SyncParts';
+import { DB_INFO } from '../lib/dbInfo';
 
 type Step = 'compare' | 'confirm' | 'result';
 
@@ -152,9 +153,9 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
             <li>CREATE {statements.filter((s) => s.category === 'create').length}문장, ALTER {statements.filter((s) => s.category === 'alter').length}문장, DROP {dropCount}문장</li>
             {warningCount > 0 && <li className="warning-inline">주의가 필요한 문장 {warningCount}개 (데이터 손실·실패 가능)</li>}
             <li>
-              {dialect.id === 'postgresql'
+              {DB_INFO[dialect.id].transactional
                 ? '하나의 트랜잭션으로 실행합니다. 하나라도 실패하면 모두 되돌립니다.'
-                : 'MySQL은 DDL을 되돌릴 수 없어 한 문장씩 실행하고, 실패하면 그 자리에서 멈춥니다.'}
+                : `${dialect.label}은(는) DDL을 되돌릴 수 없어 한 문장씩 실행하고, 실패하면 그 자리에서 멈춥니다.`}
             </li>
             <li>실행 전후로 ERD 버전이 자동 저장됩니다.</li>
           </ul>

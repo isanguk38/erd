@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import type { DialectId } from '@erd/core';
+import { dialects, type DialectId } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
 import { ProjectStore } from './projects';
@@ -45,7 +45,7 @@ export interface AppOptions {
 }
 
 
-const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
+const DIALECTS = Object.keys(dialects) as DialectId[];
 const MAX_STATEMENTS = 1000;
 
 /** 자주 나는 접속 오류를 알아보기 쉬운 말로 바꾼다 */

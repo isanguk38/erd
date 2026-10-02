@@ -217,19 +217,22 @@ async function withConnection<T>(config: ConnectionConfig, fn: (conn: mysql.Conn
   }
 }
 
-export const mysqlConnector: Connector = {
-  dialect: 'mysql',
+/** MySQL과 MariaDB는 같은 드라이버·같은 information_schema를 쓴다 */
+function makeConnector(dialect: 'mysql' | 'mariadb'): Connector {
+  const label = (v: string) => (/mariadb/i.test(v) ? `MariaDB ${v.replace(/-MariaDB.*$/i, '')}` : `MySQL ${v}`);
+  return {
+  dialect,
   test: (config) =>
     withConnection(config, async (conn) => {
       const [rows] = await conn.query('SELECT VERSION() AS v');
-      return { serverVersion: `MySQL ${(rows as Rows)[0].v}` };
+      return { serverVersion: label((rows as Rows)[0].v) };
     }),
   introspect: (config, options) =>
     withConnection(config, async (conn) => {
       const [rows] = await conn.query('SELECT VERSION() AS v');
       const run = async (sql: string, params: unknown[]) => (await conn.query(sql, params))[0] as Rows;
       const result = await introspectMysql(run, config.database, options);
-      return { ...result, serverVersion: `MySQL ${(rows as Rows)[0].v}` };
+      return { ...result, serverVersion: label((rows as Rows)[0].v) };
     }),
   execute: (config, statements) =>
     withConnection(config, async (conn) => {
@@ -254,3 +257,7 @@ export const mysqlConnector: Connector = {
       return { results, ok: !failed, rolledBack: false, appliedCount } satisfies ExecuteResult;
     }),
 };
+}
+
+export const mysqlConnector = makeConnector('mysql');
+export const mariadbConnector = makeConnector('mariadb');

@@ -3,6 +3,7 @@ import type { DialectId } from '@erd/core';
 import { projectApi, type ProjectInfo } from '../lib/api';
 import { clearLegacyProject, legacyProject, useStore } from '../store';
 import { UserMenu } from './Toolbar';
+import { DB_ORDER, dbLabel } from '../lib/dbInfo';
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
@@ -63,8 +64,7 @@ export function ProjectsPage() {
       >
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="새 프로젝트 이름" />
         <select value={dialect} onChange={(e) => setDialect(e.target.value as DialectId)}>
-          <option value="mysql">MySQL</option>
-          <option value="postgresql">PostgreSQL</option>
+          {DB_ORDER.map((d) => <option key={d} value={d}>{dbLabel(d)}</option>)}
         </select>
         <button className="btn btn-primary" type="submit">만들기</button>
       </form>
@@ -77,7 +77,7 @@ export function ProjectsPage() {
             <a href={`#/p/${p.id}`}>
               <b>{p.name}</b>
               <span className="muted small">
-                {p.dialect === 'postgresql' ? 'PostgreSQL' : 'MySQL'} · 테이블 {p.tableCount ?? 0}개 · {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ''}
+                {dbLabel(p.dialect)} · 테이블 {p.tableCount ?? 0}개 · {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ''}
                 {p.role && p.role !== 'owner' && ` · ${p.role === 'editor' ? '편집' : '보기'} 권한으로 참여`}
               </span>
             </a>

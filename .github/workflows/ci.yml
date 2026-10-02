@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 타입 검사 · 테스트 · 빌드
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 타입 검사
+        run: npm run typecheck
+      - name: 단위·통합 테스트 (core · db · server · mcp)
+        run: npm test
+      - name: 웹 빌드
+        run: npm run build
+
+  databases:
+    name: 실제 DB 왕복 테스트 (MySQL · MariaDB · Oracle · SQL Server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports: ['3407:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: erdtest
+        ports: ['3308:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      oracle:
+        image: gvenzl/oracle-free:23-slim-faststart
+        env:
+          ORACLE_PASSWORD: ErdTest_123
+        ports: ['1521:1521']
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s --health-timeout 5s --health-retries 30
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: ErdTest_123!
+        ports: ['1433:1433']
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'ErdTest_123!' -Q 'SELECT 1' || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: DB 왕복 테스트
+        working-directory: packages/db
+        env:
+          ERD_TEST_MYSQL: mysql://root@127.0.0.1:3407
+          ERD_TEST_MARIADB: mysql://root:erdtest@127.0.0.1:3308
+          ERD_TEST_ORACLE: oracle://system:ErdTest_123@127.0.0.1:1521/FREEPDB1
+          ERD_TEST_MSSQL: mssql://sa:ErdTest_123%21@127.0.0.1:1433
+        run: npx vitest run test/mysql.integration.test.ts test/others.integration.test.ts

@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { describeSchema, LINT_RULES, lintSchema, type Schema } from '@erd/core';
+import { describeSchema, dialects, LINT_RULES, lintSchema, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -59,6 +59,7 @@ const command = z.discriminatedUnion('op', [
 
 const mode = z.enum(['apply', 'propose']).optional().describe('apply: 바로 반영(되돌리기 가능), propose: 제안으로 모아 사람이 승인. 생략하면 프로젝트 설정을 따른다');
 const projectArg = z.string().describe('프로젝트 id 또는 이름');
+const dialectArg = z.enum(Object.keys(dialects) as [DialectId, ...DialectId[]]).describe('DB 종류: mysql, mariadb, postgresql, oracle, mssql');
 
 const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
 
@@ -98,7 +99,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     {
       title: 'ERD 프로젝트 만들기',
       description: '빈 ERD 프로젝트를 만든다.',
-      inputSchema: { name: z.string(), dialect: z.enum(['mysql', 'postgresql']).optional() },
+      inputSchema: { name: z.string(), dialect: dialectArg.optional() },
     },
     safe(async ({ name, dialect }: { name: string; dialect?: string }) => {
       const p = await api.request<ProjectInfo>('POST', '/api/projects', { name, dialect: dialect ?? 'mysql' });
@@ -183,7 +184,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     {
       title: 'SQL 만들기',
       description: 'ERD로 SQL을 만든다. since_version을 주면 그 버전 이후 바뀐 부분만 ALTER/CREATE로 만든다 (CREATE/ALTER/DROP 구분 포함).',
-      inputSchema: { project: projectArg, dialect: z.enum(['mysql', 'postgresql']).optional(), since_version: z.string().optional().describe('버전 id (list_versions로 확인)') },
+      inputSchema: { project: projectArg, dialect: dialectArg.optional(), since_version: z.string().optional().describe('버전 id (list_versions로 확인)') },
       annotations: { readOnlyHint: true },
     },
     safe(async ({ project, dialect, since_version }: { project: string; dialect?: string; since_version?: string }) => {

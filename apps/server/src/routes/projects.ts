@@ -20,6 +20,7 @@ import {
   toScript,
   type ChangeCategory,
   type Command,
+  dialects,
   type DialectId,
   type RenameLink,
   type Schema,
@@ -32,7 +33,7 @@ import type { ConnectionStore } from '../connections';
 import type { Origin, ProjectStore } from '../projects';
 import { DESKTOP_ONLY_MESSAGE, type Auth } from '../auth';
 
-const DIALECTS: DialectId[] = ['mysql', 'postgresql'];
+const DIALECTS = Object.keys(dialects) as DialectId[];
 /** 이 시간 동안 AI 변경이 없으면 다음 변경은 새 AI 작업으로 본다 (되돌리기 기준 버전을 새로 만든다) */
 const AI_SESSION_IDLE_MS = 30 * 60 * 1000;
 
