@@ -162,6 +162,7 @@ export const oracle: Dialect = {
     return statements;
   },
 
+  indexSupport: { expression: true },
   createIndex(table, index) {
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})`];
   },

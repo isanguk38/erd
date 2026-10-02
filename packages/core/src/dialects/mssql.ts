@@ -174,6 +174,7 @@ export const mssql: Dialect = {
     return statements;
   },
 
+  indexSupport: { where: true },
   createIndex(table, index) {
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },

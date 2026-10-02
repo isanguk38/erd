@@ -1,4 +1,5 @@
 import { findColumn, findTable, type Index, type Relation, type Schema, type Table } from '../model';
+import type { Dialect } from './types';
 
 /** SQL 문자열 리터럴 */
 export function literal(value: string, escapeBackslash = false): string {
@@ -19,6 +20,52 @@ export function columnNames(table: Table, ids: string[]): string[] {
 /** CREATE INDEX ... ON 테이블 ( 여기 ): 식 인덱스면 식 원문, 아니면 컬럼 이름들 */
 export function indexKeys(table: Table, index: Index, q: (name: string) => string): string {
   return index.expression?.trim() || columnNames(table, index.columnIds).map(q).join(', ');
+}
+
+/** 괄호·따옴표 밖의 콤마로 나눈다 */
+export function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (const ch of text) {
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+    } else if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+    } else if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** 이 DB에서 지원하지 않는 인덱스 기능이 있으면 주의 문구 (SQL 미리보기·내보내기에 "-- 주의:"로 붙는다) */
+export function indexWarnings(dialect: Dialect, table: Table, index: Index): string | undefined {
+  const support = dialect.indexSupport ?? {};
+  const label = dialect.label;
+  const messages: string[] = [];
+  const expression = index.expression?.trim();
+  if (expression && !support.expression) messages.push(`${label}는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)`);
+  else if (expression && dialect.id !== 'postgresql' && /::|\bto_tsvector\b|\bto_tsquery\b|\bjsonb_/i.test(expression)) {
+    messages.push(`식에 PostgreSQL 전용 문법이 있어 ${label}에서는 실패할 수 있습니다: ${expression}`);
+  }
+  if (index.where?.trim() && !support.where) messages.push(`${label}는 부분 인덱스를 지원하지 않아 조건(WHERE ${index.where.trim()})을 빼고 만듭니다`);
+  const method = index.method?.trim().toLowerCase();
+  if (method && method !== 'btree' && !support.method) messages.push(`${label}에는 ${method} 방식이 없어 일반 인덱스로 만듭니다`);
+  if ((dialect.id === 'mysql' || dialect.id === 'mariadb') && !expression) {
+    const json = index.columnIds.map((id) => findColumn(table, id)).filter((c) => c && /^JSONB?$/i.test(c.type.trim()));
+    if (json.length) messages.push(`${label}는 JSON 컬럼(${json.map((c) => c!.name).join(', ')})에 일반 인덱스를 만들 수 없습니다`);
+  }
+  return messages.length ? messages.join(' / ') : undefined;
 }
 
 /** 부분 인덱스 조건 ( WHERE ...) */

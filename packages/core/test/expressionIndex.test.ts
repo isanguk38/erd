@@ -82,6 +82,37 @@ describe('식(expression) 인덱스', () => {
     expect(idx.ix_prefix.columnIds).toHaveLength(1);
   });
 
+  it('다른 DB로 내보낼 때: MySQL은 식을 괄호로 감싸고, 지원하지 않는 기능은 주의를 단다', () => {
+    const empty = emptySchema();
+    const pg = applyCommands(empty, [
+      { op: 'createTable', name: 'member', columns: [
+        { name: 'id', type: 'BIGINT', primaryKey: true },
+        { name: 'email', type: 'VARCHAR(100)' },
+        { name: 'profile', type: 'JSONB' },
+        { name: 'deleted_at', type: 'TIMESTAMP' },
+      ] },
+      { op: 'addIndex', table: 'member', name: 'ux_email_live', expression: 'lower(email)', unique: true, where: 'deleted_at IS NULL' },
+      { op: 'addIndex', table: 'member', name: 'ix_profile', columns: ['profile'], method: 'gin' },
+      { op: 'addIndex', table: 'member', name: 'ix_fts', expression: "to_tsvector('simple', email)", method: 'gin' },
+    ]).schema;
+    const out = (dialect: string) => {
+      const d = getDialect(dialect as never);
+      const diff = diffSchemas(empty, pg, d);
+      const byName = (n: string) => diff.changes.find((c) => c.kind === 'addIndex' && (c as { index: { name: string } }).index.name === n)!;
+      const sql = generateStatements(diff, d, new Set(diff.changes.map((c) => c.id))).map((x) => x.sql);
+      return { warn: (n: string) => byName(n).warning ?? '', sql };
+    };
+    const mysql = out('mysql');
+    expect(mysql.sql).toContain('CREATE UNIQUE INDEX `ux_email_live` ON `member` ((lower(email)))');
+    expect(mysql.warn('ux_email_live')).toContain('부분 인덱스를 지원하지 않아 조건(WHERE deleted_at IS NULL)을 빼고');
+    expect(mysql.warn('ix_profile')).toMatch(/gin 방식이 없어.*JSON 컬럼\(profile\)/);
+    expect(mysql.warn('ix_fts')).toContain('PostgreSQL 전용 문법');
+    expect(out('mariadb').warn('ux_email_live')).toContain('식 인덱스를 지원하지 않습니다');
+    expect(out('mssql').warn('ux_email_live')).toContain('식 인덱스를 지원하지 않습니다');
+    const postgres = out('postgresql');
+    expect(['ux_email_live', 'ix_profile', 'ix_fts'].map(postgres.warn)).toEqual(['', '', '']);
+  });
+
   it('MCP 명령: expression 또는 columns가 필요하다', () => {
     expect(() => applyCommands(base(), [{ op: 'addIndex', table: 'customer' }])).toThrow(/columns|expression/);
     const { messages } = applyCommands(base(), [{ op: 'addIndex', table: 'customer', expression: 'lower(email)' }]);

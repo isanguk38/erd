@@ -10,6 +10,7 @@ export const mariadb: Dialect = {
   id: 'mariadb',
   label: 'MariaDB',
   typeSuggestions: [...mysql.typeSuggestions, 'UUID', 'INET6'],
+  indexSupport: {},
   normalizeDefault(value) {
     if (value === null) return null;
     // MariaDB는 함수 기본값을 소문자+괄호로 돌려준다: current_timestamp() → CURRENT_TIMESTAMP

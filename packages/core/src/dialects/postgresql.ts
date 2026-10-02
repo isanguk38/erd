@@ -155,6 +155,7 @@ export const postgresql: Dialect = {
     return actions.length ? [`ALTER TABLE ${q(after.name)} ${actions.join(', ')}`] : [];
   },
 
+  indexSupport: { expression: true, where: true, method: true },
   createIndex(table, index) {
     const method = index.method?.trim() && index.method.trim().toLowerCase() !== 'btree' ? ` USING ${index.method.trim().toLowerCase()}` : '';
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)}${method} (${indexKeys(table, index, q)})${indexWhere(index)}`];

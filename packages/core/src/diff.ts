@@ -1,5 +1,5 @@
 import type { ColumnField, Dialect } from './dialects/types';
-import { sqlComment } from './dialects/common';
+import { indexWarnings, sqlComment } from './dialects/common';
 import {
   cloneSchema,
   expressionColumns,
@@ -159,6 +159,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
         changes.push({
           kind: 'addIndex', id: `addIndex:${table.id}:${index.id}`, category: 'create', tableName: table.name,
           summary: `${table.name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${indexLabel(table, index)})`, table, index,
+          warning: indexWarnings(dialect, table, index),
         });
       }
       continue;
@@ -305,7 +306,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       changes.push({
         kind: 'addIndex', id: `addIndex:${after.id}:${index.id}`, category: 'alter', tableName: name,
         summary: `${name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${indexLabel(after, index)})`,
-        warning: index.unique ? '중복 값이 있으면 실패합니다' : undefined,
+        warning: [index.unique ? '중복 값이 있으면 실패합니다' : '', indexWarnings(dialect, after, index) ?? ''].filter(Boolean).join(' / ') || undefined,
         table: after, index,
       });
     }

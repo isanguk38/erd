@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys } from './common';
+import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, splitTopLevel } from './common';
 import type { Dialect } from './types';
 
 const TYPE_MAP: Record<string, string> = {
@@ -96,8 +96,11 @@ export const mysql: Dialect = {
     return actions.length ? [`ALTER TABLE ${q(after.name)} ${actions.join(', ')}`] : [];
   },
 
+  indexSupport: { expression: true },
   createIndex(table: Table, index) {
-    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})`];
+    // MySQL은 식마다 괄호를 한 번 더 감싸야 한다: lower(email) → (lower(email))
+    const keys = index.expression?.trim() ? mysqlKeyParts(index.expression) : indexKeys(table, index, q);
+    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${keys})`];
   },
   fkNeedsIndex: true,
   dropIndex(table, index, keepForFk = []) {
@@ -121,3 +124,30 @@ export const mysql: Dialect = {
     return [`ALTER TABLE ${q(from.name)} DROP FOREIGN KEY ${q(relationName(schema, relation))}`];
   },
 };
+
+/** 식 인덱스 키: 컬럼 이름은 그대로, 식은 괄호로 한 번 감싼다 (이미 감싸 있으면 그대로) */
+export function mysqlKeyParts(expression: string): string {
+  return splitTopLevel(expression)
+    .map((raw) => {
+      const part = raw.trim();
+      if (/^[`"]?[\w$]+[`"]?(\s+(ASC|DESC))?$/i.test(part)) return part;
+      if (part.startsWith('(') && closingParen(part) === part.length - 1) return part;
+      return `(${part})`;
+    })
+    .join(', ');
+}
+
+/** 첫 '('와 짝이 맞는 ')'의 위치 */
+function closingParen(text: string): number {
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')' && --depth === 0) return i;
+  }
+  return -1;
+}
