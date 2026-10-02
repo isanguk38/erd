@@ -10,7 +10,6 @@ import {
   useReactFlow,
   type Connection,
   type NodeChange,
-  type OnSelectionChangeParams,
 } from '@xyflow/react';
 import { connectManyToMany, connectTables, removeRelation, removeTable } from '@erd/core';
 import { useStore } from '../store';
@@ -103,17 +102,24 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const readOnly = Boolean(compare) || role === 'viewer';
   const { effective: theme } = useTheme();
 
+  // 선택은 사용자가 캔버스에서 직접 바꾼 것(클릭, Ctrl+클릭, Shift+끌기 상자)만 스토어에 알린다.
+  // onNodesChange의 select 변경은 사용자 조작일 때만 오고, 스토어가 바꾼 선택(검색 결과 클릭 등)으로는 오지 않는다.
+  // (onSelectionChange는 스토어가 바꾼 선택에도 한 박자 늦게 불려 서로 덮어쓰며 무한 반복된 적이 있다)
   const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
-    setNodes((prev) => applyNodeChanges(changes, prev));
-  }, []);
-
-  // 캔버스에서 고른 것(클릭, Ctrl+클릭, Shift+드래그 상자)을 스토어에 알린다
-  const onSelectionChange = useCallback(({ nodes: picked }: OnSelectionChangeParams) => {
-    const tables = picked.map((n) => n.id);
-    const state = useStore.getState();
-    if (sameIds(state.selectedTables, tables)) return;
-    if (tables.length === 0 && state.selection?.type === 'relation') return; // 관계를 고른 상태는 유지
-    state.selectTables(tables);
+    const picked = changes.some((c) => c.type === 'select');
+    setNodes((prev) => {
+      const next = applyNodeChanges(changes, prev);
+      if (picked) {
+        const ids = next.filter((n) => n.selected).map((n) => n.id);
+        queueMicrotask(() => {
+          const state = useStore.getState();
+          if (sameIds(state.selectedTables, ids)) return;
+          if (ids.length === 0 && state.selection?.type === 'relation') return; // 관계를 고른 상태는 유지
+          state.selectTables(ids);
+        });
+      }
+      return next;
+    });
   }, []);
 
   const onConnect = useCallback(
@@ -144,7 +150,6 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
-      onSelectionChange={onSelectionChange}
       onConnect={readOnly ? undefined : onConnect}
       nodesDraggable={!readOnly}
       nodesConnectable={!readOnly}
@@ -183,7 +188,15 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         });
       }}
       onNodesDelete={(deleted) => edit((draft) => deleted.forEach((n) => removeTable(draft, n.id)))}
-      onEdgesDelete={(deleted) => edit((draft) => deleted.forEach((e) => removeRelation(draft, e.id)))}
+      onEdgesDelete={(deleted) => {
+        // 관계를 지우면 그 FK 컬럼도 지운다 (다른 관계가 같이 쓰는 컬럼은 남김). Ctrl+Z로 함께 되돌린다
+        const dropped: string[] = [];
+        edit((draft) => deleted.forEach((e) => dropped.push(...removeRelation(draft, e.id, true))));
+        if (dropped.length) useStore.getState().showNotice({ text: `관계와 FK 컬럼 ${dropped.join(', ')}을(를) 지웠습니다. (Ctrl+Z로 되돌리기)` });
+      }}
+      // 관계 연결 점을 클릭만 해서는 연결되지 않고, 10px 이상 끌어야 연결이 시작된다 (붙어 있는 테이블에서 실수로 관계가 생기지 않게)
+      connectOnClick={false}
+      connectionDragThreshold={10}
       deleteKeyCode={readOnly ? null : ['Delete']}
       multiSelectionKeyCode={['Control', 'Meta']}
       selectionKeyCode="Shift"

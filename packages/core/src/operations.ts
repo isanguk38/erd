@@ -225,11 +225,26 @@ export function updateRelation(schema: Schema, relationId: string, patch: Partia
 }
 
 /** 관계를 지운다. dropColumns이면 관계 때문에 생긴 자식 쪽 FK 컬럼도 지운다. */
-export function removeRelation(schema: Schema, relationId: string, dropColumns = false): void {
+/**
+ * 관계를 지운다. dropColumns이면 그 관계의 FK 컬럼도 지운다 — 단, 다른 관계가 같이 쓰는 컬럼은 남긴다
+ * (다른 관계의 FK이거나, 다른 테이블이 참조하는 키인 경우). 지운 컬럼 이름을 돌려준다.
+ */
+export function removeRelation(schema: Schema, relationId: string, dropColumns = false): string[] {
   const relation = schema.relations.find((r) => r.id === relationId);
-  if (!relation) return;
+  if (!relation) return [];
   schema.relations = schema.relations.filter((r) => r.id !== relationId);
-  if (dropColumns) for (const id of relation.fromColumnIds) removeColumn(schema, relation.fromTableId, id);
+  if (!dropColumns) return [];
+  const table = findTable(schema, relation.fromTableId);
+  const shared = (id: string) =>
+    schema.relations.some((r) => (r.fromTableId === relation.fromTableId && r.fromColumnIds.includes(id)) || (r.toTableId === relation.fromTableId && r.toColumnIds.includes(id)));
+  const dropped: string[] = [];
+  for (const id of relation.fromColumnIds) {
+    if (shared(id)) continue;
+    const name = table?.columns.find((c) => c.id === id)?.name;
+    removeColumn(schema, relation.fromTableId, id);
+    if (name) dropped.push(name);
+  }
+  return dropped;
 }
 
 /** 다른 관계의 FK로 쓰이는 컬럼 id 목록 */

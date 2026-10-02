@@ -241,8 +241,8 @@ function RelationEditor({ relation }: { relation: Relation }) {
       <div className="inspector__head">
         <h3>관계 (외래키)</h3>
         <div className="btn-row">
-          <button className="btn btn-sm" onClick={() => { edit((d) => removeRelation(d, relation.id)); select(null); }}>관계만 삭제</button>
-          <button className="btn btn-danger btn-sm" onClick={() => { edit((d) => removeRelation(d, relation.id, true)); select(null); }}>FK 컬럼까지 삭제</button>
+          <button className="btn btn-sm" title="관계만 지우고 FK 컬럼은 남깁니다" onClick={() => { edit((d) => removeRelation(d, relation.id)); select(null); }}>관계만 삭제</button>
+          <button className="btn btn-danger btn-sm" title="관계와 그 FK 컬럼을 함께 지웁니다 (Delete 키와 같음, 다른 관계가 쓰는 컬럼은 남김)" onClick={() => { edit((d) => removeRelation(d, relation.id, true)); select(null); }}>삭제 (FK 컬럼 포함)</button>
         </div>
       </div>
       <p className="relation-summary">

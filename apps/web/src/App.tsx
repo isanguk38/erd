@@ -21,6 +21,7 @@ import { SearchBox } from './components/SearchBox';
 import { MultiSelectPanel } from './components/MultiSelectPanel';
 import { TemplateManagerDialog } from './components/TemplatePanels';
 import { LintPanel } from './components/LintPanel';
+import { Notice } from './components/Notice';
 import { CommentsPanel } from './components/Comments';
 import { copySelection, pasteClipboard, selectAllTables } from './lib/tableClipboard';
 import { ImageExportDialog } from './components/ImageExportDialog';
@@ -240,6 +241,7 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'help' && <HelpDialog onClose={close} />}
         {dialog === 'image' && <ImageExportDialog onClose={close} />}
         {dialog === 'templates' && <TemplateManagerDialog onClose={close} />}
+        <Notice />
       </div>
     </ReactFlowProvider>
   );

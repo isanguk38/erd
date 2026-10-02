@@ -93,6 +93,9 @@ interface State extends LocalPrefs {
   replyComment: (threadId: string, text: string) => void;
   setCommentStatus: (threadId: string, status: CommentThread['status']) => void;
   deleteComment: (threadId: string) => void;
+  /** 화면 아래 잠깐 뜨는 안내 (되돌릴 수 있는 작업 등) */
+  notice: { text: string; action?: { label: string; run: () => void } } | null;
+  showNotice: (notice: State['notice']) => void;
   /** 다른 사람·AI가 방금 바꾼 테이블 (잠깐 강조) */
   remoteChanges: Record<string, RemoteChange>;
   /** 버전 비교 중이면 기준 버전 (편집은 잠긴다) */
@@ -178,6 +181,8 @@ export const useStore = create<State>()(
         me: null,
         comments: [],
         remoteChanges: {},
+        notice: null,
+        showNotice: (notice) => set({ notice }),
         searchOpen: false,
         searchQuery: '',
         searchFocus: null,
