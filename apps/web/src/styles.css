@@ -607,3 +607,32 @@ label.btn { display: inline-flex; align-items: center; }
   .desktop-link span { display: none; }
   .tool-select { max-width: 132px; }
 }
+
+/* 댓글 */
+.comment-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; background: rgba(255,255,255,.25); color: #fff; border-radius: 9px; padding: 0 6px; }
+.comment-badge.review { background: #f59e0b; }
+.table-node__column.col-comment .table-node__name::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: #f59e0b; vertical-align: middle; }
+.db-badge.comment { background: #f59e0b; }
+.comments-section textarea { width: 100%; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+.comment-new__row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.comment-new__row select { flex: 1; min-width: 0; }
+.comment-kind { display: flex; align-items: center; gap: 3px; white-space: nowrap; font-size: 12px; }
+.comment-thread { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel); }
+.comment-thread.review { border-left: 3px solid #f59e0b; }
+.comment-thread.resolved { opacity: .65; }
+.comment-thread__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.comment-tag { font-size: 11px; background: #fef3c7; color: #b45309; border-radius: 4px; padding: 0 5px; }
+.comment-target { border: none; background: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; font-weight: 600; }
+.comment-target-static { color: var(--muted); font-family: Consolas, monospace; }
+.comment-text { margin: 4px 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+.comment-reply { margin: 6px 0 0 10px; padding-left: 8px; border-left: 2px solid var(--border); font-size: 12px; }
+.comment-actions { display: flex; gap: 4px; align-items: center; margin-top: 6px; }
+.comment-reply-input { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: 12px; background: var(--panel); color: var(--text); }
+.comments-panel { width: 420px; }
+.comments-panel .lint-groups { padding: 10px; }
+.small-seg button { font-size: 11px; padding: 2px 6px; }
+
+/* 다른 사람·AI가 방금 바꾼 곳 */
+@keyframes remote-pulse { 0% { box-shadow: 0 0 0 0 rgb(245 158 11 / .7); } 70% { box-shadow: 0 0 0 10px rgb(245 158 11 / 0); } 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0); } }
+.table-node.remote-changed { outline: 2px solid #f59e0b; outline-offset: 2px; animation: remote-pulse 1.2s ease-out 2; }
+.table-node__column.col-remote { background: rgb(245 158 11 / .18); transition: background .6s; }

@@ -4,6 +4,12 @@ import type { TableNodeType } from '../components/TableNode';
 import type { RelationEdgeType } from '../components/RelationEdge';
 import type { AreaNodeType } from '../components/AreaNode';
 
+/** 테이블에 붙는 표시: 다른 사람이 방금 바꾼 곳, 열린 댓글 수 */
+export interface NodeMarks {
+  remote?: Record<string, { added: boolean; columnIds: string[] }>;
+  comments?: Map<string, { open: number; review: number; columnIds: Set<string> }>;
+}
+
 /** 캔버스의 노드: 테이블과 영역 */
 export type ErdNode = TableNodeType | AreaNodeType;
 
@@ -22,6 +28,7 @@ export function buildNodes(
   prev: ErdNode[] = [],
   peers: Peer[] = [],
   search: SearchMarks | null = null,
+  marks: NodeMarks = {},
 ): TableNodeType[] {
   const measured = new Map(prev.map((n) => [n.id, n.measured]));
   const peerMarks = (tableId: string) =>
@@ -43,6 +50,8 @@ export function buildNodes(
       search: search ? (search.tables.has(table.id) ? 'match' : 'dim') : undefined,
       matchColumnIds: search ? table.columns.filter((c) => search.columns.has(c.id)).map((c) => c.id) : undefined,
       focusColumnId: search?.focus?.tableId === table.id ? search.focus.columnId ?? '*' : undefined,
+      remote: marks.remote?.[table.id],
+      comments: marks.comments?.get(table.id),
     },
   }));
 }

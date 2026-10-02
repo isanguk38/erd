@@ -35,6 +35,21 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const selection = useStore((s) => s.selection);
   const selectedTables = useStore((s) => s.selectedTables);
   const peers = useStore((s) => s.peers);
+  const remoteChanges = useStore((s) => s.remoteChanges);
+  const comments = useStore((s) => s.comments);
+  // 테이블별 열린 댓글 수
+  const commentMarks = useMemo(() => {
+    const m = new Map<string, { open: number; review: number; columnIds: Set<string> }>();
+    for (const c of comments) {
+      if (c.status !== 'open') continue;
+      const e = m.get(c.tableId) ?? { open: 0, review: 0, columnIds: new Set<string>() };
+      e.open++;
+      if (c.kind === 'review') e.review++;
+      if (c.columnId) e.columnIds.add(c.columnId);
+      m.set(c.tableId, e);
+    }
+    return m;
+  }, [comments]);
   const compare = useStore((s) => s.compare);
   const searchOpen = useStore((s) => s.searchOpen);
   const searchQuery = useStore((s) => s.searchQuery);
@@ -82,9 +97,9 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
       }
       // 영역을 먼저 두어 테이블 뒤에 그려지게 한다
-      return [...buildAreaNodes(schema, prev), ...buildNodes(schema, viewMode, selectedIds, prev, peers, searchMarks)];
+      return [...buildAreaNodes(schema, prev), ...buildNodes(schema, viewMode, selectedIds, prev, peers, searchMarks, { remote: remoteChanges, comments: commentMarks })];
     });
-  }, [schema, viewMode, selectedIds, peers, compareGraph, searchMarks]);
+  }, [schema, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks]);
   // 영역 소속을 정할 때 화면에서 잰 테이블 크기를 쓴다
   useEffect(() => {
     setMeasuredSizes(new Map(nodes.filter((n) => n.type === 'table' && n.measured?.width).map((n) => [n.id, { width: n.measured!.width!, height: n.measured!.height! }])));

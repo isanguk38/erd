@@ -2,7 +2,26 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
-import { cloneSchema, emptySchema, readMeta, readSchema, writeMeta, writeSchema, type DialectId, type ProjectMeta, type Schema } from '@erd/core';
+import {
+  addComment,
+  changedTables,
+  cloneSchema,
+  deleteComment,
+  emptySchema,
+  readComments,
+  readMeta,
+  readSchema,
+  replyComment,
+  setCommentStatus,
+  writeMeta,
+  writeSchema,
+  type CommentAuthor,
+  type CommentKind,
+  type CommentThread,
+  type DialectId,
+  type ProjectMeta,
+  type Schema,
+} from '@erd/core';
 import { authApi, type Me, type Role } from './lib/api';
 
 export type ViewMode = 'physical' | 'logical' | 'both';
@@ -20,6 +39,12 @@ export interface Peer {
 
 /** 이 화면에서 한 변경 (되돌리기 대상) */
 const LOCAL = 'local';
+/** 댓글 변경 (되돌리기 대상 아님) */
+const COMMENT = 'comment';
+/** 다른 사람·AI가 바꾼 곳을 강조하는 시간 */
+const HIGHLIGHT_MS = 4000;
+
+export type RemoteChange = { added: boolean; columnIds: string[]; at: number };
 
 const COLORS = ['#e11d48', '#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
 
@@ -58,6 +83,14 @@ interface State extends LocalPrefs {
   setSearchOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
   setSearchFocus: (focus: { tableId: string; columnId?: string } | null) => void;
+  /** 테이블·컬럼 댓글 */
+  comments: CommentThread[];
+  addComment: (input: { tableId: string; columnId?: string; kind: CommentKind; text: string }) => void;
+  replyComment: (threadId: string, text: string) => void;
+  setCommentStatus: (threadId: string, status: CommentThread['status']) => void;
+  deleteComment: (threadId: string) => void;
+  /** 다른 사람·AI가 방금 바꾼 테이블 (잠깐 강조) */
+  remoteChanges: Record<string, RemoteChange>;
   /** 버전 비교 중이면 기준 버전 (편집은 잠긴다) */
   compare: { name: string; createdAt: string; schema: Schema } | null;
 
@@ -97,6 +130,23 @@ export const useStore = create<State>()(
     (set, get) => {
       const refreshUndo = () => set({ canUndo: (undoManager?.undoStack.length ?? 0) > 0, canRedo: (undoManager?.redoStack.length ?? 0) > 0 });
 
+      // 댓글: 보기 권한·비교 중에는 쓸 수 없다 (서버가 보기 권한의 변경을 받지 않는다)
+      const author = (): CommentAuthor => {
+        const { me, userName } = get();
+        return me?.user ? { id: me.user.id, name: me.user.name } : { name: userName || '익명' };
+      };
+      const commentEdit = (fn: (d: Y.Doc) => void) => {
+        if (!doc || !get().synced || get().role === 'viewer') return;
+        const d = doc;
+        try {
+          d.transact(() => fn(d), COMMENT);
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+          return;
+        }
+        set({ comments: readComments(d) });
+      };
+
       const publishPresence = () => {
         const { userName, userColor, selection } = get();
         provider?.awareness.setLocalStateField('user', { name: userName, color: userColor });
@@ -122,6 +172,8 @@ export const useStore = create<State>()(
         canRedo: false,
         compare: null,
         me: null,
+        comments: [],
+        remoteChanges: {},
         searchOpen: false,
         searchQuery: '',
         searchFocus: null,
@@ -150,18 +202,38 @@ export const useStore = create<State>()(
           // 여러 변경이 한꺼번에 와도 한 번만 다시 읽는다.
           // requestAnimationFrame은 창이 가려지면 멈추므로 타이머를 쓴다 (뒤에 있는 탭도 최신 상태 유지).
           let pending: ReturnType<typeof setTimeout> | null = null;
-          doc.on('update', () => {
+          let remote = false;
+          const um = undoManager;
+          doc.on('update', (_update: Uint8Array, origin: unknown) => {
+            // 내 편집·내 되돌리기·내 댓글이 아니면 다른 사람(또는 AI·서버)의 변경
+            if (origin !== LOCAL && origin !== COMMENT && origin !== um) remote = true;
             if (pending) return;
             pending = setTimeout(() => {
               pending = null;
               if (!doc) return;
-              set({ schema: readSchema(doc), meta: readMeta(doc) });
+              const next = readSchema(doc);
+              const patch: Partial<State> = { schema: next, meta: readMeta(doc), comments: readComments(doc) };
+              if (remote && get().synced) {
+                const changed = changedTables(get().schema, next);
+                if (changed.size) {
+                  const now = Date.now();
+                  const marks = { ...get().remoteChanges };
+                  changed.forEach((c, id) => (marks[id] = { ...c, at: now }));
+                  patch.remoteChanges = marks;
+                  setTimeout(() => {
+                    const left = Object.fromEntries(Object.entries(get().remoteChanges).filter(([, m]) => Date.now() - m.at < HIGHLIGHT_MS));
+                    set({ remoteChanges: left });
+                  }, HIGHLIGHT_MS + 50);
+                }
+              }
+              remote = false;
+              set(patch);
             }, 16);
           });
           provider.on('status', ({ status }: { status: SyncStatus }) => set({ status }));
           provider.on('sync', (synced: boolean) => {
             set({ synced });
-            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc) });
+            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc) });
           });
           provider.awareness.on('change', () => {
             const me = provider?.awareness.clientID;
@@ -172,7 +244,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, selection: null, selectedTables: [], synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], remoteChanges: {}, selection: null, selectedTables: [], synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
           publishPresence();
           authApi
             .project(projectId)
@@ -213,6 +285,19 @@ export const useStore = create<State>()(
             draft.relations = copy.relations;
           });
           set({ selection: null, selectedTables: [] });
+        },
+
+        addComment(input) {
+          commentEdit((d) => addComment(d, { ...input, author: author() }));
+        },
+        replyComment(threadId, text) {
+          commentEdit((d) => replyComment(d, threadId, author(), text));
+        },
+        setCommentStatus(threadId, status) {
+          commentEdit((d) => setCommentStatus(d, threadId, status, author()));
+        },
+        deleteComment(threadId) {
+          commentEdit((d) => deleteComment(d, threadId));
         },
 
         undo() {

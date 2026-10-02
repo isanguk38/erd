@@ -14,3 +14,5 @@ export * from './areas';
 export * from './clipboard';
 export * from './templates';
 export * from './lint';
+export * from './comments';
+export * from './changes';

@@ -23,6 +23,7 @@ import {
 } from '@erd/core';
 import { useStore } from '../store';
 import { TemplateApplyMenu } from './TemplatePanels';
+import { TableComments } from './Comments';
 import { useDialect } from '../lib/hooks';
 
 const ACTIONS: ReferentialAction[] = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
@@ -166,6 +167,7 @@ function TableEditor({ table }: { table: Table }) {
       </div>
 
       <IndexEditor table={table} />
+      <TableComments table={table} />
     </aside>
   );
 }

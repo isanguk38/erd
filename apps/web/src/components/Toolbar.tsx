@@ -4,6 +4,7 @@ import { createArea, dialectList, fitAreasToTables, type ColumnTemplate, type Di
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { measuredSizeOf } from '../lib/sizes';
 import { useLintCount } from './LintPanel';
+import { useOpenCommentCount } from './Comments';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
@@ -14,7 +15,7 @@ import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
 import { loadModule } from '../lib/appVersion';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -154,6 +155,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     });
   };
   const lintCount = useLintCount();
+  const commentCount = useOpenCommentCount();
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -191,6 +193,11 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <Icon name="check" />
           <span className="hide-narrow">설계 검사</span>
           {lintCount > 0 && <span className="db-badge lint">{lintCount}</span>}
+        </button>
+        <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
+          <Icon name="comment" />
+          <span className="hide-narrow">댓글</span>
+          {commentCount > 0 && <span className="db-badge comment">{commentCount}</span>}
         </button>
         <button className="btn btn-ghost icon-only" onClick={() => onOpen('help')} title="사용 방법 · 단축키">
           <Icon name="help" />
