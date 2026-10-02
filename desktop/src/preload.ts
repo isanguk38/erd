@@ -4,7 +4,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('erdDesktop', {
-  version: '0.1.0',
+  version: '0.2.0',
   listConnections: () => ipcRenderer.invoke('erd:connections:list'),
   createConnection: (input: unknown) => ipcRenderer.invoke('erd:connections:create', input),
   updateConnection: (id: string, input: unknown) => ipcRenderer.invoke('erd:connections:update', id, input),

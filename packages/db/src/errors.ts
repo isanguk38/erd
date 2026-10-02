@@ -15,5 +15,7 @@ export function explainConnectionError(e: unknown): Error {
   if (/Connection terminated|ECONNRESET|socket hang up|Connection lost|PROTOCOL_CONNECTION_LOST|ESOCKET|NJS-500|DPI-1080/i.test(message)) {
     return new Error(`DB 연결이 중간에 끊겼습니다 (네트워크·방화벽, 또는 DB 서버가 연결을 닫음). 잠시 뒤 다시 시도하세요.\n(${message})`);
   }
+  if (/NJS-515/.test(message)) return new Error(`Oracle 접속 주소 형식이 올바르지 않습니다. 서비스 이름(예: FREEPDB1, ORCLPDB1)과 포트를 확인하세요.
+(${message})`);
   return e instanceof Error ? e : new Error(message);
 }

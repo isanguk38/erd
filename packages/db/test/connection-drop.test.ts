@@ -47,3 +47,13 @@ describe('DB 연결이 중간에 끊길 때', () => {
     }
   });
 });
+
+describe('연결 오류 안내', () => {
+  it('끊김·Oracle 주소 형식 오류는 알아보기 쉽게, 나머지는 그대로', async () => {
+    const { explainConnectionError } = await import('../src/errors');
+    expect(explainConnectionError(new Error('Connection terminated unexpectedly')).message).toContain('DB 연결이 중간에 끊겼습니다');
+    expect(explainConnectionError(new Error('read ECONNRESET')).message).toContain('DB 연결이 중간에 끊겼습니다');
+    expect(explainConnectionError(new Error('NJS-515: error in Easy Connect connection string')).message).toContain('서비스 이름');
+    expect(explainConnectionError(new Error('password authentication failed')).message).toBe('password authentication failed');
+  });
+});
