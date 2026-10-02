@@ -51,7 +51,8 @@ export function registerDesktopRoutes(app: FastifyInstance, fetchLatest: () => P
       try {
         cache = { at: Date.now(), value: toDesktopRelease(await fetchLatest()) };
       } catch (e) {
-        // GitHub에 닿지 않으면 이전 값을 쓰고, 그것도 없으면 "모름"
+        // GitHub에 닿지 않으면 이전 값을 쓰되 1분 뒤 다시 확인하고, 이전 값도 없으면 "모름"
+        if (cache) cache.at = Date.now() - CACHE_MS + 60_000;
         if (!cache) return reply.status(503).send({ error: `최신 버전을 확인하지 못했습니다: ${e instanceof Error ? e.message : String(e)}` });
       }
     }
@@ -60,11 +61,64 @@ export function registerDesktopRoutes(app: FastifyInstance, fetchLatest: () => P
   });
 }
 
+/**
+ * GitHub API로 최신 릴리스를 읽는다. API는 IP당 시간 제한(60회)이 있어 여러 서비스가 IP를 같이 쓰는
+ * 호스팅에서는 자주 막히므로, 막히면 일반 웹 주소(/releases/latest 이동 + releases.atom 피드)로 읽는다.
+ */
 async function defaultFetch(): Promise<GithubRelease> {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'erd-server' },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`GitHub ${res.status}`);
-  return (await res.json()) as GithubRelease;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers: { accept: 'application/vnd.github+json', 'user-agent': 'erd-server' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    return (await res.json()) as GithubRelease;
+  } catch (apiError) {
+    try {
+      return await fetchWithoutApi();
+    } catch (e) {
+      throw new Error(`${apiError instanceof Error ? apiError.message : String(apiError)} / ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+export async function fetchWithoutApi(): Promise<GithubRelease> {
+  // 최신 릴리스 주소는 /releases/tag/v0.2.0 으로 이동한다 (초안·미리보기 릴리스는 빠짐)
+  const latest = await fetch(`https://github.com/${REPO}/releases/latest`, { redirect: 'manual', signal: AbortSignal.timeout(8000) });
+  const tag = /\/releases\/tag\/([^/?#]+)$/.exec(latest.headers.get('location') ?? '')?.[1];
+  if (!tag) throw new Error(`최신 릴리스 주소를 찾지 못했습니다 (${latest.status})`);
+  const version = decodeURIComponent(tag).replace(/^v/i, '');
+  const feed = await fetch(`https://github.com/${REPO}/releases.atom`, { signal: AbortSignal.timeout(8000) }).then((r) => (r.ok ? r.text() : ''));
+  const entry = feed.split('<entry>').find((e) => e.includes(`/releases/tag/${tag}"`)) ?? '';
+  const pick = (re: RegExp) => re.exec(entry)?.[1] ?? '';
+  return {
+    tag_name: tag,
+    name: unescapeXml(pick(/<title>([\s\S]*?)<\/title>/)) || tag,
+    body: htmlToNotes(unescapeXml(pick(/<content type="html">([\s\S]*?)<\/content>/))),
+    html_url: `https://github.com/${REPO}/releases/tag/${tag}`,
+    published_at: pick(/<updated>([^<]+)<\/updated>/),
+    draft: false,
+    prerelease: false,
+    assets: [{ name: `ERD-Setup-${version}.exe`, browser_download_url: `https://github.com/${REPO}/releases/download/${tag}/ERD-Setup-${version}.exe` }],
+  };
+}
+
+function unescapeXml(text: string): string {
+  return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+}
+
+/** 릴리스 설명 HTML을 화면이 읽는 간단한 형식(## 제목, - 목록)으로 바꾼다 */
+export function htmlToNotes(html: string): string {
+  return unescapeXml(
+    html
+      .replace(/<h[1-6][^>]*>/gi, '\n## ')
+      .replace(/<li[^>]*>/gi, '\n- ')
+      .replace(/<\/(p|h[1-6]|li|ul|ol)>|<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  )
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
 }

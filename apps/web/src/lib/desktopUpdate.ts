@@ -15,7 +15,8 @@ export interface DesktopRelease {
 }
 
 const SNOOZE_KEY = 'erd.desktopUpdate.snooze';
-const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+const CHECK_INTERVAL = 60 * 60 * 1000;
+const FOCUS_INTERVAL = 10 * 60 * 1000;
 
 /** a가 b보다 새 버전이면 true (1.2.10 > 1.2.9) */
 export function isNewer(a: string, b: string): boolean {
@@ -119,8 +120,18 @@ export const useDesktopUpdate = create<UpdateState>((set, get) => ({
 /** 앱이 열려 있는 동안 주기적으로 확인한다 */
 export function startDesktopUpdateCheck(): () => void {
   if (!desktop) return () => {};
-  const check = () => void useDesktopUpdate.getState().check();
+  let last = 0;
+  const check = () => {
+    last = Date.now();
+    void useDesktopUpdate.getState().check();
+  };
+  // 앱을 켜 둔 채 새 버전이 나와도 알 수 있게: 창으로 돌아올 때마다(10분에 한 번까지) 다시 확인
+  const onFocus = () => Date.now() - last > FOCUS_INTERVAL && check();
   check();
   const timer = setInterval(check, CHECK_INTERVAL);
-  return () => clearInterval(timer);
+  window.addEventListener('focus', onFocus);
+  return () => {
+    clearInterval(timer);
+    window.removeEventListener('focus', onFocus);
+  };
 }
