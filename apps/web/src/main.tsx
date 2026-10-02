@@ -4,6 +4,9 @@ import '@xyflow/react/dist/style.css';
 import './styles.css';
 import { App } from './App';
 import { UpdateBanner } from './components/UpdateBanner';
+import { applyTheme } from './lib/theme';
+
+applyTheme();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

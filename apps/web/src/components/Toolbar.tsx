@@ -5,6 +5,7 @@ import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { measuredSizeOf } from '../lib/sizes';
 import { useLintCount } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
+import { setThemeSetting, useTheme, type ThemeSetting } from '../lib/theme';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
 import { DESKTOP_DOWNLOAD_URL } from '../lib/desktop';
@@ -155,6 +156,9 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     });
   };
   const lintCount = useLintCount();
+  const { setting: themeSetting, effective: theme } = useTheme();
+  const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { system: 'light', light: 'dark', dark: 'system' };
+  const THEME_LABEL: Record<ThemeSetting, string> = { system: '시스템 설정', light: '라이트', dark: '다크' };
   const commentCount = useOpenCommentCount();
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
@@ -198,6 +202,15 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <Icon name="comment" />
           <span className="hide-narrow">댓글</span>
           {commentCount > 0 && <span className="db-badge comment">{commentCount}</span>}
+        </button>
+        <button
+          className="btn btn-ghost icon-only"
+          onClick={() => setThemeSetting(THEME_NEXT[themeSetting])}
+          title={`화면 테마: ${THEME_LABEL[themeSetting]} (누르면 ${THEME_LABEL[THEME_NEXT[themeSetting]]})`}
+          aria-label="화면 테마 바꾸기"
+        >
+          <Icon name={theme === 'dark' ? 'moon' : 'sun'} />
+          {themeSetting === 'system' && <span className="theme-auto">A</span>}
         </button>
         <button className="btn btn-ghost icon-only" onClick={() => onOpen('help')} title="사용 방법 · 단축키">
           <Icon name="help" />

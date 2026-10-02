@@ -22,6 +22,7 @@ import { matchIds } from '../lib/search';
 import { measuredSizeOf, setMeasuredSizes } from '../lib/sizes';
 import { addTableWithTemplate } from '../lib/templates';
 import { getDialect, type DialectId } from '@erd/core';
+import { useTheme } from '../lib/theme';
 
 const nodeTypes = { table: TableNode, area: AreaNode };
 const edgeTypes = { relation: RelationEdge };
@@ -107,6 +108,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
   const role = useStore((s) => s.role);
   const readOnly = Boolean(compare) || role === 'viewer';
+  const { effective: theme } = useTheme();
 
   const onNodesChange = useCallback((changes: NodeChange<ErdNode>[]) => {
     setNodes((prev) => applyNodeChanges(changes, prev));
@@ -241,10 +243,11 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       maxZoom={2}
       fitView
       proOptions={{ hideAttribution: true }}
+      colorMode={theme}
     >
       <Background gap={20} size={1} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable nodeStrokeWidth={3} nodeColor={(n) => (n.type === 'area' ? 'transparent' : '#cbd5e1')} />
+      <MiniMap pannable zoomable nodeStrokeWidth={3} nodeColor={(n) => (n.type === 'area' ? 'transparent' : theme === 'dark' ? '#475569' : '#cbd5e1')} />
       <ViewportPortal>
         {peers.filter((p) => p.cursor).map((p) => (
           <div key={p.clientId} className="peer-cursor" style={{ transform: `translate(${p.cursor!.x}px, ${p.cursor!.y}px)`, color: p.color }}>
