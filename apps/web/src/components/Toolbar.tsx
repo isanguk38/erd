@@ -14,6 +14,7 @@ import { sampleSchema } from '../lib/sample';
 import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
 import { loadModule } from '../lib/appVersion';
+import { DesktopUpdateButton } from './DesktopUpdate';
 
 export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments';
 
@@ -214,6 +215,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <Icon name="share" />
           <span>공유</span>
         </button>
+        <DesktopUpdateButton />
         <UserMenu />
       </div>
 

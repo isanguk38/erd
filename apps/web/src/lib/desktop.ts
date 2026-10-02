@@ -13,6 +13,9 @@ export interface DesktopBridge {
   testConnection(input: ConnectionInput & { id?: string }): Promise<{ serverVersion: string }>;
   introspect(id: string, commentAs: 'logicalName' | 'comment'): Promise<IntrospectResult>;
   execute(id: string, statements: string[]): Promise<ExecuteResult>;
+  /** 새 버전 설치 파일을 내려받아 실행 (0.2.0부터. 0.1.x에는 없다) */
+  installUpdate?(url: string): Promise<{ ok: true }>;
+  onUpdateProgress?(callback: (percent: number) => void): () => void;
 }
 
 export const desktop: DesktopBridge | null = (globalThis as { erdDesktop?: DesktopBridge }).erdDesktop ?? null;

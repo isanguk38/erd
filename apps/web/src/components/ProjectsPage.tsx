@@ -5,6 +5,7 @@ import { clearLegacyProject, legacyProject, useStore } from '../store';
 import { UserMenu } from './Toolbar';
 import { DB_ORDER, dbLabel } from '../lib/dbInfo';
 
+import { DesktopUpdateButton } from './DesktopUpdate';
 export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
   const [error, setError] = useState('');
@@ -36,6 +37,7 @@ export function ProjectsPage() {
       <header className="projects-page__head">
         <div className="projects-page__title">
           <h1>ERD</h1>
+          <DesktopUpdateButton />
           <UserMenu />
         </div>
         <p className="muted">함께 그리고, DB와 바로 동기화하고, AI와 같이 설계하는 ERD</p>

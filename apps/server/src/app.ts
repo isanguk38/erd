@@ -10,6 +10,7 @@ import { ProjectStore } from './projects';
 import { registerProjectRoutes } from './routes/projects';
 import { registerAuthRoutes, requiredRole } from './routes/auth';
 import { registerTemplateRoutes } from './routes/templates';
+import { registerDesktopRoutes } from './routes/desktop';
 import { createSyncServer } from './ws';
 import { loadMcpToken, registerMcpRoute } from './mcp';
 import { atLeast, Auth, DESKTOP_ONLY_MESSAGE, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
@@ -26,6 +27,8 @@ export interface AppOptions {
   /** 파일 저장 위치 (storage를 주지 않으면 이 폴더에 저장) */
   dataDir?: string;
   storage?: Storage;
+  /** 설치형 앱 최신 릴리스 읽기 (테스트용으로 바꿔 끼운다. 기본: GitHub) */
+  fetchDesktopRelease?: Parameters<typeof registerDesktopRoutes>[1];
   /** DB 비밀번호 암호화 키 (배포 시 필수) */
   secret?: string;
   logger?: boolean;
@@ -99,7 +102,7 @@ export interface ErdApp {
 }
 
 /** 로그인이 없어도 되는 경로 */
-const PUBLIC_PATHS = ['/api/health', '/api/me', '/auth/', '/mcp'];
+const PUBLIC_PATHS = ['/api/health', '/api/me', '/api/desktop/latest', '/auth/', '/mcp'];
 
 export function buildApp(options: AppOptions): ErdApp {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 20 * 1024 * 1024 });
@@ -219,6 +222,7 @@ export function buildApp(options: AppOptions): ErdApp {
 
   registerAuthRoutes(app, auth, projects, serverDb);
   registerTemplateRoutes(app, storage);
+  registerDesktopRoutes(app, options.fetchDesktopRelease);
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
   registerMcpRoute(app, { auth, localToken: mcpToken, webUrl: publicUrl });
 

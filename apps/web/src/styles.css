@@ -664,3 +664,16 @@ label.btn { display: inline-flex; align-items: center; }
 .multi-section .colors { flex-wrap: wrap; }
 .multi-comment .comment-new__row { justify-content: space-between; }
 .ok-text { color: var(--create); margin: 4px 0 0; }
+
+/* 설치형 앱 새 버전 안내 */
+.btn-update { background: #16a34a; color: #fff; border-color: #16a34a; }
+.btn-update:hover { background: #15803d; border-color: #15803d; }
+.desktop-update h3 { margin: 14px 0 6px; font-size: 14px; }
+.desktop-update__versions { margin: 0; }
+.release-notes { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+.release-notes h4 { margin: 8px 0 4px; font-size: 13px; }
+.release-notes ul { margin: 4px 0; padding-left: 18px; }
+.release-notes li { margin: 2px 0; }
+.release-notes p { margin: 4px 0; }
+.notice-box { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, #16a34a 12%, transparent); font-size: 13px; }
+.projects-page__title .btn-update { margin-left: auto; }

@@ -4,10 +4,12 @@
 // - DB 연결만 앱이 이 PC에서 직접 처리한다. 그래서 사내망·내 PC(localhost)의 DB에도 붙는다.
 // - DB 접속 정보는 이 PC에만 저장하고, 비밀번호는 OS 보안 저장소(safeStorage)로 암호화한다. 서버로 보내지 않는다.
 
-import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, net, safeStorage, shell, type IpcMainInvokeEvent } from 'electron';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { dialects, type DialectId } from '@erd/core';
 
@@ -166,7 +168,44 @@ function handle<A extends unknown[], R>(channel: string, fn: (...args: A) => R |
   });
 }
 
+// ── 업데이트 ─────────────────────────────
+
+/** 이 저장소의 릴리스 설치 파일만 받는다 */
+const UPDATE_URL = /^https:\/\/github\.com\/isanguk38\/erd\/releases\/download\/v[\d.]+\/ERD-Setup-[\d.]+\.exe$/;
+
+/** 새 버전 설치 파일을 내려받아 실행하고 앱을 끈다 (설치 프로그램이 이 앱을 새 버전으로 바꾼다) */
+async function installUpdate(url: string): Promise<{ ok: true }> {
+  if (typeof url !== 'string' || !UPDATE_URL.test(url)) throw new Error('허용되지 않은 설치 파일 주소입니다');
+  const res = await net.fetch(url);
+  if (!res.ok || !res.body) throw new Error(`설치 파일을 내려받지 못했습니다 (HTTP ${res.status})`);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const file = join(app.getPath('temp'), basename(new URL(url).pathname));
+  const out = createWriteStream(file);
+  const progress = (percent: number) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('erd:update:progress', percent));
+  let received = 0;
+  let last = -1;
+  const reader = res.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      if (!out.write(value)) await once(out, 'drain');
+      const percent = total ? Math.floor((received / total) * 100) : -1;
+      if (percent !== last) progress((last = percent));
+    }
+  } finally {
+    out.end();
+    await once(out, 'close');
+  }
+  if (total && received !== total) throw new Error('설치 파일을 끝까지 받지 못했습니다. 다시 시도하세요');
+  spawn(file, [], { detached: true, stdio: 'ignore' }).unref();
+  setTimeout(() => app.quit(), 1000);
+  return { ok: true };
+}
+
 function registerHandlers() {
+  handle('erd:update:install', (url: string) => installUpdate(url));
   handle('erd:connections:list', () => readConnections().map(toPublic));
 
   handle('erd:connections:create', (input: ConnectionInput) => {
