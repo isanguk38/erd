@@ -252,10 +252,14 @@ export function buildApp(options: AppOptions): ErdApp {
     });
   }
 
+  // 종료 순서: ① 실시간 접속을 먼저 끊어 편집을 그만 받고 (preClose: HTTP 서버를 닫기 전에 해야 종료가 멈추지 않는다)
+  // ② 메모리의 문서를 바로 저장 ③ 저장소 쓰기가 끝날 때까지 기다린다 (최대 20초)
+  app.addHook('preClose', async () => {
+    await sync.close();
+  });
   app.addHook('onClose', async () => {
     projects.flush();
-    sync.close();
-    await storage.flush();
+    await Promise.race([storage.flush(), new Promise((resolve) => setTimeout(resolve, 20_000))]);
   });
 
   return { app, projects, connections: store, auth, storage, sync, mcpToken };

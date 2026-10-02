@@ -22,6 +22,8 @@ export function createSyncServer(store: ProjectStore, authorize: Authorize = () 
   /** 문서별 접속자: 연결 → 그 연결이 관리하는 awareness client id들 */
   const rooms = new Map<string, Map<WebSocket, Set<number>>>();
   const listening = new Set<string>();
+  /** 서버를 끄는 중: 새 접속과 편집을 받지 않는다 (화면은 편집을 들고 있다가 새 서버에 다시 보낸다) */
+  let closing = false;
 
   const send = (conn: WebSocket, message: Uint8Array) => {
     if (conn.readyState === conn.OPEN) conn.send(message, (err) => err && conn.close());
@@ -63,6 +65,7 @@ export function createSyncServer(store: ProjectStore, authorize: Authorize = () 
 
     conn.binaryType = 'arraybuffer';
     conn.on('message', (data: ArrayBuffer) => {
+      if (closing) return;
       try {
         const decoder = decoding.createDecoder(new Uint8Array(data));
         const encoder = encoding.createEncoder();
@@ -99,7 +102,7 @@ export function createSyncServer(store: ProjectStore, authorize: Authorize = () 
       const ids = room.get(conn);
       room.delete(conn);
       if (ids?.size) awarenessProtocol.removeAwarenessStates(awareness, [...ids], null);
-      if (room.size === 0) store.save(id);
+      if (room.size === 0 && !closing) store.save(id);
     });
 
     // 처음 접속: 서버 상태 요청(step1) + 지금 참가자 목록
@@ -118,6 +121,12 @@ export function createSyncServer(store: ProjectStore, authorize: Authorize = () 
 
   /** http 서버의 upgrade 이벤트에 연결한다. 경로: /ws/<projectId> */
   const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    if (closing) {
+      // 재시작 중: 화면은 잠시 뒤 다시 접속한다 (새 서버로)
+      socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     const match = (req.url ?? '').match(/^\/ws\/([a-zA-Z0-9-]+)/);
     if (!match || !store.exists(match[1])) {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
@@ -133,6 +142,31 @@ export function createSyncServer(store: ProjectStore, authorize: Authorize = () 
     wss.handleUpgrade(req, socket, head, (conn) => onConnection(conn, match[1], access.readOnly));
   };
 
-  return { handleUpgrade, rooms, close: () => wss.close() };
+  /**
+   * 서버 종료: 새 접속·편집을 막고 접속자를 "서버 재시작"(1012)으로 끊는다.
+   * 끊긴 화면은 자동으로 다시 접속하고, 아직 서버에 안 간 편집은 다시 접속할 때 보내 합쳐진다.
+   */
+  const close = async (timeoutMs = 3000) => {
+    closing = true;
+    const conns = [...rooms.values()].flatMap((room) => [...room.keys()]);
+    await Promise.race([
+      Promise.all(
+        conns.map(
+          (conn) =>
+            new Promise<void>((resolve) => {
+              if (conn.readyState === conn.CLOSED) return resolve();
+              conn.once('close', () => resolve());
+              conn.close(1012, 'server restart');
+            }),
+        ),
+      ),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+    // 응답이 없는 연결은 강제로 닫는다 (종료가 멈추지 않게)
+    for (const conn of conns) if (conn.readyState !== conn.CLOSED) conn.terminate();
+    wss.close();
+  };
+
+  return { handleUpgrade, rooms, close };
 }
 

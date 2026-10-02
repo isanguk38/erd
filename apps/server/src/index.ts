@@ -90,12 +90,24 @@ const { app, mcpToken, auth } = buildApp({
   serverDb: !authEnabled || env.ERD_SERVER_DB === '1',
 });
 
-// 종료할 때 메모리의 문서를 저장한다
+// 종료할 때(재배포·잠들기) 접속을 정리하고 메모리의 문서를 저장한 뒤 끈다.
+// Render는 신호를 보내고 30초 뒤 강제로 끝내므로, 그 전에 반드시 끝나도록 25초 제한을 둔다.
+let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`${signal}: 접속을 정리하고 저장한 뒤 종료합니다`);
+    const force = setTimeout(() => {
+      console.error('종료가 25초 안에 끝나지 않아 강제로 끝냅니다');
+      process.exit(1);
+    }, 25_000);
+    force.unref();
     app
       .close()
       .then(() => storage.close())
+      .then(() => console.log('저장 완료, 종료'))
+      .catch((e) => console.error('종료 중 오류:', e))
       .finally(() => process.exit(0));
   });
 }
