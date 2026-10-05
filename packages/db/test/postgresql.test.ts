@@ -50,7 +50,8 @@ async function pendingChanges(db: Queryable, schema: Schema) {
   return diffIncoming(schema, dbSchema, pgDialect).changes.map((c) => c.summary);
 }
 
-describe('PostgreSQL 연동 (PGlite)', () => {
+// PGlite(브라우저용 PostgreSQL)는 시작이 느릴 수 있어(PC가 바쁠 때 5초 넘음) 넉넉히 기다린다
+describe('PostgreSQL 연동 (PGlite)', { timeout: 30_000 }, () => {
   it('ERD로 빈 DB에 테이블을 만들고, 다시 읽으면 ERD와 같다', async () => {
     const db = new PGlite();
     const schema = erd();
