@@ -36,7 +36,9 @@ describe('MCP', () => {
     const tools = (await client.listTools()).tools.map((t) => t.name);
     expect(tools).toEqual(expect.arrayContaining(['get_schema', 'edit_schema', 'export_sql', 'db_push', 'export_definition_excel']));
 
-    await client.callTool({ name: 'create_project', arguments: { name: '쇼핑몰', dialect: 'postgresql' } });
+    const created = JSON.parse(textOf(await client.callTool({ name: 'create_project', arguments: { name: '쇼핑몰', dialect: 'postgresql' } })));
+    // 새 프로젝트는 제안 모드가 기본이다. 이 테스트는 바로 적용 흐름을 본다 (사람이 화면에서 바꾼 것처럼)
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'apply' } });
     const edit = await client.callTool({
       name: 'edit_schema',
       arguments: {

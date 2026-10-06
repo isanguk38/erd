@@ -162,7 +162,7 @@ export class ProjectStore {
     const id = randomUUID();
     const doc = new Y.Doc();
     doc.transact(() => {
-      writeMeta(doc, { name, dialect, aiMode: 'apply', aiAllowDbExecute: false });
+      writeMeta(doc, { name, dialect, aiMode: 'propose', aiAllowDbExecute: false });
       writeSchema(doc, schema);
     });
     this.storage.put(this.path(id, 'doc.ydoc'), Buffer.from(Y.encodeStateAsUpdate(doc)));

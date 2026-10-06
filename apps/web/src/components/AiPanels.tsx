@@ -267,7 +267,7 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
           <label className={`choice${meta.aiMode === 'propose' ? ' active' : ''}`}>
             <input type="radio" disabled={role === 'viewer'} checked={meta.aiMode === 'propose'} onChange={() => projectApi.update(projectId, { aiMode: 'propose' })} />
             <div>
-              <b>제안 모드</b>
+              <b>제안 모드 (기본)</b>
               <p className="muted small">AI의 변경은 제안으로 쌓이고, 사람이 항목별로 골라 반영합니다. 그 사이 사람이 한 변경은 그대로 유지됩니다.</p>
             </div>
           </label>

@@ -28,14 +28,26 @@ const member: Command = {
   ],
 };
 
-async function createProject(app: ErdApp['app']) {
-  return (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '쇼핑몰', dialect: 'mysql' } })).json() as { id: string };
+/** aiMode: 새 프로젝트 기본은 제안 모드. 바로 적용 흐름을 보는 테스트는 'apply'로 바꾼다 (사람이 화면에서 바꾸는 것처럼) */
+async function createProject(app: ErdApp['app'], aiMode?: 'apply' | 'propose') {
+  const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '쇼핑몰', dialect: 'mysql' } })).json() as { id: string };
+  if (aiMode) await app.inject({ method: 'PATCH', url: `/api/projects/${project.id}`, payload: { aiMode } });
+  return project;
 }
 
 describe('AI 바로 적용 + 되돌리기', () => {
-  it('AI 변경 전 버전을 자동 저장하고 한 번에 되돌린다', async () => {
+  it('새 프로젝트는 제안 모드가 기본: AI 변경은 승인 전까지 ERD에 반영되지 않는다', async () => {
     const { app } = setup();
     const { id } = await createProject(app);
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json().meta.aiMode).toBe('propose');
+    const r = (await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source: 'ai', commands: [member] } })).json();
+    expect(r.mode).toBe('propose');
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json().schema.tables).toEqual([]);
+  });
+
+  it('AI 변경 전 버전을 자동 저장하고 한 번에 되돌린다', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app, 'apply');
     await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { commands: [member] } }); // 사람(api)이 만든 테이블
 
     const r1 = (await app.inject({
@@ -67,7 +79,7 @@ describe('AI 바로 적용 + 되돌리기', () => {
 
   it('MCP 되돌리기는 가장 최근 AI 작업 한 번만, 그 뒤 사람이 고친 것은 남긴다', async () => {
     const { app } = setup();
-    const { id } = await createProject(app);
+    const { id } = await createProject(app, 'apply');
     const run = (source: string, commands: Command[]) => app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source, commands } });
     const tables = async () => (await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json().schema.tables as { name: string; columns: { name: string }[] }[];
     await run('ai', [member]);
@@ -173,7 +185,7 @@ describe('버전', () => {
 describe('실시간 동기화', () => {
   it('API(AI) 변경이 접속한 화면에 바로 반영되고, 화면 변경도 서버에 반영된다', async () => {
     const erd = setup();
-    const { id } = await createProject(erd.app);
+    const { id } = await createProject(erd.app, 'apply');
     await erd.app.listen({ port: 0, host: '127.0.0.1' });
     const port = (erd.app.server.address() as { port: number }).port;
 
