@@ -2,6 +2,8 @@ import { useState } from 'react';
 import {
   addColumn,
   addIndex,
+  autoFixColumnPatch,
+  canAutoIncrement,
   createCheck,
   findTable,
   foreignKeyColumnIds,
@@ -13,6 +15,7 @@ import {
   removeIndex,
   removeRelation,
   removeTable,
+  tableTypeIssues,
   updateColumn,
   updateIndex,
   updateRelation,
@@ -21,6 +24,8 @@ import {
   type ReferentialAction,
   type Relation,
   type Table,
+  type TableTypeIssue,
+  type TypeIssueField,
 } from '@erd/core';
 import { useStore } from '../store';
 import { TemplateApplyMenu } from './TemplatePanels';
@@ -52,7 +57,7 @@ function EmptyInspector() {
       <h3>사용 방법</h3>
       <ul>
         <li>빈 곳을 <b>더블클릭</b>하면 테이블이 생깁니다.</li>
-        <li>테이블을 클릭하면 여기서 컬럼과 인덱스를 편집합니다.</li>
+        <li>테이블을 <b>더블클릭</b>하면 여기서 컬럼과 인덱스를 편집합니다. 클릭·끌기는 고르기·옮기기만 합니다.</li>
         <li>테이블 오른쪽 점을 끌어 다른 테이블에 놓으면 <b>관계(FK)</b>가 생깁니다. 끌기 시작한 쪽이 부모입니다.</li>
         <li>관계 종류는 상단의 관계 메뉴에서 고릅니다.</li>
         <li><kbd>Delete</kbd> 선택 삭제, <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기</li>
@@ -62,7 +67,7 @@ function EmptyInspector() {
 }
 
 /** 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해). */
-function TextInput({ value, onCommit, placeholder, className, list }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string }) {
+function TextInput({ value, onCommit, placeholder, className, list, issue }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string; issue?: Mark }) {
   const [draft, setDraft] = useState<string | null>(null);
   const commit = () => {
     if (draft !== null && draft !== value) onCommit(draft);
@@ -70,10 +75,10 @@ function TextInput({ value, onCommit, placeholder, className, list }: { value: s
   };
   return (
     <input
-      className={className}
+      className={[className, issue?.className].filter(Boolean).join(' ') || undefined}
       value={draft ?? value}
-      // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다
-      title={(draft ?? value) || undefined}
+      // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다. 타입 문제가 있으면 그 이유도
+      title={[issue?.title, draft ?? value].filter(Boolean).join('\n\n') || undefined}
       placeholder={placeholder}
       list={list}
       onChange={(e) => setDraft(e.target.value)}
@@ -86,6 +91,18 @@ function TextInput({ value, onCommit, placeholder, className, list }: { value: s
   );
 }
 
+/** 타입 검사 결과를 편집 칸에 표시 (빨강: DB에서 실패, 주황: 주의) */
+interface Mark {
+  className: string;
+  title: string;
+}
+function markOf(issues: TableTypeIssue[], columnId: string, field: TypeIssueField): Mark | undefined {
+  const found = issues.filter((i) => i.columnId === columnId && i.field === field && i.severity !== 'info');
+  if (!found.length) return undefined;
+  const error = found.some((i) => i.severity === 'error');
+  return { className: error ? 'type-error' : 'type-warning', title: found.map((i) => `${i.severity === 'error' ? '⛔ DB에서 실패' : '⚠ 주의'}: ${i.message}${i.fix ? ` (설계 검사에서 "${i.fix.label}")` : ''}`).join('\n') };
+}
+
 function TableEditor({ table }: { table: Table }) {
   const schema = useStore((s) => s.schema);
   const dialect = getDialect(useDialect());
@@ -93,6 +110,23 @@ function TableEditor({ table }: { table: Table }) {
   const fkIds = foreignKeyColumnIds(schema, table.id);
   const setTable = (patch: Parameters<typeof updateTable>[2]) => edit((d) => updateTable(d, table.id, patch));
   const setColumn = (column: Column, patch: Partial<Column>) => edit((d) => updateColumn(d, table.id, column.id, patch));
+  // 타입·길이·자동 증가·ON UPDATE를 바꿀 때 함께 바로잡는다 (예: VARCHAR(255)를 DATETIME으로 바꾸면 길이 255를 지움)
+  const setColumnFixed = (column: Column, patch: Partial<Column>) => {
+    const fixed = autoFixColumnPatch(dialect, column, patch);
+    setColumn(column, fixed.patch);
+    if (fixed.notes.length) useStore.getState().showNotice({ text: `함께 고쳤습니다: ${fixed.notes.join(' / ')} (Ctrl+Z로 되돌리기)` });
+  };
+  const setAutoIncrement = (column: Column, on: boolean) => {
+    if (on && !canAutoIncrement(dialect, column)) {
+      const type = `${column.type}${column.length ? `(${column.length})` : ''}`;
+      if (!confirm(`${type}에는 자동 증가를 쓸 수 없습니다 (정수 타입만 가능).\n타입을 BIGINT로 바꾸고 자동 증가를 켤까요?`)) return;
+      setColumn(column, { autoIncrement: true, type: 'BIGINT', length: '', defaultValue: null });
+      return;
+    }
+    setColumnFixed(column, { autoIncrement: on });
+  };
+  const typeIssues = tableTypeIssues(dialect, table);
+  const mark = (column: Column, field: TypeIssueField) => markOf(typeIssues, column.id, field);
 
   return (
     <aside className="inspector">
@@ -151,12 +185,18 @@ function TableEditor({ table }: { table: Table }) {
             <div key={c.id} className="column-grid__row">
               <TextInput value={c.name} onCommit={(name) => setColumn(c, { name })} className={fkIds.has(c.id) ? 'is-fk' : ''} />
               <TextInput value={c.logicalName} onCommit={(logicalName) => setColumn(c, { logicalName })} />
-              <TextInput value={c.type} list="type-suggestions" onCommit={(type) => setColumn(c, { type: type.toUpperCase() })} />
-              <TextInput value={c.length} onCommit={(length) => setColumn(c, { length })} />
+              <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, { type: type.toUpperCase() })} />
+              <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
               <input type="checkbox" checked={!c.nullable || c.primaryKey} disabled={c.primaryKey} onChange={(e) => setColumn(c, { nullable: !e.target.checked })} />
               <input type="checkbox" checked={c.unique} disabled={c.primaryKey} onChange={(e) => setColumn(c, { unique: e.target.checked })} />
-              <input type="checkbox" checked={c.autoIncrement} onChange={(e) => setColumn(c, { autoIncrement: e.target.checked })} />
+              <input
+                type="checkbox"
+                checked={c.autoIncrement}
+                className={mark(c, 'autoIncrement')?.className}
+                title={mark(c, 'autoIncrement')?.title ?? '자동 증가'}
+                onChange={(e) => setAutoIncrement(c, e.target.checked)}
+              />
               <span className="default-cell">
                 {c.generated ? (
                   <TextInput
@@ -166,7 +206,7 @@ function TableEditor({ table }: { table: Table }) {
                     onCommit={(expression) => setColumn(c, { generated: { ...c.generated!, expression } })}
                   />
                 ) : (
-                  <TextInput value={c.defaultValue ?? ''} placeholder="NULL" onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
+                  <TextInput value={c.defaultValue ?? ''} placeholder="NULL" issue={mark(c, 'defaultValue')} onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
                 )}
                 <button
                   className={`generated-btn${c.generated ? ' on' : ''}`}
@@ -187,9 +227,10 @@ function TableEditor({ table }: { table: Table }) {
                 {/* MySQL·MariaDB 날짜 컬럼: 행이 바뀔 때 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP) */}
                 {(dialect.id === 'mysql' || dialect.id === 'mariadb') && /^(TIMESTAMP|DATETIME)/i.test(c.type) && (
                   <button
-                    className={`onupdate-btn${c.onUpdate ? ' on' : ''}`}
-                    title={c.onUpdate ? `ON UPDATE ${c.onUpdate} (행이 바뀔 때마다 현재 시각) — 누르면 끕니다` : '행이 바뀔 때마다 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP)'}
-                    onClick={() => setColumn(c, { onUpdate: c.onUpdate ? undefined : /^\d+$/.test(c.length) ? `CURRENT_TIMESTAMP(${c.length})` : 'CURRENT_TIMESTAMP' })}
+                    className={`onupdate-btn${c.onUpdate ? ' on' : ''}${mark(c, 'onUpdate') ? ` ${mark(c, 'onUpdate')!.className}` : ''}`}
+                    title={[mark(c, 'onUpdate')?.title, c.onUpdate ? `ON UPDATE ${c.onUpdate} (행이 바뀔 때마다 현재 시각) — 누르면 끕니다` : '행이 바뀔 때마다 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP)'].filter(Boolean).join('\n\n')}
+                    // 자릿수는 컬럼의 소수 초 자릿수(0~6)와 같아야 한다
+                    onClick={() => setColumn(c, { onUpdate: c.onUpdate ? undefined : /^[1-6]$/.test(c.length.trim()) ? `CURRENT_TIMESTAMP(${c.length.trim()})` : 'CURRENT_TIMESTAMP' })}
                   >
                     ↻
                   </button>

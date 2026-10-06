@@ -1,5 +1,6 @@
 import type { ColumnField, Dialect } from './dialects/types';
 import { columnWarnings, indexWarnings, sqlComment } from './dialects/common';
+import { columnTypeIssues, tableTypeIssues, type TypeIssue } from './typeRules';
 import {
   cloneSchema,
   expressionColumns,
@@ -148,6 +149,12 @@ function columnWarning(before: Column, after: Column, fields: ColumnField[]): st
   return warnings.length ? warnings.join(' / ') : undefined;
 }
 
+/** 타입 검사에서 실패(오류)·주의(경고)인 것을 변경 주의 문구로 (DB가 무시하는 것은 빼고) */
+function typeWarnings(issues: TypeIssue[]): string[] {
+  return issues.filter((i) => i.severity !== 'info').map((i) => (i.severity === 'error' ? `실패 예상: ${i.message}` : i.message));
+}
+const joinWarnings = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(' / ') || undefined;
+
 export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dialect): DiffResult {
   const base = normalizeSchema(baseInput);
   const target = normalizeSchema(targetInput);
@@ -162,12 +169,14 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     const before = baseTables.get(table.id);
     if (!before) {
       createdTableIds.add(table.id);
-      const tableWarning = table.columns.map((c) => columnWarnings(dialect, c)).filter(Boolean).join(' / ') || undefined;
+      const tableWarning = joinWarnings(...table.columns.map((c) => columnWarnings(dialect, c)), ...typeWarnings(tableTypeIssues(dialect, table)));
       changes.push({ kind: 'createTable', id: `createTable:${table.id}`, category: 'create', tableName: table.name, summary: `${table.name} 테이블 생성`, table, warning: tableWarning });
       for (const check of table.checks ?? []) {
         changes.push({ kind: 'addCheck', id: `addCheck:${table.id}:${check.id}`, category: 'create', tableName: table.name, summary: `${table.name} CHECK 추가 (${check.expression})`, table, check });
       }
+      const inlined = new Set(dialect.inlineIndexIds?.(table) ?? []);
       for (const index of table.indexes) {
+        if (inlined.has(index.id)) continue; // CREATE TABLE 안에서 만든다
         changes.push({
           kind: 'addIndex', id: `addIndex:${table.id}:${index.id}`, category: 'create', tableName: table.name,
           summary: `${table.name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${indexLabel(table, index)})`, table, index,
@@ -279,7 +288,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       changes.push({
         kind: 'addColumn', id: `addColumn:${after.id}:${column.id}`, category: 'alter', tableName: name,
         summary: `${name}.${column.name} 컬럼 추가`,
-        warning: needsDefault ? '기존 행이 있으면 NOT NULL 컬럼 추가에 기본값이 필요합니다' : undefined,
+        warning: joinWarnings(needsDefault ? '기존 행이 있으면 NOT NULL 컬럼 추가에 기본값이 필요합니다' : undefined, ...typeWarnings(columnTypeIssues(dialect, column))),
         table: after, column, previous: i > 0 ? after.columns[i - 1] : null,
       });
       return;
@@ -309,7 +318,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     changes.push({
       kind: 'alterColumn', id: `alterColumn:${after.id}:${column.id}`, category: 'alter', tableName: name,
       summary: `${name}.${column.name} 변경: ${detail}`,
-      warning: columnWarning(old, column, fields),
+      warning: joinWarnings(columnWarning(old, column, fields), ...typeWarnings(columnTypeIssues(dialect, column))),
       table: after, before: old, after: column, fields, beforeTable: before,
     });
   });

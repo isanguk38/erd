@@ -134,7 +134,7 @@ function Editor({ projectId }: { projectId: string }) {
   const status = useStore((s) => s.status);
   const comparing = useStore((s) => Boolean(s.compare));
   const openError = useStore((s) => s.openError);
-  const hasSelection = useStore((s) => Boolean(s.selection));
+  const hasSelection = useStore((s) => Boolean(s.selection) && s.inspectorOpen);
   const multiSelected = useStore((s) => s.selectedTables.length > 1);
   // 설계 검사·댓글은 캔버스 위 패널(하나씩 열고 닫기), 나머지는 대화상자
   const [sidePanel, setSidePanel] = useState<'lint' | 'comments' | null>(null);

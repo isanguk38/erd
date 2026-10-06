@@ -108,7 +108,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   // onNodesChange의 select 변경은 사용자 조작일 때만 오고, 스토어가 바꾼 선택(검색 결과 클릭 등)으로는 오지 않는다.
   // (onSelectionChange는 스토어가 바꾼 선택에도 한 박자 늦게 불려 서로 덮어쓰며 무한 반복된 적이 있다)
   // 마우스 버튼을 누르고 있는 동안(테이블을 잡고 끄는 중)에는 선택을 스토어에 알리지 않고, 놓는 순간 알린다.
-  // 누르자마자 오른쪽 편집 창이 열리면 아직 잡고 있는지 헷갈린다
+  // (편집 창이 열려 있을 때 잡자마자 내용이 바뀌면 아직 잡고 있는지 헷갈린다)
   const commitSelection = useCallback((ids: string[]) => {
     const state = useStore.getState();
     if (sameIds(state.selectedTables, ids)) return;
@@ -155,7 +155,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       edit((draft) => {
         if (tool === 'N:M') {
           const { table } = connectManyToMany(draft, source, target);
-          select({ type: 'table', id: table.id });
+          select({ type: 'table', id: table.id }, true);
           return;
         }
         const relation = connectTables(draft, {
@@ -164,7 +164,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
           cardinality: tool === '1:1' ? '1:1' : '1:N',
           identifying: tool === '1:N-identifying',
         });
-        select({ type: 'relation', id: relation.id });
+        select({ type: 'relation', id: relation.id }, true);
       });
     },
     [edit, select],
@@ -186,7 +186,10 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         if (e.ctrlKey || e.metaKey || e.shiftKey) return;
         select({ type: 'table', id: node.id });
       }}
+      // 클릭·끌기는 고르기만 하고, 오른쪽 편집 창은 더블클릭할 때 연다 (옮기기만 했는데 창이 열리면 불편하다)
+      onNodeDoubleClick={(_, node) => select({ type: 'table', id: node.id }, true)}
       onEdgeClick={(_, edge) => select({ type: 'relation', id: edge.id })}
+      onEdgeDoubleClick={(_, edge) => select({ type: 'relation', id: edge.id }, true)}
       onPaneClick={() => select(null)}
       onMouseMove={(e) => {
         // 다른 사람에게 내 커서 위치를 알린다 (초당 20번까지)
@@ -211,7 +214,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
         edit((draft) => {
           const table = addTableWithTemplate(draft, { position });
-          select({ type: 'table', id: table.id });
+          select({ type: 'table', id: table.id }, true);
         });
       }}
       onNodesDelete={(deleted) => edit((draft) => deleted.forEach((n) => removeTable(draft, n.id)))}

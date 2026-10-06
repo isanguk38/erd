@@ -11,6 +11,7 @@ import oracledb from 'oracledb';
 import sql from 'mssql';
 import { addColumn, addIndex, applyCommands, cloneSchema, emptySchema, generateStatements, getDialect, planPush, toLink, type DialectId, type Schema } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '../src';
+import { typeRuleMismatches } from './typeCases';
 
 interface Target {
   id: DialectId;
@@ -182,6 +183,12 @@ for (const target of [mariadb, oracle, mssql]) {
 
   describe.skipIf(!target.url)(`${dialect.label} 실제 서버`, () => {
     afterAll(() => target.cleanup());
+
+    it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
+      const config = await target.fresh();
+      const mismatches = await typeRuleMismatches(target.id, async (sqls) => (await connector.execute(config, sqls)).results.find((r) => !r.ok)?.error ?? null);
+      expect(mismatches).toEqual([]);
+    }, 180000);
 
     it('연결 확인, ERD로 만들고 다시 읽으면 ERD와 같다 (한글 코멘트, IDENTITY, UNIQUE, 기본값, FK CASCADE, 복합 인덱스)', async () => {
       const config = await target.fresh();

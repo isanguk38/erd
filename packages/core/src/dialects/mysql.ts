@@ -1,4 +1,4 @@
-import { checkName, indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
+import { checkName, indexName, primaryKeyColumns, relationName, type Column, type Index, type Table } from '../model';
 import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, splitTopLevel } from './common';
 import type { Dialect } from './types';
 
@@ -54,6 +54,14 @@ function columnDefinition(column: Column): string {
   return parts.join(' ');
 }
 
+/** 기본키 첫 컬럼이 아닌 AUTO_INCREMENT 컬럼의 키가 될 인덱스. MySQL은 CREATE TABLE 때 이미 키가 있어야 해서 테이블 안에 함께 만든다 */
+function autoIncrementKey(table: Table): Index | undefined {
+  const auto = table.columns.find((c) => c.autoIncrement && !c.generated?.expression.trim());
+  if (!auto || primaryKeyColumns(table)[0]?.id === auto.id) return undefined;
+  const candidates = table.indexes.filter((i) => !i.expression?.trim() && !i.method?.trim() && i.columnIds[0] === auto.id);
+  return candidates.find((i) => i.unique) ?? candidates[0];
+}
+
 export const mysql: Dialect = {
   id: 'mysql',
   label: 'MySQL',
@@ -79,6 +87,8 @@ export const mysql: Dialect = {
     const lines = table.columns.map((c) => '  ' + columnDefinition(c));
     const pk = primaryKeyColumns(table);
     if (pk.length) lines.push(`  PRIMARY KEY (${pk.map((c) => q(c.name)).join(', ')})`);
+    const autoKey = autoIncrementKey(table);
+    if (autoKey) lines.push(`  ${autoKey.unique ? 'UNIQUE ' : ''}KEY ${q(indexName(table, autoKey))} (${indexKeys(table, autoKey, q)})`);
     const comment = sqlComment(table);
     const suffix = comment ? ` COMMENT=${str(comment)}` : '';
     return [`CREATE TABLE ${q(table.name)} (\n${lines.join(',\n')}\n)${suffix}`];
@@ -119,6 +129,10 @@ export const mysql: Dialect = {
     const method = index.method?.trim().toLowerCase();
     const kind = method === 'fulltext' || method === 'spatial' ? `${method.toUpperCase()} ` : index.unique ? 'UNIQUE ' : '';
     return [`CREATE ${kind}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${keys})`];
+  },
+  inlineIndexIds: (table) => {
+    const key = autoIncrementKey(table);
+    return key ? [key.id] : [];
   },
   fkNeedsIndex: true,
   dropIndex(table, index, keepForFk = []) {

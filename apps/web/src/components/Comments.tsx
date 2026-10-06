@@ -137,7 +137,7 @@ export function CommentsPanel({ onClose }: { onClose: () => void }) {
   const go = (c: CommentThread) => {
     if (orphans.has(c.id) && !schema.tables.some((t) => t.id === c.tableId)) return;
     const { select, setSearchFocus } = useStore.getState();
-    select({ type: 'table', id: c.tableId });
+    select({ type: 'table', id: c.tableId }, true);
     setSearchFocus({ tableId: c.tableId, columnId: c.columnId });
     fitView({ nodes: [{ id: c.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
   };

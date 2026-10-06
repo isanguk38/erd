@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, LINT_RULES, lintSchema, type LintIssue, type LintRule } from '@erd/core';
+import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, updateColumn, type LintIssue, type LintRule } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Icon } from './ui';
@@ -14,6 +14,17 @@ export function useLintCount(): number {
     const skip = new Set(ignored ?? []);
     return lintSchema(schema, dialect).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
   }, [schema, dialect, ignored]);
+}
+
+/** 타입 검사의 고치기: 그 고침 때문에 생기는 문제(예: BIGINT로 바꾸면 남는 길이)도 함께 바로잡는다 */
+function applyColumnFix(issue: LintIssue) {
+  if (issue.fix?.kind !== 'patchColumn') return;
+  const { tableId, columnId, patch } = issue.fix;
+  const { schema, meta, edit } = useStore.getState();
+  const column = findTable(schema, tableId)?.columns.find((c) => c.id === columnId);
+  if (!column) return;
+  const fixed = autoFixColumnPatch(meta.dialect || 'mysql', column, patch);
+  edit((d) => updateColumn(d, tableId, columnId, fixed.patch));
 }
 
 /** 설계 검사 결과. 항목을 누르면 그 테이블로 이동한다 */
@@ -50,7 +61,7 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
 
   const go = (issue: LintIssue) => {
     const { select, setSearchFocus } = useStore.getState();
-    select({ type: 'table', id: issue.tableId });
+    select({ type: 'table', id: issue.tableId }, true);
     setSearchFocus({ tableId: issue.tableId, columnId: issue.columnId });
     fitView({ nodes: [{ id: issue.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
   };
@@ -108,9 +119,17 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                           <button
                             className="btn btn-ghost small"
                             title="이 외래키 컬럼에 인덱스를 추가합니다"
-                            onClick={() => useStore.getState().edit((d) => void addIndex(d, issue.fix!.tableId, { columnIds: issue.fix!.columnIds }))}
+                            onClick={() => {
+                              const fix = issue.fix as Extract<LintIssue['fix'], { kind: 'addIndex' }>;
+                              useStore.getState().edit((d) => void addIndex(d, fix.tableId, { columnIds: fix.columnIds }));
+                            }}
                           >
                             인덱스 추가
+                          </button>
+                        )}
+                        {issue.fix?.kind === 'patchColumn' && !readOnly && (
+                          <button className="btn btn-ghost small" title="이 컬럼을 고칩니다 (Ctrl+Z로 되돌리기)" onClick={() => applyColumnFix(issue)}>
+                            {issue.fix.label}
                           </button>
                         )}
                       </li>

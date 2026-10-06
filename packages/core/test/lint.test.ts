@@ -42,7 +42,7 @@ describe('설계 검사', () => {
     expect(only(s, 'fk-without-index', 'mysql')).toEqual([]);
     expect(only(s, 'fk-without-index', 'mariadb')).toEqual([]);
     // 고치면 사라진다
-    addIndex(s, orders.id, { columnIds: issue.fix!.columnIds });
+    addIndex(s, orders.id, { columnIds: (issue.fix as { columnIds: string[] }).columnIds });
     expect(only(s, 'fk-without-index')).toEqual([]);
   });
 

@@ -148,7 +148,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const addTableAtCenter = (template?: ColumnTemplate | null) => {
     edit((d) => {
       const t = addTableWithTemplate(d, { position: viewCenter() }, template);
-      select({ type: 'table', id: t.id });
+      select({ type: 'table', id: t.id }, true);
     });
   };
   const lintCount = useLintCount();

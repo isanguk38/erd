@@ -2,6 +2,7 @@
 
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
+import { tableTypeIssues } from './typeRules';
 
 export type LintRule =
   | 'no-primary-key'
@@ -10,7 +11,10 @@ export type LintRule =
   | 'naming-mixed'
   | 'missing-logical-name'
   | 'duplicate-index'
-  | 'varchar-no-length';
+  | 'varchar-no-length'
+  | 'type-error'
+  | 'type-warning'
+  | 'type-ignored';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -25,7 +29,7 @@ export interface LintIssue {
   columnName?: string;
   message: string;
   /** 바로 고칠 수 있으면 방법 */
-  fix?: { kind: 'addIndex'; tableId: string; columnIds: string[] };
+  fix?: { kind: 'addIndex'; tableId: string; columnIds: string[] } | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> };
 }
 
 export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverity; description: string }> = {
@@ -36,6 +40,9 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'missing-logical-name': { label: '논리명 없음', severity: 'info', description: '논리명(한글 이름)이나 설명이 없으면 정의서·다른 사람이 보기 어렵습니다.' },
   'duplicate-index': { label: '중복 인덱스', severity: 'warning', description: '같은 컬럼 조합의 인덱스가 두 개 이상이면 저장 공간과 쓰기 속도만 낭비됩니다.' },
   'varchar-no-length': { label: '문자 길이 없음', severity: 'warning', description: 'VARCHAR/CHAR에 길이가 없으면 DB에 따라 오류가 나거나 의도와 다른 길이가 됩니다.' },
+  'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
+  'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
+  'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
 
 type Style = 'snake' | 'camel' | null;
@@ -56,7 +63,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string): LintIss
   const issues: LintIssue[] = [];
   const add = (rule: LintRule, table: Table, message: string, extra: Partial<LintIssue> = {}) =>
     issues.push({
-      id: `${rule}:${table.id}${extra.columnId ? `:${extra.columnId}` : ''}${extra.fix ? `:${extra.fix.columnIds.join('+')}` : ''}`,
+      id: `${rule}:${table.id}${extra.columnId ? `:${extra.columnId}` : ''}${extra.fix?.kind === 'addIndex' ? `:${extra.fix.columnIds.join('+')}` : ''}`,
       rule,
       severity: LINT_RULES[rule].severity,
       tableId: table.id,
@@ -138,9 +145,30 @@ export function lintSchema(schema: Schema, dialect: DialectId | string): LintIss
   // 문자 길이
   for (const t of schema.tables) {
     for (const c of t.columns) {
+      // MySQL·MariaDB의 VARCHAR 길이 없음은 실패하므로 타입 검사(DB에서 실패하는 타입)에서 알린다
+      if (dialect === 'mysql' || dialect === 'mariadb') continue;
       if (/^(VARCHAR|CHAR|NVARCHAR|NCHAR|VARCHAR2|NVARCHAR2|CHARACTER VARYING)$/i.test(c.type.trim()) && !c.length.trim()) {
         add('varchar-no-length', t, `${t.name}.${c.name}: ${c.type}에 길이가 없습니다`, { columnId: c.id, columnName: c.name });
       }
+    }
+  }
+
+  // 타입 검사 (DB별 규칙은 typeRules.ts)
+  const typeRule = { error: 'type-error', warning: 'type-warning', info: 'type-ignored' } as const;
+  for (const t of schema.tables) {
+    for (const i of tableTypeIssues(dialect || 'mysql', t)) {
+      const rule = typeRule[i.severity];
+      issues.push({
+        id: `${rule}:${t.id}:${i.columnId}:${i.code}`,
+        rule,
+        severity: LINT_RULES[rule].severity,
+        tableId: t.id,
+        tableName: t.name,
+        columnId: i.columnId,
+        columnName: i.columnName,
+        message: i.message.startsWith(`${t.name}:`) ? i.message : `${t.name}.${i.message}`,
+        fix: i.fix ? { kind: 'patchColumn', tableId: t.id, columnId: i.columnId, label: i.fix.label, patch: i.fix.patch } : undefined,
+      });
     }
   }
 

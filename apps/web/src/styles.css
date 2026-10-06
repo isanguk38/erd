@@ -256,6 +256,9 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
 .column-grid__row input:not([type='checkbox']) { width: 100%; padding: 3px 5px; font-size: 12px; min-width: 0; }
 .column-grid__row input[type='checkbox'] { margin: 0 auto; }
 .column-grid__row input.is-fk { border-color: var(--fk); }
+/* 타입 검사: DB에서 실패(빨강)·주의(주황). 이유는 마우스를 올리면 보인다 */
+.column-grid__row input.type-error, .column-grid__row .type-error { border-color: var(--danger); background: var(--danger-soft); outline: 1px solid var(--danger); }
+.column-grid__row input.type-warning, .column-grid__row .type-warning { border-color: var(--warning); background: var(--warning-soft); outline: 1px solid var(--warning); }
 .row-actions { display: flex; }
 .row-actions .icon-btn { padding: 2px 4px; font-size: 12px; }
 

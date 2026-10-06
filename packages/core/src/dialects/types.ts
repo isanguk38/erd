@@ -41,6 +41,8 @@ export interface Dialect {
   changePrimaryKey(before: Table, after: Table): string[];
 
   createIndex(table: Table, index: Index): string[];
+  /** CREATE TABLE 안에 함께 만드는 인덱스 id (MySQL: 기본키가 아닌 AUTO_INCREMENT 컬럼은 테이블을 만들 때 키가 있어야 한다). 이 인덱스는 따로 만들지 않는다 */
+  inlineIndexIds?(table: Table): string[];
   /** keepForFk: 이 인덱스에 기대는 FK가 있으면 같은 문장에서 FK용 인덱스를 만든다 (fkNeedsIndex인 DB) */
   dropIndex(table: Table, index: Index, keepForFk?: { name: string; columnIds: string[] }[]): string[];
 

@@ -42,7 +42,7 @@ export function SearchBox() {
 
   const go = (r: SearchResult | undefined) => {
     if (!r) return;
-    select({ type: 'table', id: r.tableId });
+    select({ type: 'table', id: r.tableId }, true);
     setSearchFocus({ tableId: r.tableId, columnId: r.columnId });
     fitView({ nodes: [{ id: r.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
   };

@@ -13,5 +13,6 @@ export * from './syncPlan';
 export * from './clipboard';
 export * from './templates';
 export * from './lint';
+export * from './typeRules';
 export * from './comments';
 export * from './changes';

@@ -21,6 +21,7 @@ import {
 } from '@erd/core';
 import type { ConnectionConfig } from '../src';
 import { mysqlConnector } from '../src/mysql';
+import { typeRuleMismatches } from './typeCases';
 
 const url = process.env.ERD_TEST_MYSQL;
 const dialect = getDialect('mysql');
@@ -99,6 +100,12 @@ async function remaining(config: ConnectionConfig, schema: Schema) {
 }
 
 describe.skipIf(!url)('MySQL 실제 서버', () => {
+  it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
+    const config = await freshDatabase();
+    const mismatches = await typeRuleMismatches('mysql', async (sqls) => (await mysqlConnector.execute(config, sqls)).results.find((r) => !r.ok)?.error ?? null);
+    expect(mismatches).toEqual([]);
+  }, 60000);
+
   it('ERD로 만들고 다시 읽으면 ERD와 같다 (한글 코멘트, UNIQUE, ENUM, DECIMAL, 기본값, FK CASCADE, 복합 인덱스)', async () => {
     const config = await freshDatabase();
     const schema = erd();

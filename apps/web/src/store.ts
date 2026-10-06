@@ -62,6 +62,8 @@ interface State extends LocalPrefs {
   selection: Selection;
   /** 여러 테이블을 골랐을 때 (Shift 드래그, Ctrl 클릭). 하나만 골랐으면 selection과 같다 */
   selectedTables: string[];
+  /** 오른쪽 편집 창이 열려 있는지. 테이블·관계를 더블클릭하거나 새로 만들면 열리고, 빈 곳을 클릭하면 닫힌다 (클릭·끌기만으로는 열리지 않음) */
+  inspectorOpen: boolean;
   status: SyncStatus;
   synced: boolean;
   peers: Peer[];
@@ -108,7 +110,8 @@ interface State extends LocalPrefs {
   replaceSchema: (schema: Schema) => void;
   undo: () => void;
   redo: () => void;
-  select: (selection: Selection) => void;
+  /** open: 편집 창도 연다. 이미 열려 있으면 고른 것을 보여 준다 */
+  select: (selection: Selection, open?: boolean) => void;
   /** 여러 테이블 고르기. 하나면 그 테이블을 고른 것과 같다 */
   selectTables: (ids: string[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -169,6 +172,7 @@ export const useStore = create<State>()(
         meta: emptyMeta,
         selection: null,
         selectedTables: [],
+        inspectorOpen: false,
         status: 'connecting',
         synced: false,
         peers: [],
@@ -194,7 +198,7 @@ export const useStore = create<State>()(
           if (me?.authEnabled && me.user) get().setUserName(me.user.name);
         },
 
-        setCompare: (compare) => set({ compare, selection: null, selectedTables: [] }),
+        setCompare: (compare) => set({ compare, selection: null, selectedTables: [], inspectorOpen: false }),
 
         open(projectId) {
           if (get().projectId === projectId) return;
@@ -250,7 +254,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], remoteChanges: {}, selection: null, selectedTables: [], synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
           publishPresence();
           authApi
             .project(projectId)
@@ -290,7 +294,7 @@ export const useStore = create<State>()(
             draft.tables = copy.tables;
             draft.relations = copy.relations;
           });
-          set({ selection: null, selectedTables: [] });
+          set({ selection: null, selectedTables: [], inspectorOpen: false });
         },
 
         addComment(input) {
@@ -321,8 +325,8 @@ export const useStore = create<State>()(
           undoManager?.redo();
         },
 
-        select(selection) {
-          set({ selection, selectedTables: selection?.type === 'table' ? [selection.id] : [] });
+        select(selection, open) {
+          set({ selection, selectedTables: selection?.type === 'table' ? [selection.id] : [], inspectorOpen: selection ? Boolean(open) || get().inspectorOpen : false });
           provider?.awareness.setLocalStateField('selection', selection);
         },
 
