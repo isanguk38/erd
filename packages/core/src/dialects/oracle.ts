@@ -151,7 +151,7 @@ export const oracle: Dialect = {
     const parts: string[] = [];
     if (changed.includes('type')) parts.push(renderType(after));
     if (changed.includes('defaultValue') && !after.autoIncrement) parts.push(defaultClause(after).trim() || 'DEFAULT NULL');
-    if (changed.includes('nullable')) parts.push(after.nullable && !after.primaryKey ? 'NULL' : 'NOT NULL');
+    if (changed.includes('nullable')) parts.push(after.nullable && !after.primaryKey && !after.autoIncrement ? 'NULL' : 'NOT NULL');
     if (parts.length) statements.push(`ALTER TABLE ${t} MODIFY (${q(after.name)} ${parts.join(' ')})`);
     if (changed.includes('comment')) statements.push(columnComment(table, after));
     return statements;

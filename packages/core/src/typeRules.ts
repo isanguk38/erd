@@ -103,7 +103,8 @@ function canAutoIncrementType(ctx: Ctx): boolean {
   if (INTEGER_TYPES[dialect].has(base)) return true;
   const scale = Number(args.split(',')[1] ?? 0);
   if (dialect === 'mssql') return (base === 'DECIMAL' || base === 'NUMERIC') && scale === 0;
-  if (dialect === 'oracle') return base === 'NUMBER' && scale === 0;
+  // Oracle은 NUMBER(10,2)도 IDENTITY로 만들 수 있다 (실제 서버로 확인)
+  if (dialect === 'oracle') return base === 'NUMBER';
   return false;
 }
 
@@ -267,7 +268,8 @@ const RULES: Rule[] = [
   },
   {
     code: 'on-update-precision',
-    dialects: MY,
+    // MariaDB는 자릿수가 달라도 받는다 (실제 서버로 확인)
+    dialects: ['mysql'],
     autoFix: true,
     check(ctx) {
       if (ctx.base !== 'DATETIME' && ctx.base !== 'TIMESTAMP') return undefined;
@@ -308,7 +310,8 @@ const RULES: Rule[] = [
   // ── 기본값 ──────────────────────────────────────────────
   {
     code: 'default-time-type',
-    dialects: MY,
+    // MariaDB는 DATE 기본값 CURRENT_TIMESTAMP·자릿수 차이를 받는다 (실제 서버로 확인)
+    dialects: ['mysql'],
     check(ctx) {
       const p = timePrecision(ctx.column.defaultValue);
       if (p === null || ctx.column.autoIncrement) return undefined;

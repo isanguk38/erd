@@ -116,7 +116,8 @@ function byId<T extends { id: string }>(items: T[]): Map<string, T> {
   return new Map(items.map((i) => [i.id, i]));
 }
 
-const effectiveNullable = (c: Column) => c.nullable && !c.primaryKey;
+// 자동 증가(IDENTITY) 컬럼은 모든 DB가 NOT NULL로 만든다
+const effectiveNullable = (c: Column) => c.nullable && !c.primaryKey && !c.autoIncrement;
 
 const FIELD_LABEL: Record<ColumnField, string> = {
   name: '이름',

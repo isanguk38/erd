@@ -69,7 +69,7 @@ function columnDefinition(column: Column): string {
   if (generated) return `${q(column.name)} AS (${quoteExpression(generated, q)})${column.generated!.stored ? ` PERSISTED${!column.nullable || column.primaryKey ? ' NOT NULL' : ''}` : ''}`;
   let def = `${q(column.name)} ${renderType(column)}`;
   if (column.autoIncrement) def += ' IDENTITY(1,1)';
-  def += column.nullable && !column.primaryKey ? ' NULL' : ' NOT NULL';
+  def += column.nullable && !column.primaryKey && !column.autoIncrement ? ' NULL' : ' NOT NULL';
   const v = defaultValue(column);
   if (v && !column.autoIncrement) def += ` DEFAULT ${v}`;
   return def;
@@ -158,7 +158,7 @@ export const mssql: Dialect = {
       statements.push(fail(`SQL Server는 기존 컬럼에 IDENTITY를 넣거나 뺄 수 없습니다: ${table.name}.${after.name} (새 컬럼을 만들어 옮기세요)`));
     }
     if (retype) {
-      statements.push(`ALTER TABLE ${t} ALTER COLUMN ${q(after.name)} ${renderType(after)} ${after.nullable && !after.primaryKey ? 'NULL' : 'NOT NULL'}`);
+      statements.push(`ALTER TABLE ${t} ALTER COLUMN ${q(after.name)} ${renderType(after)} ${after.nullable && !after.primaryKey && !after.autoIncrement ? 'NULL' : 'NOT NULL'}`);
     }
     for (const i of keep) statements.push(...mssql.createIndex(table, i));
     if (changed.includes('defaultValue')) {

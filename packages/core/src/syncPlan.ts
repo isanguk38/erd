@@ -148,7 +148,7 @@ export function alignDb(db: Schema, erd: Schema, baseline?: Schema | null, links
 function sameShape(dialect: Dialect, a: Column, b: Column): boolean {
   return (
     dialect.renderType(a) === dialect.renderType(b) &&
-    (a.nullable && !a.primaryKey) === (b.nullable && !b.primaryKey) &&
+    (a.nullable && !a.primaryKey && !a.autoIncrement) === (b.nullable && !b.primaryKey && !b.autoIncrement) &&
     dialect.normalizeDefault(a.defaultValue) === dialect.normalizeDefault(b.defaultValue) &&
     a.autoIncrement === b.autoIncrement &&
     a.primaryKey === b.primaryKey

@@ -45,7 +45,7 @@ function columnDefinition(column: Column): string {
     if (comment) parts.push(`COMMENT ${str(comment)}`);
     return parts.join(' ');
   }
-  parts.push(column.nullable && !column.primaryKey ? 'NULL' : 'NOT NULL');
+  parts.push(column.nullable && !column.primaryKey && !column.autoIncrement ? 'NULL' : 'NOT NULL');
   if (column.defaultValue !== null && column.defaultValue.trim() !== '') parts.push(`DEFAULT ${column.defaultValue.trim()}`);
   if (column.onUpdate?.trim()) parts.push(`ON UPDATE ${column.onUpdate.trim()}`);
   if (column.autoIncrement) parts.push('AUTO_INCREMENT');

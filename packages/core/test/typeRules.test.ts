@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, autoFixColumnPatch, canAutoIncrement, columnTypeIssues, createColumn, diffSchemas, emptySchema, getDialect, lintSchema, tableTypeIssues, type Column, type DialectId } from '../src';
+import { applyCommands, autoFixColumnPatch, canAutoIncrement, columnTypeIssues, createColumn, diffSchemas, emptySchema, generateStatements, getDialect, lintSchema, tableTypeIssues, type Column, type DialectId } from '../src';
 
 const col = (patch: Partial<Column>): Column => ({ ...createColumn({ name: 'c' }), type: 'INT', length: '', ...patch });
 const codes = (dialect: DialectId, patch: Partial<Column>) => columnTypeIssues(dialect, col(patch)).map((i) => `${i.severity}:${i.code}`);
@@ -18,6 +18,7 @@ describe('타입 검사: 자동 증가', () => {
     expect(errors('oracle', { type: 'NUMBER', length: '10', autoIncrement: true })).toEqual([]);
     expect(errors('mssql', { type: 'DECIMAL', length: '18,0', autoIncrement: true })).toEqual([]);
     expect(errors('mssql', { type: 'DECIMAL', length: '18,2', autoIncrement: true })).toContain('auto-increment-type');
+    expect(errors('oracle', { type: 'DECIMAL', length: '10,2', autoIncrement: true })).toEqual([]);
   });
   it('BIGINT로 고치는 방법을 준다', () => {
     const [issue] = columnTypeIssues('mysql', col({ type: 'VARCHAR', length: '255', autoIncrement: true }));
@@ -166,6 +167,19 @@ describe('설계 검사·DB 내보내기에 함께 나온다', () => {
     const issues = lintSchema(design(), 'mysql').filter((i) => i.rule === 'type-error');
     expect(issues.map((i) => i.message)).toEqual(expect.arrayContaining([expect.stringContaining('test_table.id'), expect.stringContaining('test_table.created_at')]));
     expect(issues[0]!.fix?.kind).toBe('patchColumn');
+  });
+  it('자동 증가 컬럼은 NULL 허용이어도 NOT NULL로 만든다 (SQL Server는 NULL이면 실패)', () => {
+    const { schema } = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 't', columns: [{ name: 'id', type: 'BIGINT', primaryKey: true }, { name: 'seq', type: 'INT', nullable: true, autoIncrement: true, unique: true }] },
+    ]);
+    const sql = (d: DialectId) => getDialect(d).createTable(schema.tables[0]!).join('\n');
+    expect(sql('mssql')).toContain('[seq] INT IDENTITY(1,1) NOT NULL');
+    expect(sql('mysql')).toContain('`seq` INT NOT NULL AUTO_INCREMENT');
+    // 실제 내보내기: UNIQUE 인덱스를 CREATE TABLE 안에서 만들고 따로 만들지 않는다
+    const mysql = getDialect('mysql');
+    const statements = generateStatements(diffSchemas(emptySchema(), schema, mysql), mysql).map((s) => s.sql);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatch(/UNIQUE KEY `\w+` \(`seq`\)/);
   });
   it('DB 내보내기: 테이블 생성에 "실패 예상"', () => {
     const diff = diffSchemas(emptySchema(), design(), getDialect('mysql'));

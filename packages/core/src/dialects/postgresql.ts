@@ -143,7 +143,7 @@ export const postgresql: Dialect = {
       }
     }
     if (changed.includes('nullable')) {
-      actions.push(after.nullable && !after.primaryKey ? `ALTER COLUMN ${c} DROP NOT NULL` : `ALTER COLUMN ${c} SET NOT NULL`);
+      actions.push(after.nullable && !after.primaryKey && !after.autoIncrement ? `ALTER COLUMN ${c} DROP NOT NULL` : `ALTER COLUMN ${c} SET NOT NULL`);
     }
     if (changed.includes('defaultValue') && !after.autoIncrement) {
       const v = after.defaultValue?.trim();
