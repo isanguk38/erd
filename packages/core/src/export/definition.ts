@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import type { Change } from '../diff';
 import { getDialect } from '../dialects';
 import type { DialectId } from '../dialects/types';
-import { findTable, indexLabel, indexName, relationName, type Index, type Schema, type Table } from '../model';
+import { checkName, findTable, indexLabel, indexName, relationName, type Index, type Schema, type Table } from '../model';
 import { foreignKeyColumnIds } from '../operations';
 
 export interface DefinitionOptions {
@@ -98,7 +98,7 @@ function writeTableBlock(sheet: ExcelJS.Worksheet, schema: Schema, table: Table,
       fk.has(c.id) ? 'Y' : '',
       c.nullable && !pk ? 'Y' : 'N',
       c.autoIncrement ? 'Y' : '',
-      c.defaultValue ?? '',
+      c.generated?.expression.trim() ? `= ${c.generated.expression.trim()} (계산${c.generated.stored ? ', 저장' : ''})` : `${c.defaultValue ?? ''}${c.onUpdate ? ` (수정 시 ${c.onUpdate})` : ''}`,
       c.comment,
     ]);
     styleRow(row);
@@ -119,6 +119,19 @@ function writeTableBlock(sheet: ExcelJS.Worksheet, schema: Schema, table: Table,
       const cols = indexLabel(table, index);
       const row = sheet.addRow([i + 1, indexName(table, index), cols, '', '', index.unique ? 'Y' : '']);
       sheet.mergeCells(row.number, 3, row.number, 5);
+      styleRow(row, { to: 6 });
+    });
+  }
+
+  const checks = (table.checks ?? []).filter((k) => k.expression.trim());
+  if (checks.length) {
+    sheet.addRow([]);
+    const head = sheet.addRow(['No', 'CHECK 제약명', '조건', '', '', '']);
+    sheet.mergeCells(head.number, 3, head.number, 6);
+    styleRow(head, { header: true, to: 6 });
+    checks.forEach((check, i) => {
+      const row = sheet.addRow([i + 1, checkName(table, check), check.expression.trim(), '', '', '']);
+      sheet.mergeCells(row.number, 3, row.number, 6);
       styleRow(row, { to: 6 });
     });
   }

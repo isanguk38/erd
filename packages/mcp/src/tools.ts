@@ -34,6 +34,8 @@ const columnSpec = z.object({
   autoIncrement: z.boolean().optional(),
   default: z.string().nullable().optional().describe("SQL 식 그대로. 문자열은 따옴표 포함 (예: 'Y', 0, CURRENT_TIMESTAMP)"),
   onUpdate: z.string().nullable().optional().describe('MySQL·MariaDB 전용: 행이 바뀔 때 넣는 값 (예: CURRENT_TIMESTAMP). null이면 해제'),
+  generated: z.string().nullable().optional().describe('계산 컬럼 식 (예: qty * price). null이면 일반 컬럼으로'),
+  generatedStored: z.boolean().optional().describe('계산 값을 저장(STORED)할지. 기본 VIRTUAL (PostgreSQL은 STORED만, Oracle은 VIRTUAL만)'),
   comment: z.string().optional(),
 });
 
@@ -58,6 +60,13 @@ const command = z.discriminatedUnion('op', [
     name: z.string().optional(),
   }),
   z.object({ op: z.literal('dropIndex'), table: z.string(), name: z.string().optional(), columns: z.array(z.string()).optional() }),
+  z.object({
+    op: z.literal('addCheck'),
+    table: z.string(),
+    expression: z.string().describe('CHECK ( ... ) 괄호 안 조건. 예: point >= 0'),
+    name: z.string().optional().describe('제약 이름 (비우면 ck_테이블_번호)'),
+  }),
+  z.object({ op: z.literal('dropCheck'), table: z.string(), name: z.string().optional(), expression: z.string().optional().describe('이름 대신 조건으로 찾기') }),
   z.object({
     op: z.literal('addRelation'),
     parent: z.string().describe('참조되는(부모) 테이블. 이 테이블의 기본키를 자식이 FK로 가진다'),

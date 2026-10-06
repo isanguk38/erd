@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   addColumn,
   addIndex,
+  createCheck,
   findTable,
   foreignKeyColumnIds,
   getDialect,
@@ -155,7 +156,32 @@ function TableEditor({ table }: { table: Table }) {
               <input type="checkbox" checked={c.unique} disabled={c.primaryKey} onChange={(e) => setColumn(c, { unique: e.target.checked })} />
               <input type="checkbox" checked={c.autoIncrement} onChange={(e) => setColumn(c, { autoIncrement: e.target.checked })} />
               <span className="default-cell">
-                <TextInput value={c.defaultValue ?? ''} placeholder="NULL" onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
+                {c.generated ? (
+                  <TextInput
+                    className="mono generated-input"
+                    value={c.generated.expression}
+                    placeholder="계산식 예: qty * price"
+                    onCommit={(expression) => setColumn(c, { generated: { ...c.generated!, expression } })}
+                  />
+                ) : (
+                  <TextInput value={c.defaultValue ?? ''} placeholder="NULL" onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
+                )}
+                <button
+                  className={`generated-btn${c.generated ? ' on' : ''}`}
+                  title={
+                    c.generated
+                      ? `계산 컬럼 (${c.generated.stored ? 'STORED: 값을 저장' : 'VIRTUAL: 읽을 때 계산'}) — 누르면 ${c.generated.stored ? '일반 컬럼으로' : 'STORED로'}`
+                      : '계산 컬럼으로 (GENERATED ALWAYS AS): 다른 컬럼으로 값을 계산합니다'
+                  }
+                  onClick={() =>
+                    setColumn(c, {
+                      generated: !c.generated ? { expression: '', stored: dialect.id === 'postgresql' } : !c.generated.stored && dialect.id !== 'postgresql' && dialect.id !== 'oracle' ? { ...c.generated, stored: true } : undefined,
+                      ...(c.generated ? {} : { defaultValue: null, autoIncrement: false }),
+                    })
+                  }
+                >
+                  ƒ{c.generated?.stored ? <sub>S</sub> : null}
+                </button>
                 {/* MySQL·MariaDB 날짜 컬럼: 행이 바뀔 때 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP) */}
                 {(dialect.id === 'mysql' || dialect.id === 'mariadb') && /^(TIMESTAMP|DATETIME)/i.test(c.type) && (
                   <button
@@ -179,6 +205,7 @@ function TableEditor({ table }: { table: Table }) {
       </div>
 
       <IndexEditor table={table} />
+      <CheckEditor table={table} />
       <TableComments table={table} />
     </aside>
   );
@@ -199,6 +226,47 @@ const EXPRESSION_HINT: Record<string, string> = {
   oracle: '예) UPPER("EMAIL"), TRUNC("CREATED_AT")',
   mssql: 'SQL Server는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)',
 };
+
+/** CHECK 제약: 이름(비우면 ck_테이블_번호)과 조건식 */
+function CheckEditor({ table }: { table: Table }) {
+  const { edit } = useStore.getState();
+  const checks = table.checks ?? [];
+  const update = (fn: (list: NonNullable<Table['checks']>) => NonNullable<Table['checks']>) =>
+    edit((d) => {
+      const t = findTable(d, table.id);
+      if (!t) return;
+      const next = fn(t.checks ?? []);
+      if (next.length) t.checks = next;
+      else delete t.checks;
+    });
+  return (
+    <div className="inspector__section">
+      <div className="inspector__section-head">
+        <h4>CHECK 제약 ({checks.length})</h4>
+        <button className="btn btn-sm" title="값이 지켜야 할 조건. 예: point >= 0" onClick={() => update((list) => [...list, createCheck({ expression: '' })])}>
+          + CHECK
+        </button>
+      </div>
+      {checks.length === 0 && <p className="muted">값이 지켜야 할 조건을 걸 수 있습니다. 예) point &gt;= 0, status IN ('READY','DONE')</p>}
+      {checks.map((check, i) => (
+        <div key={check.id} className="check-row">
+          <TextInput
+            value={check.name}
+            placeholder={`ck_${table.name}_${i + 1}`}
+            onCommit={(name) => update((list) => list.map((k) => (k.id === check.id ? { ...k, name: name.trim() } : k)))}
+          />
+          <TextInput
+            className="mono"
+            value={check.expression}
+            placeholder="조건 예: point >= 0"
+            onCommit={(expression) => update((list) => list.map((k) => (k.id === check.id ? { ...k, expression: expression.trim().replace(/^check\s*/i, '') } : k)))}
+          />
+          <button className="icon-btn danger" title="CHECK 삭제" onClick={() => update((list) => list.filter((k) => k.id !== check.id))}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function IndexEditor({ table }: { table: Table }) {
   const { edit } = useStore.getState();

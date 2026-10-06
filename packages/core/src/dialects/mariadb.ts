@@ -1,3 +1,4 @@
+import { checkName } from '../model';
 import { mysql } from './mysql';
 import type { Dialect } from './types';
 
@@ -11,6 +12,7 @@ export const mariadb: Dialect = {
   label: 'MariaDB',
   typeSuggestions: [...mysql.typeSuggestions, 'UUID', 'INET6'],
   indexSupport: { methods: ['fulltext', 'spatial'] },
+  dropCheck: (table, check) => [`ALTER TABLE ${mysql.quote(table.name)} DROP CONSTRAINT ${mysql.quote(checkName(table, check))}`],
   normalizeDefault(value) {
     if (value === null) return null;
     // MariaDB는 함수 기본값을 소문자+괄호로 돌려준다: current_timestamp() → CURRENT_TIMESTAMP

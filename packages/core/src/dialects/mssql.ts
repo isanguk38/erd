@@ -64,6 +64,9 @@ function defaultValue(column: Column): string {
 }
 
 function columnDefinition(column: Column): string {
+  const generated = column.generated?.expression.trim();
+  // NOT NULL은 PERSISTED일 때만 쓸 수 있다
+  if (generated) return `${q(column.name)} AS (${generated})${column.generated!.stored ? ` PERSISTED${!column.nullable || column.primaryKey ? ' NOT NULL' : ''}` : ''}`;
   let def = `${q(column.name)} ${renderType(column)}`;
   if (column.autoIncrement) def += ' IDENTITY(1,1)';
   def += column.nullable && !column.primaryKey ? ' NULL' : ' NOT NULL';
@@ -175,6 +178,7 @@ export const mssql: Dialect = {
   },
 
   indexSupport: { where: true },
+  generatedSupport: { virtual: true, stored: true },
   createIndex(table, index) {
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },

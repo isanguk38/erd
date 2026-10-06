@@ -3,8 +3,11 @@
 
 import {
   cloneSchema,
+  checkName,
+  createCheck,
   findTable,
   indexLabel,
+  sameExpression,
   primaryKeyColumns,
   type Cardinality,
   type Column,
@@ -41,6 +44,10 @@ export interface ColumnSpec {
   default?: string | null;
   /** MySQL·MariaDB: 행이 바뀔 때 넣는 값 (예: CURRENT_TIMESTAMP). null이면 해제 */
   onUpdate?: string | null;
+  /** 계산 컬럼 식 (예: qty * price). null이면 일반 컬럼으로 */
+  generated?: string | null;
+  /** 계산 값을 저장(STORED)할지. 기본 false(VIRTUAL) */
+  generatedStored?: boolean;
   comment?: string;
 }
 
@@ -53,6 +60,8 @@ export type Command =
   | { op: 'dropColumn'; table: string; column: string }
   | { op: 'addIndex'; table: string; columns?: string[]; unique?: boolean; name?: string; expression?: string; method?: string; where?: string }
   | { op: 'dropIndex'; table: string; name?: string; columns?: string[] }
+  | { op: 'addCheck'; table: string; expression: string; name?: string }
+  | { op: 'dropCheck'; table: string; name?: string; expression?: string }
   | {
       op: 'addRelation';
       parent: string;
@@ -106,6 +115,8 @@ export function columnPatch(spec: Partial<ColumnSpec>): Partial<Column> {
   if (spec.autoIncrement !== undefined) patch.autoIncrement = spec.autoIncrement;
   if (spec.default !== undefined) patch.defaultValue = spec.default === '' ? null : spec.default;
   if (spec.onUpdate !== undefined) patch.onUpdate = spec.onUpdate?.trim() ? spec.onUpdate.trim().toUpperCase() : undefined;
+  if (spec.generated !== undefined) patch.generated = spec.generated?.trim() ? { expression: spec.generated.trim(), stored: Boolean(spec.generatedStored) } : undefined;
+
   if (spec.comment !== undefined) patch.comment = spec.comment;
   return patch;
 }
@@ -140,6 +151,10 @@ function applyOne(schema: Schema, command: Command, created: string[]): string {
       const table = tableByName(schema, command.table);
       const column = columnByName(table, command.column);
       updateColumn(schema, table.id, column.id, columnPatch(command.changes));
+      // 계산식은 그대로 두고 저장 방식만 바꾸는 경우
+      if (command.changes.generated === undefined && command.changes.generatedStored !== undefined && column.generated) {
+        column.generated = { ...column.generated, stored: command.changes.generatedStored };
+      }
       return `${table.name}.${command.column} 컬럼 수정`;
     }
     case 'dropColumn': {
@@ -176,6 +191,20 @@ function applyOne(schema: Schema, command: Command, created: string[]): string {
         throw new Error(`${table.name}에 해당 인덱스가 없습니다`);
       }
       return `${table.name} 인덱스 삭제`;
+    }
+    case 'addCheck': {
+      const table = tableByName(schema, command.table);
+      if (!command.expression?.trim()) throw new Error('CHECK 식(expression)이 필요합니다. 예: point >= 0');
+      table.checks = [...(table.checks ?? []), createCheck({ name: command.name?.trim() ?? '', expression: command.expression.trim().replace(/^check\s*/i, '') })];
+      return `${table.name} CHECK 추가 (${command.expression.trim()})`;
+    }
+    case 'dropCheck': {
+      const table = tableByName(schema, command.table);
+      const check = (table.checks ?? []).find((k) => (command.name ? eq(checkName(table, k), command.name) : sameExpression(k.expression, command.expression)));
+      if (!check) throw new Error(`${table.name}에 해당 CHECK 제약이 없습니다`);
+      table.checks = (table.checks ?? []).filter((k) => k.id !== check.id);
+      if (!table.checks.length) delete table.checks;
+      return `${table.name} CHECK 삭제 (${check.expression})`;
     }
     case 'addRelation': {
       const parent = tableByName(schema, command.parent);
@@ -243,8 +272,12 @@ export function describeSchema(schema: Schema) {
         unique: c.unique || undefined,
         autoIncrement: c.autoIncrement || undefined,
         default: c.defaultValue ?? undefined,
+        onUpdate: c.onUpdate || undefined,
+        generated: c.generated?.expression || undefined,
+        generatedStored: c.generated?.stored || undefined,
         comment: c.comment || undefined,
       })),
+      checks: t.checks?.length ? t.checks.map((k) => ({ name: checkName(t, k), expression: k.expression })) : undefined,
       indexes: t.indexes.length
         ? t.indexes.map((i) => ({
             name: i.name || undefined,

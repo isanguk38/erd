@@ -120,7 +120,8 @@ describe('식(expression) 인덱스', () => {
         ' KEY `ix_prefix` (`title`(20)), KEY `ix_desc` (`at` DESC), FULLTEXT KEY `ft_body` (`body`), CONSTRAINT `ck` CHECK (`id` > 0)) ENGINE=InnoDB;',
       { dialect: 'mysql' },
     );
-    expect(warnings).toEqual(['board: CHECK 제약은 가져오지 않습니다']);
+    expect(warnings).toEqual([]);
+    expect(schema.tables[0].checks).toMatchObject([{ name: 'ck', expression: '`id` > 0' }]);
     const t = schema.tables[0];
     const idx = Object.fromEntries(t.indexes.map((i) => [i.name, i]));
     expect(idx.ix_prefix.expression).toBe('`title`(20)');

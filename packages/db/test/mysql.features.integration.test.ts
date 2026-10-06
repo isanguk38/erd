@@ -3,7 +3,7 @@
 // ERD_TEST_MYSQL=mysql://user:pass@host:port 가 있을 때만 실행한다. 만든 테스트 DB(erd_it_*)는 끝나면 지운다.
 import { afterAll, describe, expect, it } from 'vitest';
 import mysql from 'mysql2/promise';
-import { addIndex, applyChanges, cloneSchema, generateStatements, getDialect, parseDdl, planPull, planPush, type Schema } from '@erd/core';
+import { addIndex, applyChanges, applyCommands, cloneSchema, generateStatements, getDialect, parseDdl, planPull, planPush, type Schema } from '@erd/core';
 import type { ConnectionConfig } from '../src';
 import { mysqlConnector } from '../src/mysql';
 
@@ -84,8 +84,10 @@ describe.skipIf(!url)('MySQL 실제 서버: 실무형 기능', () => {
     const src = await freshDatabase();
     await run(src, FEATURES);
     const { schema, warnings } = await read(src);
-    // 아직 ERD에 담지 않는 것은 경고로 알린다 (DB에는 그대로 남는다)
-    expect(warnings).toEqual(['board.total: 계산 컬럼의 식은 가져오지 않습니다', 'member.ck_member_point: CHECK 제약은 가져오지 않습니다 (DB에는 그대로 남습니다)']);
+    expect(warnings).toEqual([]);
+    // CHECK 제약과 계산 컬럼도 가져온다
+    expect(table(schema, 'member').checks).toMatchObject([{ name: 'ck_member_point', expression: '(`point` >= 0)' }]);
+    expect(column(schema, 'board', 'total').generated).toEqual({ expression: '(`qty` * `price`)', stored: false });
     const idx = (t: string, n: string) => table(schema, t).indexes.find((i) => i.name === n)!;
     expect(idx('board', 'ft_board_body').method).toBe('fulltext');
     expect(idx('board', 'ix_board_title_prefix').expression).toBe('`title`(20)');
@@ -102,6 +104,11 @@ describe.skipIf(!url)('MySQL 실제 서버: 실무형 기능', () => {
     expect(ddl).toContain('FULLTEXT KEY `ft_board_body` (`body`)');
     expect(ddl).toContain('KEY `ix_board_title_prefix` (`title`(20))');
     expect(await showCreate(copy, 'member')).toContain('ON UPDATE CURRENT_TIMESTAMP');
+    // 다시 만든 테이블이 원본과 같은 정의 (인덱스 순서만 다를 수 있어 줄 단위로 비교)
+    for (const t of ['member', 'board']) {
+      const lines = (ddl: string) => ddl.split(/\r?\n/).map((l) => l.trim().replace(/,$/, '')).sort();
+      expect(lines(await showCreate(copy, t))).toEqual(lines(await showCreate(src, t)));
+    }
   }, 120_000);
 
   it('데이터가 있는 DB에 ERD 변경을 내보내고(이름 변경은 데이터 보존), DB에서 바뀐 것은 아직 안 내보낸 설계를 지키며 가져온다', async () => {
@@ -140,6 +147,50 @@ describe.skipIf(!url)('MySQL 실제 서버: 실무형 기능', () => {
     expect(table(pulled, 'orders').columns.map((c) => c.name)).toContain('paid_at');
     expect(table(pulled, 'orders').indexes.find((i) => i.name === 'ix_orders_paid')?.expression).toMatch(/date/i);
     expect(table(pulled, 'member').columns.map((c) => c.name)).toContain('phone');
+  }, 120_000);
+
+  it('CHECK 제약 추가·삭제, 계산식 변경·저장 방식 변경을 데이터가 있는 DB에 내보낸다', async () => {
+    const db = await freshDatabase();
+    await run(db, `
+      CREATE TABLE item (id INT PRIMARY KEY, qty INT NOT NULL, price DECIMAL(10,2) NOT NULL,
+        total DECIMAL(12,2) GENERATED ALWAYS AS (qty * price) VIRTUAL,
+        CONSTRAINT ck_item_qty CHECK (qty >= 0));
+      INSERT INTO item (id, qty, price) VALUES (1, 2, 10.00), (2, 3, 5.50);`);
+    const next = cloneSchema((await read(db)).schema);
+    const item = table(next, 'item');
+    item.checks = [{ id: 'k_price', name: 'ck_item_price', expression: 'price > 0' }]; // qty 검사는 지우고 price 검사 추가
+    column(next, 'item', 'total').generated = { expression: 'qty * price * 1.1', stored: true }; // 식 + 저장 방식 변경
+    const { failed, statements } = await push(db, next, true);
+    expect(failed).toEqual([]);
+    expect(statements.map((x) => x.sql).join(' ; ')).toMatch(/DROP CHECK `ck_item_qty`[\s\S]*ADD CONSTRAINT `ck_item_price` CHECK \(price > 0\)/);
+    expect(await remaining(db, next)).toEqual([]);
+    const totals = (await run(db, 'SELECT total FROM item ORDER BY id')).map((r) => Number(r.total));
+    expect(totals).toEqual([22, 18.15]); // 새 식으로 다시 계산됨
+    const ddl = await showCreate(db, 'item');
+    expect(ddl).toMatch(/STORED/);
+    expect(ddl).toContain('ck_item_price');
+    expect(ddl).not.toContain('ck_item_qty');
+    // 조건에 맞지 않는 데이터가 있으면 CHECK 추가가 실패하고 알려 준다
+    const bad = cloneSchema(next);
+    table(bad, 'item').checks!.push({ id: 'k_big', name: 'ck_item_big', expression: 'qty > 100' });
+    const r = await push(db, bad, true);
+    expect(r.failed.join()).toMatch(/ck_item_big/);
+  }, 120_000);
+
+  it('CHECK·계산 컬럼이 쓰는 컬럼의 이름을 바꿔도 내보내기가 된다 (MySQL은 그대로는 막는다)', async () => {
+    const db = await freshDatabase();
+    await run(db, `
+      CREATE TABLE pay (id INT PRIMARY KEY, amount INT NOT NULL, doubled INT AS (amount * 2) VIRTUAL, CONSTRAINT ck_pay_amount CHECK (amount >= 0));
+      INSERT INTO pay (id, amount) VALUES (1, 10), (2, 20);`);
+    const read1 = (await read(db)).schema;
+    // 화면·MCP에서 이름을 바꾸면 CHECK 조건·계산식의 이름도 함께 바뀐다
+    const next = applyCommands(read1, [{ op: 'updateColumn', table: 'pay', column: 'amount', changes: { name: 'total_amount' } }]).schema;
+    expect(table(next, 'pay').checks![0].expression).toContain('total_amount');
+    expect(column(next, 'pay', 'doubled').generated!.expression).toContain('total_amount');
+    const { failed } = await push(db, next, true);
+    expect(failed).toEqual([]);
+    expect(await remaining(db, next)).toEqual([]);
+    expect((await run(db, 'SELECT total_amount, doubled FROM pay ORDER BY id')).map((r) => [r.total_amount, r.doubled])).toEqual([[10, 20], [20, 40]]);
   }, 120_000);
 
   it('덤프(SHOW CREATE TABLE)를 DDL로 가져오면 DB를 읽은 것과 같다', async () => {

@@ -71,9 +71,31 @@ export function addColumn(schema: Schema, tableId: string, partial: Partial<Colu
 export function updateColumn(schema: Schema, tableId: string, columnId: string, patch: Partial<Omit<Column, 'id'>>): Column {
   const table = requireTable(schema, tableId);
   const column = requireColumn(table, columnId);
+  const oldName = column.name;
   Object.assign(column, patch);
   if (column.primaryKey) column.nullable = false;
+  // 이름을 바꾸면 이 테이블의 CHECK 조건·계산식·식 인덱스에 쓴 옛 이름도 함께 바꾼다
+  if (patch.name !== undefined && patch.name !== oldName && oldName) renameColumnReferences(table, oldName, patch.name);
   return column;
+}
+
+/** 식 안의 컬럼 이름을 바꾼다 (따옴표 문자열 '...' 안은 건드리지 않고, `이름`·"이름" 표기는 유지) */
+export function renameInExpression(expression: string, from: string, to: string): string {
+  const name = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(^|[^\\w$.])([\`"[]?)${name}([\`"\\]]?)(?![\\w$])`, 'gi');
+  return expression
+    .split(/('(?:[^']|'')*')/)
+    .map((part, i) => (i % 2 ? part : part.replace(re, (_m, pre: string, open: string, close: string) => `${pre}${open}${to}${close}`)))
+    .join('');
+}
+
+function renameColumnReferences(table: Table, from: string, to: string): void {
+  for (const check of table.checks ?? []) check.expression = renameInExpression(check.expression, from, to);
+  for (const c of table.columns) if (c.generated) c.generated = { ...c.generated, expression: renameInExpression(c.generated.expression, from, to) };
+  for (const index of table.indexes) {
+    if (index.expression) index.expression = renameInExpression(index.expression, from, to);
+    if (index.where) index.where = renameInExpression(index.where, from, to);
+  }
 }
 
 /** 컬럼을 지우면 그 컬럼을 쓰는 인덱스와 관계도 정리한다. */

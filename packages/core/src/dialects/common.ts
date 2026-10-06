@@ -1,4 +1,4 @@
-import { findColumn, findTable, type Index, type Relation, type Schema, type Table } from '../model';
+import { checkName, findColumn, findTable, type CheckConstraint, type Column, type Index, type Relation, type Schema, type Table } from '../model';
 import type { Dialect } from './types';
 
 /** SQL 문자열 리터럴 */
@@ -66,6 +66,21 @@ export function indexWarnings(dialect: Dialect, table: Table, index: Index): str
     if (json.length) messages.push(`${label}는 JSON 컬럼(${json.map((c) => c!.name).join(', ')})에 일반 인덱스를 만들 수 없습니다`);
   }
   return messages.length ? messages.join(' / ') : undefined;
+}
+
+/** 계산 컬럼을 이 DB에서 그대로 만들 수 없으면 주의 문구 */
+export function columnWarnings(dialect: Dialect, column: Column): string | undefined {
+  const g = column.generated;
+  if (!g?.expression.trim()) return undefined;
+  const support = dialect.generatedSupport ?? {};
+  if (g.stored && !support.stored) return `${dialect.label}는 저장형(STORED) 계산 컬럼이 없어 VIRTUAL로 만듭니다: ${column.name}`;
+  if (!g.stored && !support.virtual) return `${dialect.label}는 VIRTUAL 계산 컬럼이 없어 STORED(값 저장)로 만듭니다: ${column.name}`;
+  return undefined;
+}
+
+/** CHECK 제약 기본 문장 */
+export function addCheckSql(q: (name: string) => string, table: Table, check: CheckConstraint): string {
+  return `ALTER TABLE ${q(table.name)} ADD CONSTRAINT ${q(checkName(table, check))} CHECK (${check.expression.trim()})`;
 }
 
 /** 부분 인덱스 조건 ( WHERE ...) */

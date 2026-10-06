@@ -686,3 +686,9 @@ label.btn { display: inline-flex; align-items: center; }
 .default-cell input { flex: 1; min-width: 0; }
 .onupdate-btn { flex: none; width: 20px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
 .onupdate-btn.on { background: var(--primary, #2563eb); border-color: var(--primary, #2563eb); color: #fff; }
+.generated-btn { flex: none; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-style: italic; line-height: 1; }
+.generated-btn.on { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+.generated-btn sub { font-size: 8px; font-style: normal; }
+.generated-input { color: #7c3aed; }
+.check-row { display: grid; grid-template-columns: 0.8fr 1.6fr 22px; gap: 4px; align-items: center; margin-bottom: 4px; }
+.check-row input { min-width: 0; }

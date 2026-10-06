@@ -1,4 +1,6 @@
 import type { Change, ChangeCategory, ChangeKind, DiffResult } from './diff';
+import { addCheckSql } from './dialects/common';
+import { checkName } from './model';
 import { diffSchemas } from './diff';
 import type { Dialect } from './dialects/types';
 import { emptySchema, relationName, type Index, type Schema, type Table } from './model';
@@ -17,6 +19,7 @@ export interface Statement {
  */
 const PHASE: Record<ChangeKind, number> = {
   dropForeignKey: 1,
+  dropCheck: 2,
   dropIndex: 2,
   renameTable: 3,
   createTable: 4,
@@ -26,6 +29,7 @@ const PHASE: Record<ChangeKind, number> = {
   primaryKey: 7,
   dropColumn: 8,
   addIndex: 9,
+  addCheck: 9,
   addForeignKey: 10,
   dropTable: 11,
 };
@@ -54,13 +58,16 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect, chose
     case 'tableComment': return dialect.setTableComment(change.table);
     case 'addColumn': return dialect.addColumn(change.table, change.column, change.previous);
     case 'dropColumn': return dialect.dropColumn(change.table, change.column);
-    case 'alterColumn': return dialect.alterColumn(change.table, change.before, change.after, change.fields, change.beforeTable);
+    case 'alterColumn':
+      return dialect.alterColumn(change.table, change.before, change.after, change.fields, change.beforeTable);
     case 'primaryKey': return dialect.changePrimaryKey(change.before, change.after);
     case 'addIndex': return dialect.createIndex(change.table, change.index);
     case 'dropIndex':
       return dialect.dropIndex(change.table, change.index, dialect.fkNeedsIndex ? fkIndexesToKeep(change.table, change.index, diff, chosen) : undefined);
     case 'addForeignKey': return dialect.addForeignKey(diff.target, change.relation);
     case 'dropForeignKey': return dialect.dropForeignKey(diff.base, change.relation);
+    case 'addCheck': return dialect.addCheck ? dialect.addCheck(change.table, change.check) : [addCheckSql(dialect.quote, change.table, change.check)];
+    case 'dropCheck': return dialect.dropCheck ? dialect.dropCheck(change.table, change.check) : [`ALTER TABLE ${dialect.quote(change.table.name)} DROP CONSTRAINT ${dialect.quote(checkName(change.table, change.check))}`];
   }
 }
 
@@ -69,16 +76,34 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect, chose
  * selected를 주면 그 변경만 포함한다 (미리보기에서 체크한 항목).
  */
 export function generateStatements(diff: DiffResult, dialect: Dialect, selected?: Set<string>): Statement[] {
-  const changes = diff.changes
-    .filter((c) => !selected || selected.has(c.id))
-    .map((change, order) => ({ change, order }))
-    .sort((a, b) => PHASE[a.change.kind] - PHASE[b.change.kind] || a.order - b.order);
+  const picked = diff.changes.filter((c) => !selected || selected.has(c.id));
+  // 계산식이 바뀐 컬럼은 '지우기'를 앞쪽(다른 컬럼 이름 변경·삭제 전)에, '다시 만들기'를 뒤쪽(컬럼 변경 후)에 둔다.
+  // MySQL은 계산 컬럼이 쓰는 컬럼을 바꾸거나 지우지 못하게 막기 때문이다.
+  type Step = { change: Change; order: number; phase: number; part?: 'dropGenerated' | 'addGenerated' };
+  const steps: Step[] = [];
+  picked.forEach((change, order) => {
+    if (change.kind === 'alterColumn' && change.fields.includes('generated')) {
+      steps.push({ change, order, phase: 2.5, part: 'dropGenerated' }, { change, order, phase: 8.5, part: 'addGenerated' });
+    } else {
+      steps.push({ change, order, phase: PHASE[change.kind] });
+    }
+  });
+  steps.sort((a, b) => a.phase - b.phase || a.order - b.order);
 
-  const chosen = changes.map((c) => c.change);
+  const chosen = picked;
   const statements: Statement[] = [];
-  for (const { change } of changes) {
+  for (const { change, part } of steps) {
+    const sqls =
+      part === 'dropGenerated' && change.kind === 'alterColumn'
+        ? dialect.dropColumn(change.table, change.before)
+        : part === 'addGenerated' && change.kind === 'alterColumn'
+          ? (() => {
+              const i = change.table.columns.findIndex((c) => c.id === change.after.id);
+              return dialect.addColumn(change.table, change.after, i > 0 ? change.table.columns[i - 1] : null);
+            })()
+          : statementsFor(change, diff, dialect, chosen);
     statements.push(
-      ...statementsFor(change, diff, dialect, chosen).map((sql, i) => ({
+      ...sqls.map((sql, i) => ({
         changeId: change.id,
         category: change.category,
         tableName: change.tableName,

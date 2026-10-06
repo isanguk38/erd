@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, StatementResult } from './types';
@@ -99,28 +99,50 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
   }
 
   for (const row of await query(
-    `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT
+    `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT, GENERATION_EXPRESSION
      FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`,
     [database],
   )) {
     const table = tables.get(row.TABLE_NAME);
     if (!table) continue;
     const column = mysqlColumnFromRow(row as ColumnRow);
-    if (/\b(virtual|stored) generated\b/i.test(row.EXTRA)) warnings.push(`${table.name}.${column.name}: 계산 컬럼의 식은 가져오지 않습니다`);
+    // 계산 컬럼 (식의 따옴표는 \' 로 나온다 → 되돌린다)
+    const generated = /\b(virtual|stored) generated\b/i.exec(row.EXTRA);
+    if (generated && row.GENERATION_EXPRESSION) {
+      column.generated = { expression: unescapeMysql(String(row.GENERATION_EXPRESSION)), stored: generated[1].toLowerCase() === 'stored' };
+      column.defaultValue = null;
+    }
     setComment(column, row.COLUMN_COMMENT);
     table.columns.push(column);
   }
 
-  // CHECK 제약은 아직 ERD에 담지 않는다: 조용히 빠지지 않게 알린다 (MySQL 8.0.16+, MariaDB 10.2+)
+  // CHECK 제약 (MySQL 8.0.16+, MariaDB 10.2+). MariaDB는 CHECK_CONSTRAINTS에 TABLE_NAME이 있다 (이름이 테이블마다 따로).
+  let checkRows: Record<string, string>[] = [];
   try {
-    for (const row of await query(
-      `SELECT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = ? AND CONSTRAINT_TYPE = 'CHECK' ORDER BY TABLE_NAME, CONSTRAINT_NAME`,
+    checkRows = await query(
+      `SELECT TABLE_NAME, CONSTRAINT_NAME, CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = ? ORDER BY TABLE_NAME, CONSTRAINT_NAME`,
       [database],
-    )) {
-      if (tables.has(row.TABLE_NAME)) warnings.push(`${row.TABLE_NAME}.${row.CONSTRAINT_NAME}: CHECK 제약은 가져오지 않습니다 (DB에는 그대로 남습니다)`);
-    }
+    );
   } catch {
-    // 오래된 버전에는 CHECK 제약 정보가 없다
+    try {
+      checkRows = await query(
+        `SELECT tc.TABLE_NAME, cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+         FROM information_schema.TABLE_CONSTRAINTS tc
+         JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+         WHERE tc.TABLE_SCHEMA = ? AND tc.CONSTRAINT_TYPE = 'CHECK' ORDER BY tc.TABLE_NAME, cc.CONSTRAINT_NAME`,
+        [database],
+      );
+    } catch {
+      // 오래된 버전에는 CHECK 제약 정보가 없다
+    }
+  }
+  for (const row of Array.isArray(checkRows) ? checkRows : []) {
+    const table = tables.get(row.TABLE_NAME);
+    if (!table) continue;
+    const expression = unescapeMysql(String(row.CHECK_CLAUSE)).trim();
+    // MariaDB가 JSON 컬럼에 스스로 거는 검사(json_valid)는 JSON 타입이 알아서 만든다
+    if (/^json_valid\(`?[\w$]+`?\)$/i.test(expression) && table.columns.some((c) => c.name === row.CONSTRAINT_NAME)) continue;
+    table.checks = [...(table.checks ?? []), createCheck({ name: row.CONSTRAINT_NAME, expression })];
   }
 
   const fkRows = await query(
@@ -160,7 +182,7 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
     };
     index.columns.push(row.COLUMN_NAME);
     // information_schema는 식 안의 따옴표를 \' 로 돌려준다 → SQL에 다시 쓸 수 있게 되돌린다
-    index.expressions.push(row.EXPRESSION == null ? null : String(row.EXPRESSION).replace(/\\'/g, "'"));
+    index.expressions.push(row.EXPRESSION == null ? null : unescapeMysql(String(row.EXPRESSION)));
     index.subParts.push(row.SUB_PART == null ? null : Number(row.SUB_PART));
     index.desc.push(row.COLLATION === 'D');
     indexes.set(k, index);
@@ -297,3 +319,8 @@ function makeConnector(dialect: 'mysql' | 'mariadb'): Connector {
 
 export const mysqlConnector = makeConnector('mysql');
 export const mariadbConnector = makeConnector('mariadb');
+
+/** information_schema의 식(인덱스·CHECK·계산 컬럼)은 따옴표가 \' 로 나온다 → SQL에 다시 쓸 수 있게 되돌린다 */
+function unescapeMysql(text: string): string {
+  return text.replace(/\\'/g, "'");
+}

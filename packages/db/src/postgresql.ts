@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
@@ -64,7 +64,7 @@ const SQL_COLUMNS = `
   SELECT c.relname AS table_name, a.attname AS column_name,
          format_type(a.atttypid, a.atttypmod) AS data_type,
          a.attnotnull AS not_null, pg_get_expr(d.adbin, d.adrelid) AS default_value,
-         a.attidentity AS identity, col_description(c.oid, a.attnum) AS comment
+         a.attidentity AS identity, a.attgenerated AS generated, col_description(c.oid, a.attnum) AS comment
   FROM pg_attribute a
   JOIN pg_class c ON c.oid = a.attrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -87,6 +87,15 @@ const SQL_CONSTRAINTS = `
   WHERE n.nspname = $1 AND con.contype IN ('p', 'f', 'u')
   ORDER BY c.relname, con.conname, k.ord`;
 
+/** CHECK 제약 (NOT NULL은 컬럼 속성이라 빼고) */
+const SQL_CHECKS = `
+  SELECT c.relname AS table_name, con.conname AS name, pg_get_constraintdef(con.oid, true) AS def
+  FROM pg_constraint con
+  JOIN pg_class c ON c.oid = con.conrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = $1 AND con.contype = 'c' AND c.relkind IN ('r', 'p')
+  ORDER BY c.relname, con.conname`;
+
 const SQL_INDEXES = `
   SELECT t.relname AS table_name, i.relname AS index_name, ix.indisunique AS is_unique, a.attname AS column_name, k.ord,
     am.amname AS method, pg_get_expr(ix.indpred, ix.indrelid) AS predicate, pg_get_indexdef(ix.indexrelid) AS definition
@@ -101,7 +110,7 @@ const SQL_INDEXES = `
     AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = ix.indexrelid)
   ORDER BY t.relname, i.relname, k.ord`;
 
-interface ColumnRow { table_name: string; column_name: string; data_type: string; not_null: boolean; default_value: string | null; identity: string; comment: string | null }
+interface ColumnRow { table_name: string; column_name: string; data_type: string; not_null: boolean; default_value: string | null; identity: string; generated: string; comment: string | null }
 interface ConstraintRow { name: string; type: 'p' | 'f' | 'u'; table_name: string; column_name: string; ref_table: string | null; ref_column: string | null; ref_schema: string | null; on_delete: string; on_update: string }
 interface IndexRow { table_name: string; index_name: string; is_unique: boolean; column_name: string | null; method: string; predicate: string | null; definition: string }
 
@@ -129,6 +138,11 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
     if (!table) continue;
     const { type, length } = parsePgType(row.data_type);
     const column: Column = createColumn({ name: row.column_name, type, length, nullable: !row.not_null, defaultValue: cleanPgDefault(row.default_value) });
+    // 계산 컬럼: 기본값 자리에 식이 들어 있다 (s: STORED, v: VIRTUAL — PostgreSQL 18)
+    if ((row.generated === 's' || row.generated === 'v') && row.default_value) {
+      column.generated = { expression: row.default_value, stored: row.generated === 's' };
+      column.defaultValue = null;
+    }
     if (row.identity === 'a' || row.identity === 'd') column.autoIncrement = true;
     if (column.defaultValue && /^nextval\(/i.test(column.defaultValue)) {
       // serial 컬럼
@@ -181,6 +195,13 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
         }),
       );
     }
+  }
+
+  for (const row of (await db.query<{ table_name: string; name: string; def: string }>(SQL_CHECKS, [schemaName])).rows) {
+    const table = tables.get(row.table_name);
+    const m = /^CHECK\s*\(([\s\S]*)\)(\s+NOT VALID)?$/i.exec(row.def.trim());
+    if (!table || !m) continue;
+    table.checks = [...(table.checks ?? []), createCheck({ name: row.name, expression: m[1].trim() })];
   }
 
   const indexes = new Map<string, { table: string; unique: boolean; columns: (string | null)[]; method: string; predicate: string | null; definition: string }>();

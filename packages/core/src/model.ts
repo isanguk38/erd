@@ -22,6 +22,11 @@ export interface Column {
   defaultValue: string | null;
   /** MySQL·MariaDB: 행이 바뀔 때 자동으로 넣는 값 (ON UPDATE CURRENT_TIMESTAMP). 없으면 생략 */
   onUpdate?: string;
+  /**
+   * 계산 컬럼: 다른 컬럼으로 값을 계산한다 (GENERATED ALWAYS AS (식)). stored면 계산한 값을 저장한다.
+   * 예) { expression: 'qty * price', stored: false }
+   */
+  generated?: { expression: string; stored?: boolean };
   comment: string;
 }
 
@@ -56,6 +61,27 @@ export interface Table {
   color?: string;
   /** DB에서 읽어온 PK 제약조건 이름 (PostgreSQL). 없으면 기본 이름을 쓴다. */
   primaryKeyName?: string;
+  /** CHECK 제약 (예: point >= 0) */
+  checks?: CheckConstraint[];
+}
+
+export interface CheckConstraint {
+  id: string;
+  /** 비우면 ck_테이블_번호 */
+  name: string;
+  /** CHECK ( ... ) 괄호 안의 식 */
+  expression: string;
+}
+
+export function createCheck(partial: Partial<CheckConstraint> = {}): CheckConstraint {
+  return { id: newId('chk'), name: '', expression: '', ...partial };
+}
+
+/** CHECK 제약 이름 (비어 있으면 ck_테이블_순번) */
+export function checkName(table: Table, check: CheckConstraint): string {
+  if (check.name.trim()) return check.name.trim();
+  const n = (table.checks ?? []).findIndex((c) => c.id === check.id) + 1;
+  return `ck_${table.name}_${n || 1}`.slice(0, 60);
 }
 
 /** 외래키. 자식(from) 테이블의 컬럼이 부모(to) 테이블의 컬럼을 참조한다. */
@@ -188,6 +214,8 @@ export function sameExpression(a: string | undefined, b: string | undefined): bo
     (v ?? '')
       .toLowerCase()
       .replace(/::\s*(character varying|double precision|timestamp with(out)? time zone|[a-z_][a-z0-9_]*)(\[\])?/g, '')
+      // MySQL은 문자열 앞에 문자셋을 붙여 돌려준다: _utf8mb4'A' = 'A'
+      .replace(/_(utf8mb4|utf8mb3|utf8|latin1|binary|ascii)'/g, "'")
       .replace(/["`\[\]()\s]/g, '');
   return norm(a) === norm(b);
 }

@@ -243,6 +243,36 @@ for (const target of [mariadb, oracle, mssql]) {
       else expect(index.where).toMatch(/created_at\]? IS NOT NULL/i);
     }, 120_000);
 
+    it('CHECK 제약과 계산 컬럼을 만들고 다시 읽으면 ERD와 같고, 바꾼 것도 내보낸다', async () => {
+      const config = await target.fresh();
+      const schema = applyCommands(emptySchema(), [
+        { op: 'createTable', name: 'item', logicalName: '품목', columns: [
+          { name: 'item_id', type: 'INT', primaryKey: true },
+          { name: 'qty', type: 'INT', nullable: false },
+          { name: 'price', type: 'DECIMAL(10,2)', nullable: false },
+          // Oracle은 VIRTUAL만, PostgreSQL은 STORED만 — 나머지는 둘 다
+          { name: 'total', type: 'DECIMAL(12,2)', generated: 'qty * price', generatedStored: dialect.id === 'mssql' },
+        ] },
+        { op: 'addCheck', table: 'item', name: 'ck_item_qty', expression: 'qty >= 0' },
+      ]).schema;
+      const { result } = await push(config, schema);
+      expect(result.results.filter((r) => !r.ok)).toEqual([]);
+      expect(await remaining(config, schema)).toEqual([]);
+      const { schema: read } = await connector.introspect(config);
+      const item = read.tables.find((t) => t.name === 'item')!;
+      expect(item.columns.find((c) => c.name === 'total')!.generated?.expression).toMatch(/qty/i);
+      expect(item.checks?.map((k) => k.name.toLowerCase())).toContain('ck_item_qty');
+
+      const next = applyCommands(schema, [
+        { op: 'dropCheck', table: 'item', name: 'ck_item_qty' },
+        { op: 'addCheck', table: 'item', name: 'ck_item_price', expression: 'price > 0' },
+        { op: 'updateColumn', table: 'item', column: 'total', changes: { generated: 'qty * price * 2' } },
+      ]).schema;
+      const second = await push(config, next);
+      expect(second.result.results.filter((r) => !r.ok)).toEqual([]);
+      expect(await remaining(config, next)).toEqual([]);
+    }, 120_000);
+
     it('FK 변경(ON DELETE SET NULL)과 UNIQUE 해제, 테이블 추가도 왕복된다', async () => {
       const config = await target.fresh();
       const schema = erd();

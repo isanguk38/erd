@@ -1,5 +1,5 @@
 import sql from 'mssql';
-import { createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
@@ -74,8 +74,9 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
 
   for (const row of await query(
     `SELECT t.name AS table_name, c.name, ty.name AS type_name, c.max_length, c.precision, c.scale, c.is_nullable, c.is_identity, c.is_computed,
-            dc.definition AS default_def, CAST(ep.value AS NVARCHAR(4000)) AS comment
+            dc.definition AS default_def, CAST(ep.value AS NVARCHAR(4000)) AS comment, cc.definition AS computed_def, cc.is_persisted
      FROM sys.columns c
+     LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
      JOIN sys.tables t ON t.object_id = c.object_id JOIN sys.schemas s ON s.schema_id = t.schema_id
      JOIN sys.types ty ON ty.user_type_id = c.user_type_id
      LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
@@ -96,9 +97,28 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
       logicalName: '',
       comment: '',
     });
-    if (row.is_computed) warnings.push(`${table.name}.${column.name}: 계산 컬럼의 식은 가져오지 않습니다`);
+    // 계산 컬럼: 식은 바깥 괄호가 붙어 나온다 → 떼고 담는다
+    if (row.is_computed && row.computed_def) {
+      const def = String(row.computed_def).trim();
+      column.generated = { expression: def.startsWith('(') && def.endsWith(')') ? def.slice(1, -1) : def, stored: Boolean(row.is_persisted) };
+      column.defaultValue = null;
+    }
     setComment(column, row.comment);
     table.columns.push(column);
+  }
+
+  // CHECK 제약: definition은 ([qty]>=(0)) 처럼 바깥 괄호가 붙어 나온다
+  for (const row of await query(
+    `SELECT t.name AS table_name, k.name, k.definition
+     FROM sys.check_constraints k
+     JOIN sys.tables t ON t.object_id = k.parent_object_id JOIN sys.schemas s ON s.schema_id = t.schema_id
+     WHERE s.name = @schema ORDER BY t.name, k.name`,
+    p,
+  )) {
+    const table = tables.get(row.table_name);
+    const def = String(row.definition ?? '').trim();
+    if (!table || !def) continue;
+    table.checks = [...(table.checks ?? []), createCheck({ name: row.name, expression: def.startsWith('(') && def.endsWith(')') ? def.slice(1, -1) : def })];
   }
 
   const columnId = (table: Table, name: string) => table.columns.find((c) => c.name === name)?.id;

@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError } from './errors';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
@@ -93,7 +93,11 @@ export async function introspectOracle(query: OracleQuery, owner: string, option
       logicalName: '',
       comment: '',
     });
-    if (row.VIRTUAL_COLUMN === 'YES') warnings.push(`${table.name}.${column.name}: 가상 컬럼의 식은 가져오지 않습니다`);
+    // 가상 컬럼: DATA_DEFAULT에 식이 들어 있다
+    if (row.VIRTUAL_COLUMN === 'YES' && row.DATA_DEFAULT) {
+      column.generated = { expression: String(row.DATA_DEFAULT).trim(), stored: false };
+      column.defaultValue = null;
+    }
     setComment(column, row.COMMENTS);
     table.columns.push(column);
   }
@@ -129,6 +133,19 @@ export async function introspectOracle(query: OracleQuery, owner: string, option
       const ids = c.columns.map((n) => columnId(table, n)).filter((x): x is string => !!x);
       table.indexes.push(createIndex({ name: fromOracleName(c.name), columnIds: ids, unique: true, isConstraint: true }));
     }
+  }
+
+  // CHECK 제약 (NOT NULL은 Oracle이 CHECK로 만들지만 컬럼 속성이라 뺀다)
+  for (const row of await query(
+    `SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE, TABLE_NAME, SEARCH_CONDITION, GENERATED FROM ALL_CONSTRAINTS
+     WHERE OWNER = :owner AND CONSTRAINT_TYPE = 'C' ORDER BY TABLE_NAME, CONSTRAINT_NAME`,
+    { owner },
+  )) {
+    const table = tables.get(row.TABLE_NAME);
+    const expression = String(row.SEARCH_CONDITION ?? '').trim();
+    if (!table || row.CONSTRAINT_TYPE !== 'C' || !expression) continue;
+    if (/^"[^"]+" IS NOT NULL$/i.test(expression)) continue;
+    table.checks = [...(table.checks ?? []), createCheck({ name: row.GENERATED === 'GENERATED NAME' ? '' : fromOracleName(row.CONSTRAINT_NAME), expression })];
   }
 
   for (const row of await query(

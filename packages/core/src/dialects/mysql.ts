@@ -1,4 +1,4 @@
-import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
+import { checkName, indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
 import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, splitTopLevel } from './common';
 import type { Dialect } from './types';
 
@@ -36,6 +36,14 @@ function renderType(column: Column): string {
 
 function columnDefinition(column: Column): string {
   const parts = [q(column.name), renderType(column)];
+  const generated = column.generated?.expression.trim();
+  if (generated) {
+    parts.push(`GENERATED ALWAYS AS (${generated}) ${column.generated!.stored ? 'STORED' : 'VIRTUAL'}`);
+    parts.push(column.nullable && !column.primaryKey ? 'NULL' : 'NOT NULL');
+    const comment = sqlComment(column);
+    if (comment) parts.push(`COMMENT ${str(comment)}`);
+    return parts.join(' ');
+  }
   parts.push(column.nullable && !column.primaryKey ? 'NULL' : 'NOT NULL');
   if (column.defaultValue !== null && column.defaultValue.trim() !== '') parts.push(`DEFAULT ${column.defaultValue.trim()}`);
   if (column.onUpdate?.trim()) parts.push(`ON UPDATE ${column.onUpdate.trim()}`);
@@ -100,6 +108,9 @@ export const mysql: Dialect = {
   },
 
   indexSupport: { expression: true, methods: ['fulltext', 'spatial'] },
+  generatedSupport: { virtual: true, stored: true },
+  // MySQL 8.0.16+: CHECK 삭제는 DROP CHECK
+  dropCheck: (table, check) => [`ALTER TABLE ${q(table.name)} DROP CHECK ${q(checkName(table, check))}`],
   createIndex(table: Table, index) {
     // MySQL은 식마다 괄호를 한 번 더 감싸야 한다: lower(email) → (lower(email))
     const keys = index.expression?.trim() ? mysqlKeyParts(index.expression) : indexKeys(table, index, q);

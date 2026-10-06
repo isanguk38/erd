@@ -8,10 +8,10 @@
 //  └ relations (Y.Map<relationId, Y.Map>)
 
 import * as Y from 'yjs';
-import type { Column, Index, Relation, Schema, Table } from './model';
+import type { CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
-const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'onUpdate', 'comment'] as const;
+const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'onUpdate', 'generated', 'comment'] as const;
 const RELATION_FIELDS = ['name', 'fromTableId', 'fromColumnIds', 'toTableId', 'toColumnIds', 'cardinality', 'onDelete', 'onUpdate'] as const;
 
 export function rootMap(doc: Y.Doc): Y.Map<unknown> {
@@ -90,6 +90,7 @@ function writeTable(map: Y.Map<unknown>, table: Table, order: number): void {
   writeColumns(child(map, 'columns', () => new Y.Array<Y.Map<unknown>>()), table.columns);
   // 인덱스는 통째로 바꿔도 충분하다 (자주, 동시에 고치는 부분이 아님)
   setIfChanged(map, 'indexes', table.indexes);
+  setIfChanged(map, 'checks', table.checks?.length ? table.checks : undefined);
 }
 
 /** schema와 다른 부분만 문서에 반영한다. 호출하는 쪽에서 doc.transact로 감싸 origin을 붙인다. */
@@ -141,6 +142,7 @@ export function readSchema(doc: Y.Doc): Schema {
       position: (map.get('position') as Table['position']) ?? { x: 0, y: 0 },
       columns,
       indexes: structuredClone((map.get('indexes') as Index[]) ?? []),
+      ...(map.has('checks') ? { checks: structuredClone(map.get('checks') as CheckConstraint[]) } : {}),
       order: (map.get('order') as number) ?? 0,
     };
     const color = map.get('color') as string | undefined;

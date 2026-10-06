@@ -47,6 +47,7 @@ export function pasteTables(schema: Schema, clip: Clip, offset = { x: 40, y: 40 
       c.id = id;
     }
     table.indexes = table.indexes.map((i) => ({ ...i, id: newId('idx'), name: i.name ? uniqueIndexName(i.name, schema) : '', columnIds: i.columnIds.map((cid) => columnMap.get(cid) ?? cid) }));
+    if (table.checks) table.checks = table.checks.map((k) => ({ ...k, id: newId('chk'), name: '' }));
     created.push(table);
   }
   schema.tables.push(...created);

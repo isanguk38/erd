@@ -156,6 +156,40 @@ describe('PostgreSQL 연동 (PGlite)', { timeout: 30_000 }, () => {
     expect(changed).toEqual(['customer 인덱스 삭제 (upper(email))', 'customer 인덱스 생성 (lower((email)::text))']);
   });
 
+  it('CHECK 제약·계산 컬럼(STORED): 가져오고, 빈 DB에 다시 만들고, 바꾼 것을 내보낸다', async () => {
+    const src = new PGlite();
+    await src.exec(`
+      CREATE TABLE item (id INT PRIMARY KEY, qty INT NOT NULL, price NUMERIC(10,2) NOT NULL,
+        total NUMERIC(12,2) GENERATED ALWAYS AS (qty * price) STORED,
+        CONSTRAINT ck_item_qty CHECK (qty >= 0), CHECK (price > 0));
+      INSERT INTO item (id, qty, price) VALUES (1, 2, 10), (2, 3, 5.5);`);
+    const { schema, warnings } = await introspectPostgres(src, 'public');
+    expect(warnings).toEqual([]);
+    const item = schema.tables[0];
+    expect(item.columns.find((c) => c.name === 'total')!.generated).toEqual({ expression: '((qty)::numeric * price)', stored: true });
+    expect(item.checks!.map((k) => [k.name, k.expression]).sort()).toEqual([['ck_item_qty', 'qty >= 0'], ['item_price_check', 'price > 0::numeric']]);
+    expect(await pendingChanges(src, schema)).toEqual([]);
+
+    // 빈 DB에 다시 만들기
+    const copy = new PGlite();
+    const { result } = await push(copy, schema);
+    expect(result.results.filter((r) => !r.ok)).toEqual([]);
+    expect(await pendingChanges(copy, schema)).toEqual([]);
+
+    // 바꾸기: qty 검사 삭제, 새 검사 추가, 계산식 변경
+    const next = cloneSchema(schema);
+    const t = next.tables[0];
+    t.checks = t.checks!.filter((k) => k.name !== 'ck_item_qty').concat({ id: 'k_new', name: 'ck_item_qty_max', expression: 'qty <= 1000' });
+    t.columns.find((c) => c.name === 'total')!.generated = { expression: 'qty * price * 2', stored: true };
+    const diff = diffSchemas(alignToCurrent((await introspectPostgres(src, 'public')).schema, next), next, pgDialect);
+    const statements = generateStatements(diff, pgDialect, new Set(diff.changes.map((c) => c.id)));
+    const exec = await executePostgres(src, statements.map((x) => x.sql));
+    expect(exec.results.filter((r) => !r.ok)).toEqual([]);
+    expect(await pendingChanges(src, next)).toEqual([]);
+    const totals = (await src.query<{ total: string }>('SELECT total FROM item ORDER BY id')).rows.map((r) => Number(r.total));
+    expect(totals).toEqual([40, 33]);
+  });
+
   it('실패하면 트랜잭션을 되돌린다', async () => {
     const db = new PGlite();
     const result = await executePostgres(db, ['CREATE TABLE a (id INT)', 'CREATE TABLE a (id INT)', 'CREATE TABLE b (id INT)']);

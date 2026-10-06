@@ -21,6 +21,7 @@ export function stabilizeIds(schema: Schema): Schema {
       i.id = `db_i_${t.name}.${i.name}`;
       i.columnIds = i.columnIds.map((id) => columnIds.get(id) ?? id);
     }
+    for (const k of t.checks ?? []) k.id = `db_k_${t.name}.${k.name}`;
   }
   for (const r of schema.relations) {
     r.fromTableId = tableIds.get(r.fromTableId) ?? r.fromTableId;

@@ -1,9 +1,9 @@
-import type { Column, Index, ReferentialAction, Relation, Schema, Table } from '../model';
+import type { CheckConstraint, Column, Index, ReferentialAction, Relation, Schema, Table } from '../model';
 
 /** 새 DB를 추가하려면 이 목록에 id를 넣고 Dialect를 구현해 registry에 등록한다. */
 export type DialectId = 'mysql' | 'mariadb' | 'postgresql' | 'oracle' | 'mssql';
 
-export type ColumnField = 'name' | 'type' | 'nullable' | 'defaultValue' | 'onUpdate' | 'autoIncrement' | 'comment';
+export type ColumnField = 'name' | 'type' | 'nullable' | 'defaultValue' | 'onUpdate' | 'generated' | 'autoIncrement' | 'comment';
 
 /**
  * DB 종류별 SQL 문법.
@@ -46,4 +46,9 @@ export interface Dialect {
 
   addForeignKey(schema: Schema, relation: Relation): string[];
   dropForeignKey(schema: Schema, relation: Relation): string[];
+  /** CHECK 제약 추가/삭제 (없으면 ALTER TABLE ... ADD/DROP CONSTRAINT) */
+  addCheck?(table: Table, check: CheckConstraint): string[];
+  dropCheck?(table: Table, check: CheckConstraint): string[];
+  /** 계산 컬럼에서 쓸 수 있는 방식: virtual(값을 저장하지 않음)·stored(저장) */
+  generatedSupport?: { virtual?: boolean; stored?: boolean };
 }

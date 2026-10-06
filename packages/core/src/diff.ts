@@ -1,5 +1,5 @@
 import type { ColumnField, Dialect } from './dialects/types';
-import { indexWarnings, sqlComment } from './dialects/common';
+import { columnWarnings, indexWarnings, sqlComment } from './dialects/common';
 import {
   cloneSchema,
   expressionColumns,
@@ -9,6 +9,7 @@ import {
   primaryKeyColumns,
   sameExpression,
   sameIndexMethod,
+  type CheckConstraint,
   type Column,
   type Index,
   type Relation,
@@ -48,6 +49,8 @@ export type Change = ChangeBase &
     | { kind: 'dropIndex'; table: Table; index: Index }
     | { kind: 'addForeignKey'; relation: Relation }
     | { kind: 'dropForeignKey'; relation: Relation }
+    | { kind: 'addCheck'; table: Table; check: CheckConstraint }
+    | { kind: 'dropCheck'; table: Table; check: CheckConstraint }
   );
 
 export type ChangeKind = Change['kind'];
@@ -69,6 +72,9 @@ export function normalizeSchema(input: Schema): Schema {
   const schema = cloneSchema(input);
   for (const table of schema.tables) {
     const columnIds = new Set(table.columns.map((c) => c.id));
+    // 화면에서 아직 조건을 쓰는 중인 CHECK, 식이 빈 계산 컬럼은 미완성이므로 뺀다
+    if (table.checks) table.checks = table.checks.filter((k) => k.expression.trim());
+    for (const c of table.columns) if (c.generated && !c.generated.expression.trim()) delete c.generated;
     table.indexes = table.indexes
       .map((i) => ({ ...i, columnIds: i.columnIds.filter((id) => columnIds.has(id)) }))
       .filter((i) => i.columnIds.length > 0 || isExpressionIndex(i))
@@ -116,6 +122,7 @@ const FIELD_LABEL: Record<ColumnField, string> = {
   type: '타입',
   nullable: 'NULL 허용',
   defaultValue: '기본값',
+  generated: '계산식',
   onUpdate: '수정 시 값(ON UPDATE)',
   autoIncrement: '자동 증가',
   comment: '코멘트',
@@ -155,7 +162,11 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     const before = baseTables.get(table.id);
     if (!before) {
       createdTableIds.add(table.id);
-      changes.push({ kind: 'createTable', id: `createTable:${table.id}`, category: 'create', tableName: table.name, summary: `${table.name} 테이블 생성`, table });
+      const tableWarning = table.columns.map((c) => columnWarnings(dialect, c)).filter(Boolean).join(' / ') || undefined;
+      changes.push({ kind: 'createTable', id: `createTable:${table.id}`, category: 'create', tableName: table.name, summary: `${table.name} 테이블 생성`, table, warning: tableWarning });
+      for (const check of table.checks ?? []) {
+        changes.push({ kind: 'addCheck', id: `addCheck:${table.id}:${check.id}`, category: 'create', tableName: table.name, summary: `${table.name} CHECK 추가 (${check.expression})`, table, check });
+      }
       for (const index of table.indexes) {
         changes.push({
           kind: 'addIndex', id: `addIndex:${table.id}:${index.id}`, category: 'create', tableName: table.name,
@@ -243,6 +254,22 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     }
   }
 
+  // CHECK 제약: 이름이나 식이 바뀌면 지우고 다시 만든다
+  const afterChecks = byId(after.checks ?? []);
+  const beforeChecks = byId(before.checks ?? []);
+  for (const check of before.checks ?? []) {
+    const next = afterChecks.get(check.id);
+    if (!next || !sameCheck(before, check, after, next)) {
+      changes.push({ kind: 'dropCheck', id: `dropCheck:${after.id}:${check.id}`, category: 'alter', tableName: name, summary: `${name} CHECK 삭제 (${check.expression})`, table: before, check });
+    }
+  }
+  for (const check of after.checks ?? []) {
+    const old = beforeChecks.get(check.id);
+    if (!old || !sameCheck(before, old, after, check)) {
+      changes.push({ kind: 'addCheck', id: `addCheck:${after.id}:${check.id}`, category: 'alter', tableName: name, summary: `${name} CHECK 추가 (${check.expression})`, warning: '조건에 맞지 않는 기존 데이터가 있으면 실패합니다', table: after, check });
+    }
+  }
+
   const beforeColumns = byId(before.columns);
   const afterColumns = byId(after.columns);
   after.columns.forEach((column, i) => {
@@ -264,6 +291,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     if (dialect.normalizeDefault(old.defaultValue) !== dialect.normalizeDefault(column.defaultValue)) fields.push('defaultValue');
     // ON UPDATE CURRENT_TIMESTAMP는 MySQL·MariaDB에만 있다
     if ((dialect.id === 'mysql' || dialect.id === 'mariadb') && (old.onUpdate?.trim().toUpperCase() ?? '') !== (column.onUpdate?.trim().toUpperCase() ?? '')) fields.push('onUpdate');
+    if (!sameGenerated(dialect, old, column)) fields.push('generated');
     if (old.autoIncrement !== column.autoIncrement) fields.push('autoIncrement');
     if (sqlComment(old) !== sqlComment(column)) fields.push('comment');
     if (!fields.length) return;
@@ -271,6 +299,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       .map((f) => {
         if (f === 'name') return `이름 ${old.name} → ${column.name}`;
         if (f === 'type') return `타입 ${dialect.renderType(old)} → ${dialect.renderType(column)}`;
+        if (f === 'generated') return column.generated?.expression.trim() ? `계산식 ${column.generated.expression}${column.generated.stored ? ' (STORED)' : ''}` : '계산 컬럼 해제';
         if (f === 'nullable') return effectiveNullable(column) ? 'NULL 허용' : 'NOT NULL';
         if (f === 'defaultValue') return `기본값 ${old.defaultValue ?? '없음'} → ${column.defaultValue ?? '없음'}`;
         return FIELD_LABEL[f];
@@ -314,6 +343,21 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       });
     }
   }
+}
+
+/** 같은 CHECK인지: 식이 같고, 양쪽 다 이름이 있으면 이름도 같아야 한다 (이름 없는 CHECK는 식으로만 본다) */
+function sameCheck(_beforeTable: Table, a: CheckConstraint, _afterTable: Table, b: CheckConstraint): boolean {
+  const named = a.name.trim() && b.name.trim();
+  return sameExpression(a.expression, b.expression) && (!named || a.name.trim().toLowerCase() === b.name.trim().toLowerCase());
+}
+
+/** 계산 컬럼이 같은지 (식은 공백·괄호·따옴표 차이 무시, 저장 방식은 둘 다 되는 DB에서만 비교) */
+function sameGenerated(dialect: Dialect, a: Column, b: Column): boolean {
+  const ga = a.generated?.expression.trim() ? a.generated : undefined;
+  const gb = b.generated?.expression.trim() ? b.generated : undefined;
+  if (!ga || !gb) return !ga && !gb;
+  const both = dialect.generatedSupport?.virtual && dialect.generatedSupport?.stored;
+  return sameExpression(ga.expression, gb.expression) && (!both || Boolean(ga.stored) === Boolean(gb.stored));
 }
 
 function sameIndex(a: Index, b: Index): boolean {

@@ -5,6 +5,7 @@
 import type { DialectId } from '../dialects/types';
 import {
   createColumn,
+  createCheck,
   createIndex,
   createRelation,
   createTable,
@@ -293,8 +294,12 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
       c.skipItem();
       return;
     }
-    if (c.is('CHECK') || c.is('EXCLUDE')) {
-      if (c.is('CHECK')) warnings.push(`${table.name}: CHECK 제약은 가져오지 않습니다`);
+    if (c.accept('CHECK')) {
+      if (c.isPunct('(')) addCheck(table, constraintName, c.skipParens());
+      c.skipItem();
+      return;
+    }
+    if (c.is('EXCLUDE')) {
       c.skipItem();
       return;
     }
@@ -309,9 +314,16 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
     parseColumn(c, table);
   }
 
+  /** CHECK 제약 추가 (이름이 없으면 비워 두고 SQL에서 ck_테이블_번호로 짓는다) */
+  function addCheck(table: Table, name: string, expression: string) {
+    if (!expression.trim()) return;
+    table.checks = [...(table.checks ?? []), createCheck({ name, expression: expression.trim() })];
+  }
+
   function parseColumn(c: Cursor, table: Table) {
     const column = createColumn({ name: c.identifier(), length: '', nullable: true });
     readType(c, column);
+    let constraintName = '';
 
     while (!c.done && !c.isPunct(',') && !c.isPunct(')')) {
       if (c.accept('NOT', 'NULL')) column.nullable = false;
@@ -331,11 +343,16 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
           column.autoIncrement = true;
           if (c.isPunct('(')) c.skipParens();
         } else if (c.accept('AS')) {
-          if (c.isPunct('(')) c.skipParens();
-          warnings.push(`${table.name}.${column.name}: 계산 컬럼의 식은 가져오지 않습니다`);
+          // 계산 컬럼: GENERATED ALWAYS AS (식) [VIRTUAL|STORED]
+          if (c.isPunct('(')) column.generated = { expression: c.skipParens(), stored: false };
         }
       } else if (c.accept('AS')) {
-        if (c.isPunct('(')) c.skipParens();
+        // MySQL 줄임 문법: 타입 AS (식) [VIRTUAL|STORED]
+        if (c.isPunct('(')) column.generated = { expression: c.skipParens(), stored: false };
+      } else if (column.generated && (c.accept('STORED') || c.accept('PERSISTENT') || c.accept('PERSISTED'))) {
+        column.generated.stored = true;
+      } else if (column.generated && c.accept('VIRTUAL')) {
+        column.generated.stored = false;
       } else if (c.accept('CHARACTER', 'SET') || c.accept('CHARSET') || c.accept('COLLATE')) {
         c.next();
       } else if (c.accept('ON', 'UPDATE')) {
@@ -343,9 +360,11 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
         const value = readExpression(c);
         if (value) column.onUpdate = value.toUpperCase();
       } else if (c.accept('CONSTRAINT')) {
-        if (!c.is('PRIMARY') && !c.is('UNIQUE') && !c.is('CHECK') && !c.is('REFERENCES') && !c.is('NOT')) c.next();
+        if (!c.is('PRIMARY') && !c.is('UNIQUE') && !c.is('CHECK') && !c.is('REFERENCES') && !c.is('NOT')) constraintName = c.identifier();
       } else if (c.accept('CHECK')) {
-        if (c.isPunct('(')) c.skipParens();
+        // 컬럼에 붙은 CHECK도 테이블의 CHECK 제약으로 담는다
+        if (c.isPunct('(')) addCheck(table, constraintName, c.skipParens());
+        constraintName = '';
       } else if (c.isPunct('(')) c.skipParens();
       else c.pos++;
     }

@@ -84,6 +84,9 @@ export function changeKey(change: Change): string {
     case 'addForeignKey':
     case 'dropForeignKey':
       return `r:${change.relation.id}`;
+    case 'addCheck':
+    case 'dropCheck':
+      return `k:${change.check.id}`;
   }
 }
 

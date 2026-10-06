@@ -59,6 +59,17 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema): Sch
       used.add(m.id);
       index.id = m.id;
     }
+
+    const usedChecks = new Set<string>();
+    for (const check of table.checks ?? []) {
+      const m =
+        (match.checks ?? []).find((x) => !usedChecks.has(x.id) && x.name && check.name && key(x.name) === key(check.name)) ??
+        (match.checks ?? []).find((x) => !usedChecks.has(x.id) && sameExpression(x.expression, check.expression));
+      if (!m) continue;
+      usedChecks.add(m.id);
+      check.id = m.id;
+      // DB가 지은 이름은 그대로 둔다 (지울 때 실제 이름이 필요). 이름 없는 ERD CHECK와는 식으로 비교한다
+    }
   }
 
   for (const relation of incoming.relations) {
@@ -111,6 +122,8 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
       case 'alterColumn':
       case 'addIndex':
       case 'dropIndex':
+      case 'addCheck':
+      case 'dropCheck':
         return change.table.id;
       case 'renameTable':
       case 'primaryKey':
@@ -171,6 +184,15 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
         break;
       case 'dropIndex':
         if (table) dropIndexOrFlag(table, change.index);
+        break;
+      case 'addCheck':
+        if (table) table.checks = [...(table.checks ?? []).filter((c) => c.id !== change.check.id), { ...change.check }];
+        break;
+      case 'dropCheck':
+        if (table) {
+          table.checks = (table.checks ?? []).filter((c) => c.id !== change.check.id);
+          if (!table.checks.length) delete table.checks;
+        }
         break;
     }
   }
