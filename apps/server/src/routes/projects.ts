@@ -132,8 +132,8 @@ export function registerProjectRoutes(
       patch.aiAllowDbExecute = b.aiAllowDbExecute;
     }
     if (b.dbConnectionId === null || typeof b.dbConnectionId === 'string') {
-      // 설치형 앱의 연결은 사용자 PC에만 있으므로 서버에서 확인하지 않는다
-      if (b.dbConnectionId && serverDb) connections.get(b.dbConnectionId, req.user.id);
+      // 연결 id는 '이 프로젝트에서 고른 연결'을 기억하는 것뿐이라 서버 연결 목록에서 확인하지 않는다.
+      // 설치형 앱의 연결은 그 PC에만 있어 서버(로컬·자체 설치)에 없을 수 있다. 실제 DB 작업은 할 때마다 연결 주인을 다시 확인한다.
       if (typeof b.dbConnectionId === 'string' && b.dbConnectionId.length > 100) throw badRequest('잘못된 연결 id');
       patch.dbConnectionId = b.dbConnectionId;
     }
@@ -370,8 +370,12 @@ export function registerProjectRoutes(
   app.post<{ Params: { id: string }; Body: { connectionId: string; schema?: Schema } }>('/api/projects/:id/db/baseline', async (req) => {
     const { id } = req.params;
     const { connectionId, schema } = req.body ?? ({} as never);
-    if (serverDb) connections.get(connectionId, req.user.id);
-    else if (!schema) throw desktopOnly();
+    // 화면(설치형 앱)이 자기가 읽은 DB 구조를 보내면 그대로 저장한다. 앱의 연결은 그 PC에만 있어서 서버 연결 목록에 없을 수 있다
+    // (서버가 DB에 접속하는 로컬·자체 설치 서버에 앱을 붙여 쓸 때). 구조를 안 보내면 서버가 직접 DB를 읽어야 한다.
+    if (!schema) {
+      if (!serverDb) throw desktopOnly();
+      connections.get(connectionId, req.user.id);
+    }
     if (typeof connectionId !== 'string' || !connectionId || connectionId.length > 100) throw badRequest('connectionId가 필요합니다');
     if (schema !== undefined && (!Array.isArray(schema?.tables) || !Array.isArray(schema?.relations))) throw badRequest('schema 형식이 올바르지 않습니다');
     statusCache.delete(`${id}:${connectionId}`);

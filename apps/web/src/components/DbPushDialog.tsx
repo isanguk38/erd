@@ -103,7 +103,8 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
           <button className="btn btn-primary" disabled={!canExecute || busy} onClick={execute}>{busy ? '실행 중…' : 'DB에 실행'}</button>
         </>
       )}
-      {step === 'result' && <button className="btn btn-primary" onClick={compare}>다시 비교</button>}
+      {/* 실행 뒤 DB를 다시 읽어 기준 시점(식 짝 포함)을 저장하는 동안은 막는다 — 저장 전에 비교하면 처음 맞춘 것처럼 차이가 다시 나온다 */}
+      {step === 'result' && <button className="btn btn-primary" disabled={busy} onClick={compare}>{busy ? '기록 중…' : '다시 비교'}</button>}
     </>
   );
 

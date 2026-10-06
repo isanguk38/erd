@@ -35,7 +35,7 @@ afterAll(async () => {
   await admin.connect();
   for (const name of created) await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
   await admin.end();
-});
+}, 120000); // Windows의 로컬 PostgreSQL은 DB 지우기가 느리다
 
 /** 틴팅 설계에서 PostgreSQL이 바꿔 저장하는 것들 (IN, BETWEEN, 부분 인덱스, 식 인덱스, 계산 컬럼, 문자열 기본값) */
 function erd(): Schema {
