@@ -51,7 +51,6 @@ const COLORS = ['#e11d48', '#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2'
 interface LocalPrefs {
   viewMode: ViewMode;
   relationTool: RelationTool;
-  connectionId: string | null;
   userName: string;
   userColor: string;
 }
@@ -115,7 +114,6 @@ interface State extends LocalPrefs {
   setCursor: (cursor: { x: number; y: number } | null) => void;
   setViewMode: (mode: ViewMode) => void;
   setRelationTool: (tool: RelationTool) => void;
-  setConnectionId: (id: string | null) => void;
   setUserName: (name: string) => void;
   setDialect: (dialect: DialectId) => void;
   setProjectName: (name: string) => void;
@@ -163,7 +161,6 @@ export const useStore = create<State>()(
       return {
         viewMode: 'physical',
         relationTool: '1:N',
-        connectionId: null,
         userName: '',
         userColor: COLORS[Math.floor(Math.random() * COLORS.length)],
 
@@ -341,7 +338,6 @@ export const useStore = create<State>()(
 
         setViewMode: (viewMode) => set({ viewMode }),
         setRelationTool: (relationTool) => set({ relationTool }),
-        setConnectionId: (connectionId) => set({ connectionId }),
         setUserName(userName) {
           set({ userName });
           publishPresence();
@@ -363,7 +359,6 @@ export const useStore = create<State>()(
       partialize: (s): LocalPrefs => ({
         viewMode: s.viewMode,
         relationTool: s.relationTool,
-        connectionId: s.connectionId,
         userName: s.userName,
         userColor: s.userColor,
       }),

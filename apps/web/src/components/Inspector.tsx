@@ -72,6 +72,8 @@ function TextInput({ value, onCommit, placeholder, className, list }: { value: s
     <input
       className={className}
       value={draft ?? value}
+      // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다
+      title={(draft ?? value) || undefined}
       placeholder={placeholder}
       list={list}
       onChange={(e) => setDraft(e.target.value)}

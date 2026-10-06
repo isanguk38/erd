@@ -110,10 +110,10 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
         ERD의 배치, 색상, (DB에 코멘트가 없으면) 논리명은 그대로 둡니다.
       </p>
       <ConnectionPicker
-        onChange={(c) => {
+        onChange={(c, byUser) => {
           setConnection(c);
           setResult(null);
-          if (c) projectApi.setDbConnection(projectId, c.id).catch(() => {});
+          if (c || byUser) projectApi.setDbConnection(projectId, c?.id ?? null).catch(() => {});
         }}
       />
       {connection && (

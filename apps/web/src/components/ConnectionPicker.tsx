@@ -14,10 +14,12 @@ function emptyInput(dialect: DialectId): ConnectionInput {
  * DB 연결 고르기 + 추가/수정/삭제/연결 확인.
  * 고른 연결은 프로젝트에 기억한다.
  */
-export function ConnectionPicker({ onChange }: { onChange?: (connection: Connection | null) => void }) {
-  const connectionId = useStore((s) => s.connectionId);
+/** onChange의 byUser: 사람이 직접 고른 것인지 (연결 해제는 직접 '연결 없음'을 골랐을 때만) */
+export function ConnectionPicker({ onChange }: { onChange?: (connection: Connection | null, byUser?: boolean) => void }) {
+  // 이 프로젝트에 연결한 DB만 고른 상태로 시작한다 (다른 프로젝트에서 마지막으로 쓴 연결을 가져오지 않는다. 새 프로젝트는 '연결 없음')
+  const projectConnectionId = useStore((s) => s.meta.dbConnectionId ?? null);
+  const [connectionId, setConnectionId] = useState<string | null>(projectConnectionId);
   const projectDialect = useDialect();
-  const { setConnectionId } = useStore.getState();
   const [connections, setConnections] = useState<Connection[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [editing, setEditing] = useState<{ id?: string; input: ConnectionInput } | null>(null);
@@ -75,10 +77,10 @@ export function ConnectionPicker({ onChange }: { onChange?: (connection: Connect
           onChange={(e) => {
             const c = connections.find((x) => x.id === e.target.value) ?? null;
             setConnectionId(c?.id ?? null);
-            onChange?.(c);
+            onChange?.(c, true);
           }}
         >
-          <option value="">연결을 고르세요</option>
+          <option value="">연결 없음 (고르세요)</option>
           {connections.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name} · {dbLabel(c.dialect)} · {c.host}:{c.port}/{c.database}

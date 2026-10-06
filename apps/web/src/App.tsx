@@ -25,6 +25,7 @@ import { Notice } from './components/Notice';
 import { CommentsPanel } from './components/Comments';
 import { copySelection, pasteClipboard, selectAllTables } from './lib/tableClipboard';
 import { ImageExportDialog } from './components/ImageExportDialog';
+import { ResizableSide } from './components/ResizableSide';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -228,7 +229,13 @@ function Editor({ projectId }: { projectId: string }) {
             )}
             <Canvas fitRequest={fitRequest} />
           </div>
-          {comparing ? <ComparePanel /> : multiSelected ? <MultiSelectPanel /> : hasSelection ? <Inspector /> : null}
+          {comparing ? (
+            <ResizableSide><ComparePanel /></ResizableSide>
+          ) : multiSelected ? (
+            <MultiSelectPanel />
+          ) : hasSelection ? (
+            <ResizableSide><Inspector /></ResizableSide>
+          ) : null}
         </main>
         {dialog === 'sql' && <SqlDialog onClose={close} />}
         {dialog === 'versions' && <VersionsDialog onClose={close} />}

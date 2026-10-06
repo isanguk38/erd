@@ -250,7 +250,7 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
 .column-grid { display: flex; flex-direction: column; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
 .column-grid > * { min-width: 600px; }
 .column-grid__head, .column-grid__row {
-  display: grid; grid-template-columns: 1.3fr 1.1fr 1fr 48px 22px 22px 22px 22px 0.9fr 1fr 64px; gap: 4px; align-items: center;
+  display: grid; grid-template-columns: 1.2fr 1fr 1fr 44px 22px 22px 22px 22px 1.7fr 1fr 64px; gap: 4px; align-items: center;
 }
 .column-grid__head { color: var(--muted); font-size: 11px; padding: 0 2px; }
 .column-grid__row input:not([type='checkbox']) { width: 100%; padding: 3px 5px; font-size: 12px; min-width: 0; }
@@ -692,3 +692,13 @@ label.btn { display: inline-flex; align-items: center; }
 .generated-input { color: #7c3aed; }
 .check-row { display: grid; grid-template-columns: 0.8fr 1.6fr 22px; gap: 4px; align-items: center; margin-bottom: 4px; }
 .check-row input { min-width: 0; }
+/* 오른쪽 편집 창 폭 조절 */
+.side-resizable { position: relative; display: flex; flex: none; min-height: 0; }
+.side-resizable > .inspector { width: var(--side-width, 640px); max-width: 85vw; }
+.side-resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 6; touch-action: none; }
+.side-resizer:hover, body.resizing-side .side-resizer { background: color-mix(in srgb, var(--primary, #2563eb) 35%, transparent); }
+body.resizing-side { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  .side-resizable { position: static; }
+  .side-resizer { display: none; }
+}

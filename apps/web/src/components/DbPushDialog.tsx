@@ -113,11 +113,11 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       </p>
       {step !== 'result' && (
         <ConnectionPicker
-          onChange={(c) => {
+          onChange={(c, byUser) => {
             setConnection(c);
             setDb(null);
             setStep('compare');
-            if (c) projectApi.setDbConnection(projectId, c.id).catch(() => {});
+            if (c || byUser) projectApi.setDbConnection(projectId, c?.id ?? null).catch(() => {});
           }}
         />
       )}
