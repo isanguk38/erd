@@ -116,6 +116,7 @@ const FIELD_LABEL: Record<ColumnField, string> = {
   type: '타입',
   nullable: 'NULL 허용',
   defaultValue: '기본값',
+  onUpdate: '수정 시 값(ON UPDATE)',
   autoIncrement: '자동 증가',
   comment: '코멘트',
 };
@@ -261,6 +262,8 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     if (dialect.renderType(old) !== dialect.renderType(column)) fields.push('type');
     if (effectiveNullable(old) !== effectiveNullable(column)) fields.push('nullable');
     if (dialect.normalizeDefault(old.defaultValue) !== dialect.normalizeDefault(column.defaultValue)) fields.push('defaultValue');
+    // ON UPDATE CURRENT_TIMESTAMP는 MySQL·MariaDB에만 있다
+    if ((dialect.id === 'mysql' || dialect.id === 'mariadb') && (old.onUpdate?.trim().toUpperCase() ?? '') !== (column.onUpdate?.trim().toUpperCase() ?? '')) fields.push('onUpdate');
     if (old.autoIncrement !== column.autoIncrement) fields.push('autoIncrement');
     if (sqlComment(old) !== sqlComment(column)) fields.push('comment');
     if (!fields.length) return;

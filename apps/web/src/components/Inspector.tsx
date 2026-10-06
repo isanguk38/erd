@@ -154,7 +154,19 @@ function TableEditor({ table }: { table: Table }) {
               <input type="checkbox" checked={!c.nullable || c.primaryKey} disabled={c.primaryKey} onChange={(e) => setColumn(c, { nullable: !e.target.checked })} />
               <input type="checkbox" checked={c.unique} disabled={c.primaryKey} onChange={(e) => setColumn(c, { unique: e.target.checked })} />
               <input type="checkbox" checked={c.autoIncrement} onChange={(e) => setColumn(c, { autoIncrement: e.target.checked })} />
-              <TextInput value={c.defaultValue ?? ''} placeholder="NULL" onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
+              <span className="default-cell">
+                <TextInput value={c.defaultValue ?? ''} placeholder="NULL" onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
+                {/* MySQL·MariaDB 날짜 컬럼: 행이 바뀔 때 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP) */}
+                {(dialect.id === 'mysql' || dialect.id === 'mariadb') && /^(TIMESTAMP|DATETIME)/i.test(c.type) && (
+                  <button
+                    className={`onupdate-btn${c.onUpdate ? ' on' : ''}`}
+                    title={c.onUpdate ? `ON UPDATE ${c.onUpdate} (행이 바뀔 때마다 현재 시각) — 누르면 끕니다` : '행이 바뀔 때마다 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP)'}
+                    onClick={() => setColumn(c, { onUpdate: c.onUpdate ? undefined : /^\d+$/.test(c.length) ? `CURRENT_TIMESTAMP(${c.length})` : 'CURRENT_TIMESTAMP' })}
+                  >
+                    ↻
+                  </button>
+                )}
+              </span>
               <TextInput value={c.comment} onCommit={(comment) => setColumn(c, { comment })} />
               <span className="row-actions">
                 <button className="icon-btn" title="위로" disabled={i === 0} onClick={() => edit((d) => moveColumn(d, table.id, c.id, i - 1))}>↑</button>
@@ -187,13 +199,15 @@ const EXPRESSION_HINT: Record<string, string> = {
   oracle: '예) UPPER("EMAIL"), TRUNC("CREATED_AT")',
   mssql: 'SQL Server는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)',
 };
-const PG_METHODS = ['gin', 'gist', 'brin', 'hash', 'spgist'];
 
 function IndexEditor({ table }: { table: Table }) {
   const { edit } = useStore.getState();
   const dialectId = useDialect();
-  const canMethod = dialectId === 'postgresql';
-  const canWhere = dialectId === 'postgresql' || dialectId === 'mssql';
+  // DB마다 쓸 수 있는 인덱스 방식(PostgreSQL: gin 등, MySQL: fulltext·spatial)과 부분 인덱스(WHERE) 지원
+  const support = getDialect(dialectId).indexSupport ?? {};
+  const methods = support.methods ?? [];
+  const canMethod = methods.length > 0;
+  const canWhere = Boolean(support.where);
   return (
     <div className="inspector__section">
       <div className="inspector__section-head">
@@ -278,7 +292,7 @@ function IndexEditor({ table }: { table: Table }) {
                     <span>방식</span>
                     <select value={index.method ?? ''} onChange={(e) => edit((d) => updateIndex(d, table.id, index.id, { method: e.target.value || undefined }))}>
                       <option value="">기본 (btree)</option>
-                      {[...new Set([...PG_METHODS, ...(index.method ? [index.method] : [])])].map((m) => (
+                      {[...new Set([...methods, ...(index.method ? [index.method] : [])])].map((m) => (
                         <option key={m} value={m}>{m}</option>
                       ))}
                     </select>

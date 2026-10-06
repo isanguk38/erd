@@ -682,3 +682,7 @@ label.btn { display: inline-flex; align-items: center; }
 .steps > li { margin: 8px 0; }
 .steps ul { margin: 4px 0; padding-left: 18px; }
 .steps .code-block { margin: 6px 0; }
+.default-cell { display: flex; gap: 2px; align-items: center; min-width: 0; }
+.default-cell input { flex: 1; min-width: 0; }
+.onupdate-btn { flex: none; width: 20px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+.onupdate-btn.on { background: var(--primary, #2563eb); border-color: var(--primary, #2563eb); color: #fff; }

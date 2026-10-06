@@ -20,6 +20,8 @@ export interface Column {
   autoIncrement: boolean;
   /** SQL 그대로의 기본값 (예: "0", "'Y'", "CURRENT_TIMESTAMP"). 없으면 null */
   defaultValue: string | null;
+  /** MySQL·MariaDB: 행이 바뀔 때 자동으로 넣는 값 (ON UPDATE CURRENT_TIMESTAMP). 없으면 생략 */
+  onUpdate?: string;
   comment: string;
 }
 

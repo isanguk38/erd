@@ -39,6 +39,8 @@ export interface ColumnSpec {
   autoIncrement?: boolean;
   /** SQL 식 그대로 (문자열은 따옴표 포함: "'Y'") */
   default?: string | null;
+  /** MySQL·MariaDB: 행이 바뀔 때 넣는 값 (예: CURRENT_TIMESTAMP). null이면 해제 */
+  onUpdate?: string | null;
   comment?: string;
 }
 
@@ -103,6 +105,7 @@ export function columnPatch(spec: Partial<ColumnSpec>): Partial<Column> {
   if (spec.unique !== undefined) patch.unique = spec.unique;
   if (spec.autoIncrement !== undefined) patch.autoIncrement = spec.autoIncrement;
   if (spec.default !== undefined) patch.defaultValue = spec.default === '' ? null : spec.default;
+  if (spec.onUpdate !== undefined) patch.onUpdate = spec.onUpdate?.trim() ? spec.onUpdate.trim().toUpperCase() : undefined;
   if (spec.comment !== undefined) patch.comment = spec.comment;
   return patch;
 }

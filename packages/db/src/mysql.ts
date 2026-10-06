@@ -59,6 +59,8 @@ export function mysqlColumnFromRow(row: ColumnRow): Column {
     nullable: row.IS_NULLABLE === 'YES',
     autoIncrement: extra.includes('auto_increment'),
     defaultValue,
+    // EXTRA 예: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP(3)"
+    ...(/on update (current_timestamp(\(\d*\))?)/i.test(row.EXTRA) ? { onUpdate: /on update (current_timestamp(\(\d*\))?)/i.exec(row.EXTRA)![1].toUpperCase() } : {}),
     logicalName: '',
     comment: '',
   });
@@ -109,6 +111,18 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
     table.columns.push(column);
   }
 
+  // CHECK 제약은 아직 ERD에 담지 않는다: 조용히 빠지지 않게 알린다 (MySQL 8.0.16+, MariaDB 10.2+)
+  try {
+    for (const row of await query(
+      `SELECT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = ? AND CONSTRAINT_TYPE = 'CHECK' ORDER BY TABLE_NAME, CONSTRAINT_NAME`,
+      [database],
+    )) {
+      if (tables.has(row.TABLE_NAME)) warnings.push(`${row.TABLE_NAME}.${row.CONSTRAINT_NAME}: CHECK 제약은 가져오지 않습니다 (DB에는 그대로 남습니다)`);
+    }
+  } catch {
+    // 오래된 버전에는 CHECK 제약 정보가 없다
+  }
+
   const fkRows = await query(
     `SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_SCHEMA, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME,
             r.DELETE_RULE, r.UPDATE_RULE
@@ -137,12 +151,18 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
      WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`,
     [database],
   );
-  const indexes = new Map<string, { table: string; name: string; unique: boolean; columns: (string | null)[]; expressions: (string | null)[] }>();
+  const indexes = new Map<string, { table: string; name: string; unique: boolean; type: string; columns: (string | null)[]; expressions: (string | null)[]; subParts: (number | null)[]; desc: boolean[] }>();
   for (const row of indexRows) {
     const k = `${row.TABLE_NAME}\u0000${row.INDEX_NAME}`;
-    const index = indexes.get(k) ?? { table: row.TABLE_NAME, name: row.INDEX_NAME, unique: Number(row.NON_UNIQUE) === 0, columns: [] as (string | null)[], expressions: [] as (string | null)[] };
+    const index = indexes.get(k) ?? {
+      table: row.TABLE_NAME, name: row.INDEX_NAME, unique: Number(row.NON_UNIQUE) === 0, type: String(row.INDEX_TYPE ?? 'BTREE').toUpperCase(),
+      columns: [] as (string | null)[], expressions: [] as (string | null)[], subParts: [] as (number | null)[], desc: [] as boolean[],
+    };
     index.columns.push(row.COLUMN_NAME);
-    index.expressions.push(row.EXPRESSION ?? null);
+    // information_schema는 식 안의 따옴표를 \' 로 돌려준다 → SQL에 다시 쓸 수 있게 되돌린다
+    index.expressions.push(row.EXPRESSION == null ? null : String(row.EXPRESSION).replace(/\\'/g, "'"));
+    index.subParts.push(row.SUB_PART == null ? null : Number(row.SUB_PART));
+    index.desc.push(row.COLLATION === 'D');
     indexes.set(k, index);
   }
 
@@ -152,14 +172,18 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
   for (const index of indexes.values()) {
     const table = tables.get(index.table);
     if (!table) continue;
-    if (index.columns.some((c) => !c)) {
+    // FULLTEXT·SPATIAL은 인덱스 방식으로 담는다 (다시 만들 때 CREATE FULLTEXT INDEX)
+    const method = index.type === 'FULLTEXT' || index.type === 'SPATIAL' ? index.type.toLowerCase() : undefined;
+    // 식, 앞부분 길이(col(20)), 내림차순(DESC)이 있으면 키 목록 원문을 그대로 담는다 — MySQL 문법 그대로
+    if (index.columns.some((c, i) => !c || index.subParts[i] !== null || index.desc[i])) {
       if (index.expressions.some((e, i) => !index.columns[i] && !e)) {
         warnings.push(`${table.name}.${index.name}: 인덱스 정의를 읽지 못해 가져오지 않습니다`);
         continue;
       }
-      // 식 인덱스: 키마다 컬럼은 `이름`, 식은 (식) — MySQL 문법 그대로
-      const expression = index.columns.map((c, i) => (c ? `\`${c}\`` : `(${index.expressions[i]})`)).join(', ');
-      table.indexes.push(createIndex({ name: index.name, columnIds: [], unique: index.unique, expression }));
+      const expression = index.columns
+        .map((c, i) => `${c ? `\`${c}\`${index.subParts[i] !== null ? `(${index.subParts[i]})` : ''}` : `(${index.expressions[i]})`}${index.desc[i] ? ' DESC' : ''}`)
+        .join(', ');
+      table.indexes.push(createIndex({ name: index.name, columnIds: [], unique: index.unique, expression, ...(method ? { method } : {}) }));
       continue;
     }
     const names = index.columns as string[];
@@ -171,7 +195,7 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
     const autoFkIndex = !index.unique && fkList.some((fk) => fk.table === index.table && fk.name === index.name && fk.columns.join() === names.join());
     if (autoFkIndex) continue;
     const ids = names.map((n) => columnId(table, n)).filter((x): x is string => !!x);
-    table.indexes.push(createIndex({ name: index.name, columnIds: ids, unique: index.unique }));
+    table.indexes.push(createIndex({ name: index.name, columnIds: ids, unique: index.unique, ...(method ? { method } : {}) }));
   }
 
   for (const fk of fkList) {

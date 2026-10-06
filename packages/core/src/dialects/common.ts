@@ -60,7 +60,7 @@ export function indexWarnings(dialect: Dialect, table: Table, index: Index): str
   }
   if (index.where?.trim() && !support.where) messages.push(`${label}는 부분 인덱스를 지원하지 않아 조건(WHERE ${index.where.trim()})을 빼고 만듭니다`);
   const method = index.method?.trim().toLowerCase();
-  if (method && method !== 'btree' && !support.method) messages.push(`${label}에는 ${method} 방식이 없어 일반 인덱스로 만듭니다`);
+  if (method && method !== 'btree' && !(support.methods ?? []).includes(method)) messages.push(`${label}에는 ${method} 방식이 없어 일반 인덱스로 만듭니다`);
   if ((dialect.id === 'mysql' || dialect.id === 'mariadb') && !expression) {
     const json = index.columnIds.map((id) => findColumn(table, id)).filter((c) => c && /^JSONB?$/i.test(c.type.trim()));
     if (json.length) messages.push(`${label}는 JSON 컬럼(${json.map((c) => c!.name).join(', ')})에 일반 인덱스를 만들 수 없습니다`);

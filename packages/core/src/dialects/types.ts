@@ -3,7 +3,7 @@ import type { Column, Index, ReferentialAction, Relation, Schema, Table } from '
 /** 새 DB를 추가하려면 이 목록에 id를 넣고 Dialect를 구현해 registry에 등록한다. */
 export type DialectId = 'mysql' | 'mariadb' | 'postgresql' | 'oracle' | 'mssql';
 
-export type ColumnField = 'name' | 'type' | 'nullable' | 'defaultValue' | 'autoIncrement' | 'comment';
+export type ColumnField = 'name' | 'type' | 'nullable' | 'defaultValue' | 'onUpdate' | 'autoIncrement' | 'comment';
 
 /**
  * DB 종류별 SQL 문법.
@@ -27,7 +27,7 @@ export interface Dialect {
   /** 외래키에 인덱스가 꼭 있어야 해서, FK가 쓰는 인덱스를 그냥 지울 수 없는 DB (MySQL·MariaDB) */
   fkNeedsIndex?: boolean;
   /** 지원하는 인덱스 기능: 식 인덱스, 부분 인덱스(WHERE), 인덱스 방식(gin 등). 없는 기능은 SQL에서 빼거나 주의를 단다 */
-  indexSupport?: { expression?: boolean; where?: boolean; method?: boolean };
+  indexSupport?: { expression?: boolean; where?: boolean; /** 쓸 수 있는 인덱스 방식 (btree 외) */ methods?: string[] };
 
   createTable(table: Table): string[];
   dropTable(table: Table): string[];

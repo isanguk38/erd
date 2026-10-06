@@ -33,6 +33,7 @@ const columnSpec = z.object({
   unique: z.boolean().optional(),
   autoIncrement: z.boolean().optional(),
   default: z.string().nullable().optional().describe("SQL 식 그대로. 문자열은 따옴표 포함 (예: 'Y', 0, CURRENT_TIMESTAMP)"),
+  onUpdate: z.string().nullable().optional().describe('MySQL·MariaDB 전용: 행이 바뀔 때 넣는 값 (예: CURRENT_TIMESTAMP). null이면 해제'),
   comment: z.string().optional(),
 });
 

@@ -11,7 +11,7 @@ import * as Y from 'yjs';
 import type { Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
-const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'comment'] as const;
+const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'onUpdate', 'comment'] as const;
 const RELATION_FIELDS = ['name', 'fromTableId', 'fromColumnIds', 'toTableId', 'toColumnIds', 'cardinality', 'onDelete', 'onUpdate'] as const;
 
 export function rootMap(doc: Y.Doc): Y.Map<unknown> {
@@ -57,7 +57,7 @@ function setIfChanged(map: Y.Map<unknown>, key: string, value: unknown): void {
 function columnToY(column: Column): Y.Map<unknown> {
   const m = new Y.Map<unknown>();
   m.set('id', column.id);
-  for (const f of COLUMN_FIELDS) m.set(f, column[f]);
+  for (const f of COLUMN_FIELDS) if (column[f] !== undefined) m.set(f, column[f]);
   return m;
 }
 
@@ -129,7 +129,7 @@ export function readSchema(doc: Y.Doc): Schema {
     const columnsY = map.get('columns') as Y.Array<Y.Map<unknown>> | undefined;
     const columns: Column[] = (columnsY?.toArray() ?? []).map((c) => {
       const column = { id: c.get('id') } as Column;
-      for (const f of COLUMN_FIELDS) (column as unknown as Record<string, unknown>)[f] = c.get(f);
+      for (const f of COLUMN_FIELDS) if (c.has(f)) (column as unknown as Record<string, unknown>)[f] = c.get(f);
       if (column.defaultValue === undefined) column.defaultValue = null;
       return column;
     });

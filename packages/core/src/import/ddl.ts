@@ -217,6 +217,16 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
     );
   }
 
+  // MySQL이 외래키를 위해 자동으로 만든 인덱스(이름이 FK와 같고 컬럼도 같음)는 DB에서 읽을 때처럼 ERD에 그리지 않는다
+  if (dialect === 'mysql' || dialect === 'mariadb') {
+    for (const table of schema.tables) {
+      const fks = schema.relations.filter((r) => r.fromTableId === table.id);
+      table.indexes = table.indexes.filter(
+        (i) => i.unique || i.expression || !fks.some((r) => r.name === i.name && r.fromColumnIds.join() === i.columnIds.join()),
+      );
+    }
+  }
+
   return { schema, dialect, warnings };
 
   // ── 문장별 해석 ──────────────────────────────────────────
@@ -273,7 +283,18 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
       c.skipItem();
       return;
     }
-    if (c.is('FULLTEXT') || c.is('SPATIAL') || c.is('CHECK') || c.is('EXCLUDE')) {
+    // MySQL FULLTEXT·SPATIAL 인덱스: 종류를 인덱스 방식으로 담는다
+    if (c.is('FULLTEXT') || c.is('SPATIAL')) {
+      const method = c.next().value.toLowerCase();
+      c.accept('KEY') || c.accept('INDEX');
+      let name = constraintName;
+      if (!c.isPunct('(')) name = c.identifier();
+      addIndexFromList(c, table, name, false, method);
+      c.skipItem();
+      return;
+    }
+    if (c.is('CHECK') || c.is('EXCLUDE')) {
+      if (c.is('CHECK')) warnings.push(`${table.name}: CHECK 제약은 가져오지 않습니다`);
       c.skipItem();
       return;
     }
@@ -318,7 +339,9 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
       } else if (c.accept('CHARACTER', 'SET') || c.accept('CHARSET') || c.accept('COLLATE')) {
         c.next();
       } else if (c.accept('ON', 'UPDATE')) {
-        readExpression(c);
+        // MySQL: 행이 바뀔 때 넣는 값 (ON UPDATE CURRENT_TIMESTAMP)
+        const value = readExpression(c);
+        if (value) column.onUpdate = value.toUpperCase();
       } else if (c.accept('CONSTRAINT')) {
         if (!c.is('PRIMARY') && !c.is('UNIQUE') && !c.is('CHECK') && !c.is('REFERENCES') && !c.is('NOT')) c.next();
       } else if (c.accept('CHECK')) {
@@ -456,7 +479,8 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
   function addIndexFromList(c: Cursor, table: Table, name: string, unique: boolean, method: string) {
     const start = c.pos;
     const inner = c.skipParens();
-    const plain = splitTopLevel(inner).every((part) => /^\s*[`"\[]?[\w$]+[`"\]]?(\s*\(\s*\d+\s*\))?(\s+(ASC|DESC))?\s*$/i.test(part));
+    // 앞부분 길이(col(20))·DESC가 있으면 원문으로 담는다 (일반 컬럼 인덱스로 보면 길이·방향을 잃는다)
+    const plain = splitTopLevel(inner).every((part) => /^\s*[`"\[]?[\w$]+[`"\]]?(\s+ASC)?\s*$/i.test(part));
     let where = '';
     if (c.accept('WHERE')) {
       const first = c.peek();

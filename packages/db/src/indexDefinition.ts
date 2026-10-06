@@ -24,9 +24,9 @@ export function indexDefinitionKeys(definition: string | null | undefined): stri
   return null;
 }
 
-/** 키 목록이 컬럼 이름(+ASC/DESC)만으로 되어 있는지 */
+/** 키 목록이 컬럼 이름만으로 되어 있는지 (DESC·NULLS FIRST 같은 정렬이 있으면 원문으로 담는다) */
 export function isPlainKeyList(keys: string): boolean {
-  return splitTopLevel(keys).every((part) => /^\s*[`"[]?[\w$]+[`"\]]?(\s+(ASC|DESC))?(\s+NULLS\s+(FIRST|LAST))?\s*$/i.test(part));
+  return splitTopLevel(keys).every((part) => /^\s*[`"[]?[\w$]+[`"\]]?(\s+ASC)?\s*$/i.test(part));
 }
 
 /** 괄호·따옴표 밖의 콤마로 나눈다 */

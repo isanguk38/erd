@@ -155,9 +155,11 @@ export const postgresql: Dialect = {
     return actions.length ? [`ALTER TABLE ${q(after.name)} ${actions.join(', ')}`] : [];
   },
 
-  indexSupport: { expression: true, where: true, method: true },
+  indexSupport: { expression: true, where: true, methods: ['hash', 'gin', 'gist', 'spgist', 'brin'] },
   createIndex(table, index) {
-    const method = index.method?.trim() && index.method.trim().toLowerCase() !== 'btree' ? ` USING ${index.method.trim().toLowerCase()}` : '';
+    // PostgreSQL에 있는 방식만 쓴다 (MySQL의 fulltext 등은 일반 인덱스로 만들고 주의를 단다)
+    const m = index.method?.trim().toLowerCase() ?? '';
+    const method = m && (postgresql.indexSupport?.methods ?? []).includes(m) ? ` USING ${m}` : '';
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)}${method} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },
   dropIndex: (table, index) =>

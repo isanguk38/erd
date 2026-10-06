@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, cloneSchema, diffSchemas, emptySchema, generateStatements, getDialect, lintSchema, parseDdl, removeColumn, type Schema } from '../src';
+import * as Y from 'yjs';
+import { applyCommands, cloneSchema, diffSchemas, emptySchema, generateStatements, getDialect, lintSchema, parseDdl, removeColumn, readSchema, writeSchema, type Schema } from '../src';
 
 function base(): Schema {
   return applyCommands(emptySchema(), [
@@ -78,8 +79,8 @@ describe('식(expression) 인덱스', () => {
     );
     const idx = Object.fromEntries(schema.tables[0].indexes.map((i) => [i.name, i]));
     expect(idx.ix_lower).toMatchObject({ columnIds: [], expression: '(lower(`email`))' });
-    expect(idx.ix_prefix.expression).toBeUndefined();
-    expect(idx.ix_prefix.columnIds).toHaveLength(1);
+    // 앞부분 길이는 잃지 않게 원문으로 담는다
+    expect(idx.ix_prefix.expression).toBe('`email`(10)');
   });
 
   it('다른 DB로 내보낼 때: MySQL은 식을 괄호로 감싸고, 지원하지 않는 기능은 주의를 단다', () => {
@@ -111,6 +112,57 @@ describe('식(expression) 인덱스', () => {
     expect(out('mssql').warn('ux_email_live')).toContain('식 인덱스를 지원하지 않습니다');
     const postgres = out('postgresql');
     expect(['ux_email_live', 'ix_profile', 'ix_fts'].map(postgres.warn)).toEqual(['', '', '']);
+  });
+
+  it('MySQL: FULLTEXT·앞부분 길이·DESC·ON UPDATE를 DDL에서 읽고 같은 문법으로 내보낸다', () => {
+    const { schema, warnings } = parseDdl(
+      'CREATE TABLE `board` (`id` BIGINT PRIMARY KEY, `title` VARCHAR(200), `body` TEXT, `at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,' +
+        ' KEY `ix_prefix` (`title`(20)), KEY `ix_desc` (`at` DESC), FULLTEXT KEY `ft_body` (`body`), CONSTRAINT `ck` CHECK (`id` > 0)) ENGINE=InnoDB;',
+      { dialect: 'mysql' },
+    );
+    expect(warnings).toEqual(['board: CHECK 제약은 가져오지 않습니다']);
+    const t = schema.tables[0];
+    const idx = Object.fromEntries(t.indexes.map((i) => [i.name, i]));
+    expect(idx.ix_prefix.expression).toBe('`title`(20)');
+    expect(idx.ix_desc.expression).toBe('`at` DESC');
+    expect(idx.ft_body).toMatchObject({ method: 'fulltext' });
+    expect(t.columns.find((c) => c.name === 'at')!.onUpdate).toBe('CURRENT_TIMESTAMP');
+
+    const mysql = getDialect('mysql');
+    const diff = diffSchemas(emptySchema(), schema, mysql);
+    const sql = generateStatements(diff, mysql, new Set(diff.changes.map((c) => c.id))).map((x) => x.sql).join('\n');
+    expect(sql).toContain('ON UPDATE CURRENT_TIMESTAMP');
+    expect(sql).toContain('CREATE INDEX `ix_prefix` ON `board` (`title`(20))');
+    expect(sql).toContain('CREATE INDEX `ix_desc` ON `board` (`at` DESC)');
+    expect(sql).toContain('CREATE FULLTEXT INDEX `ft_body` ON `board` (`body`)');
+
+    // PostgreSQL로 내보내면 fulltext는 일반 인덱스 + 주의, ON UPDATE는 비교하지 않는다
+    const pg = getDialect('postgresql');
+    const pgDiff = diffSchemas(emptySchema(), schema, pg);
+    const ft = pgDiff.changes.find((c) => c.kind === 'addIndex' && (c as { index: { name: string } }).index.name === 'ft_body')!;
+    expect(ft.warning).toContain('fulltext 방식이 없어');
+    expect(generateStatements(pgDiff, pg, new Set([ft.id]))[0].sql).not.toContain('USING');
+  });
+
+  it('ON UPDATE를 빼거나 넣으면 MySQL에서만 컬럼 변경으로 본다', () => {
+    const a = parseDdl('CREATE TABLE t (id INT PRIMARY KEY, at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP);', { dialect: 'mysql' }).schema;
+    const b = cloneSchema(a);
+    delete b.tables[0].columns[1].onUpdate;
+    expect(diffSchemas(a, b, getDialect('mysql')).changes.map((c) => c.summary)).toEqual(['t.at 변경: 수정 시 값(ON UPDATE)']);
+    expect(diffSchemas(a, b, getDialect('postgresql')).changes).toEqual([]);
+  });
+
+  it('ON UPDATE는 함께 편집(Y 문서)에 저장했다 읽어도 남고, MCP 명령으로 켜고 끈다', () => {
+    const s = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 't', columns: [{ name: 'id', type: 'INT', primaryKey: true }, { name: 'at', type: 'TIMESTAMP', nullable: false, default: 'CURRENT_TIMESTAMP', onUpdate: 'current_timestamp' }] },
+    ]).schema;
+    expect(s.tables[0].columns[1].onUpdate).toBe('CURRENT_TIMESTAMP');
+    const doc = new Y.Doc();
+    writeSchema(doc, s);
+    expect(readSchema(doc).tables[0].columns[1].onUpdate).toBe('CURRENT_TIMESTAMP');
+    const off = applyCommands(s, [{ op: 'updateColumn', table: 't', column: 'at', changes: { onUpdate: null } }]).schema;
+    writeSchema(doc, off);
+    expect(readSchema(doc).tables[0].columns[1].onUpdate).toBeUndefined();
   });
 
   it('MCP 명령: expression 또는 columns가 필요하다', () => {

@@ -38,6 +38,7 @@ function columnDefinition(column: Column): string {
   const parts = [q(column.name), renderType(column)];
   parts.push(column.nullable && !column.primaryKey ? 'NULL' : 'NOT NULL');
   if (column.defaultValue !== null && column.defaultValue.trim() !== '') parts.push(`DEFAULT ${column.defaultValue.trim()}`);
+  if (column.onUpdate?.trim()) parts.push(`ON UPDATE ${column.onUpdate.trim()}`);
   if (column.autoIncrement) parts.push('AUTO_INCREMENT');
   const comment = sqlComment(column);
   if (comment) parts.push(`COMMENT ${str(comment)}`);
@@ -57,7 +58,9 @@ export const mysql: Dialect = {
   renderType,
   normalizeAction: (action) => (action === 'RESTRICT' ? 'NO ACTION' : action),
   normalizeDefault(value) {
-    const v = normalizeDefaultCommon(value);
+    // 덤프(SHOW CREATE TABLE)는 숫자 기본값도 따옴표로 쓴다: DEFAULT '0.00' = 0.00
+    const unquoted = value !== null && /^'[-+]?\d+(\.\d+)?'$/.test(value.trim()) ? value.trim().slice(1, -1) : value;
+    const v = normalizeDefaultCommon(unquoted);
     if (v === 'TRUE') return '1';
     if (v === 'FALSE') return '0';
     return v;
@@ -96,11 +99,14 @@ export const mysql: Dialect = {
     return actions.length ? [`ALTER TABLE ${q(after.name)} ${actions.join(', ')}`] : [];
   },
 
-  indexSupport: { expression: true },
+  indexSupport: { expression: true, methods: ['fulltext', 'spatial'] },
   createIndex(table: Table, index) {
     // MySQL은 식마다 괄호를 한 번 더 감싸야 한다: lower(email) → (lower(email))
     const keys = index.expression?.trim() ? mysqlKeyParts(index.expression) : indexKeys(table, index, q);
-    return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${keys})`];
+    // FULLTEXT·SPATIAL 인덱스는 종류를 앞에 붙인다 (UNIQUE와 함께 쓸 수 없다)
+    const method = index.method?.trim().toLowerCase();
+    const kind = method === 'fulltext' || method === 'spatial' ? `${method.toUpperCase()} ` : index.unique ? 'UNIQUE ' : '';
+    return [`CREATE ${kind}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${keys})`];
   },
   fkNeedsIndex: true,
   dropIndex(table, index, keepForFk = []) {
@@ -130,7 +136,12 @@ export function mysqlKeyParts(expression: string): string {
   return splitTopLevel(expression)
     .map((raw) => {
       const part = raw.trim();
-      if (/^[`"]?[\w$]+[`"]?(\s+(ASC|DESC))?$/i.test(part)) return part;
+      // 컬럼 이름, 앞부분 길이(col(20)), 정렬 방향은 그대로
+      if (/^[`"]?[\w$]+[`"]?(\s*\(\d+\))?(\s+(ASC|DESC))?$/i.test(part)) return part;
+      // (식) DESC 도 그대로
+      const desc = /\s+(ASC|DESC)$/i.exec(part);
+      const body = desc ? part.slice(0, desc.index).trim() : part;
+      if (desc && body.startsWith('(') && closingParen(body) === body.length - 1) return part;
       if (part.startsWith('(') && closingParen(part) === part.length - 1) return part;
       return `(${part})`;
     })
