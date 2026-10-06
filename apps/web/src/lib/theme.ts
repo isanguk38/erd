@@ -1,29 +1,27 @@
 import { useEffect, useState } from 'react';
 
-// 화면 테마: 시스템 설정을 따르거나 라이트/다크로 고정. 이 브라우저에만 저장한다.
+// 화면 테마: 라이트(기본) 또는 다크. 이 브라우저에만 저장한다.
+// 시스템 설정은 따르지 않는다 — 언제나 data-theme을 붙여 CSS의 시스템 다크 규칙이 끼어들지 않게 한다.
 
-export type ThemeSetting = 'system' | 'light' | 'dark';
+export type ThemeSetting = 'light' | 'dark';
 const KEY = 'erd-theme';
 const listeners = new Set<() => void>();
 
 export function getThemeSetting(): ThemeSetting {
   try {
-    const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
+    return localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light';
   } catch {
-    return 'system';
+    return 'light';
   }
 }
 
 export function applyTheme(setting: ThemeSetting = getThemeSetting()): void {
-  if (setting === 'system') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = setting;
+  document.documentElement.dataset.theme = setting;
 }
 
 export function setThemeSetting(setting: ThemeSetting): void {
   try {
-    if (setting === 'system') localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, setting);
+    localStorage.setItem(KEY, setting);
   } catch {
     /* 저장 못 해도 지금 화면에는 적용 */
   }
@@ -31,22 +29,13 @@ export function setThemeSetting(setting: ThemeSetting): void {
   listeners.forEach((fn) => fn());
 }
 
-const systemDark = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches;
-
-/** 지금 실제로 쓰는 테마 (시스템 설정 반영) */
-export function useTheme(): { setting: ThemeSetting; effective: 'light' | 'dark' } {
+/** 지금 쓰는 테마 */
+export function useTheme(): { setting: ThemeSetting; effective: ThemeSetting } {
   const [setting, setSetting] = useState(getThemeSetting);
-  const [dark, setDark] = useState(systemDark);
   useEffect(() => {
     const onChange = () => setSetting(getThemeSetting());
     listeners.add(onChange);
-    const mq = matchMedia('(prefers-color-scheme: dark)');
-    const onMq = () => setDark(mq.matches);
-    mq.addEventListener('change', onMq);
-    return () => {
-      listeners.delete(onChange);
-      mq.removeEventListener('change', onMq);
-    };
+    return () => void listeners.delete(onChange);
   }, []);
-  return { setting, effective: setting === 'system' ? (dark ? 'dark' : 'light') : setting };
+  return { setting, effective: setting };
 }

@@ -153,8 +153,8 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   };
   const lintCount = useLintCount();
   const { setting: themeSetting, effective: theme } = useTheme();
-  const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { system: 'light', light: 'dark', dark: 'system' };
-  const THEME_LABEL: Record<ThemeSetting, string> = { system: '시스템 설정', light: '라이트', dark: '다크' };
+  const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { light: 'dark', dark: 'light' };
+  const THEME_LABEL: Record<ThemeSetting, string> = { light: '라이트', dark: '다크' };
   const commentCount = useOpenCommentCount();
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
@@ -199,7 +199,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           aria-label="화면 테마 바꾸기"
         >
           <Icon name={theme === 'dark' ? 'moon' : 'sun'} />
-          {themeSetting === 'system' && <span className="theme-auto">A</span>}
         </button>
         <button className="btn btn-ghost icon-only" onClick={() => onOpen('help')} title="사용 방법 · 단축키">
           <Icon name="help" />

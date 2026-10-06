@@ -534,7 +534,8 @@ label.btn { display: inline-flex; align-items: center; }
 .search-title { font-weight: 600; font-family: Consolas, monospace; font-size: 13px; white-space: nowrap; }
 .search-detail { color: var(--muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-where { font-size: 10px; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px; }
-.search-box mark { background: #fde68a; color: inherit; border-radius: 2px; }
+/* 검색어 강조: 노란 바탕에 글자는 늘 어둡게 (다크 모드에서 밝은 글자가 노란 바탕에 묻히지 않게) */
+.search-box mark { background: #fde68a; color: #1f2937; border-radius: 2px; }
 .search-box__help { font-size: 11px; color: var(--muted); padding: 6px 12px; border-top: 1px solid var(--border); background: var(--bg); }
 .table-node.search-dim { opacity: 0.28; transition: opacity 0.15s; }
 .table-node.search-match { box-shadow: 0 0 0 2px #f59e0b; }
@@ -678,7 +679,6 @@ label.btn { display: inline-flex; align-items: center; }
 @keyframes remote-pulse { 0% { box-shadow: 0 0 0 0 rgb(245 158 11 / .7); } 70% { box-shadow: 0 0 0 10px rgb(245 158 11 / 0); } 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0); } }
 .table-node.remote-changed { outline: 2px solid #f59e0b; outline-offset: 2px; animation: remote-pulse 1.2s ease-out 2; }
 .table-node__column.col-remote { background: rgb(245 158 11 / .18); transition: background .6s; }
-.theme-auto { font-size: 9px; font-weight: 700; margin-left: -4px; align-self: flex-end; color: var(--muted); }
 .lint-ignore { opacity: 0; transition: opacity .15s; }
 .lint-group li:hover .lint-ignore, .lint-ignore:focus { opacity: 1; }
 /* 무시한 항목: 머리줄은 줄어들지 않고, 펼친 목록만 스크롤 */
