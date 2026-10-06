@@ -234,6 +234,23 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 
 /* 관계선 */
 .relation-edge .react-flow__edge-path { stroke: var(--edge); stroke-width: 1.5; }
+/* 관계를 끌어 연결하는 동안의 선: 빈 곳에서는 흐르는 점선, 놓을 테이블 위에서는 생길 관계선 모양 그대로 */
+/* 연결하는 동안에는 다른 테이블의 + 손잡이를 숨긴다 (선과 겹치지 않게) */
+.react-flow__node:has(.table-node__target.active) .table-node__source { opacity: 0 !important; }
+.connection-line__path { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 5; animation: connection-flow 0.6s linear infinite; }
+.connection-line--ok .connection-line__path { stroke-dasharray: none; animation: none; }
+.connection-line__symbol { stroke: var(--accent); stroke-width: 2; }
+.connection-line__dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2.5; }
+@keyframes connection-flow { to { stroke-dashoffset: -11; } }
+.connection-line__label-wrap { display: flex; width: 100%; }
+.connection-line__label {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; padding: 4px 10px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--border); box-shadow: 0 4px 12px rgb(0 0 0 / 0.12); font-size: 12px; color: var(--text);
+}
+.connection-line--ok .connection-line__label { border-color: var(--accent); }
+.connection-line__arrow { color: var(--muted); }
+.connection-line__hint { color: var(--muted); }
+.connection-line__tool { margin-left: 2px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 11px; font-weight: 600; }
 .relation-edge__symbol { stroke: var(--edge); stroke-width: 1.5; fill: none; }
 .relation-edge.selected .react-flow__edge-path, .relation-edge.selected .relation-edge__symbol { stroke: var(--accent); stroke-width: 2.5; }
 .relation-edge.hl-added .react-flow__edge-path, .relation-edge.hl-added .relation-edge__symbol { stroke: var(--create); }

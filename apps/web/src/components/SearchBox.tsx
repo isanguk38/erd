@@ -45,6 +45,8 @@ export function SearchBox() {
     select({ type: 'table', id: r.tableId }, true);
     setSearchFocus({ tableId: r.tableId, columnId: r.columnId });
     fitView({ nodes: [{ id: r.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
+    // 고르면 창만 닫는다. 검색어는 남겨 두어 다시 열면 이어서 찾는다 (열 때 검색어 전체가 선택돼 바로 새로 입력할 수도 있다)
+    setSearchOpen(false, true);
   };
 
   const tableCount = new Set(results.map((r) => r.tableId)).size;

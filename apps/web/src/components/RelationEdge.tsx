@@ -4,13 +4,13 @@ import type { Cardinality } from '@erd/core';
 export type RelationEdgeData = { cardinality: Cardinality; highlight?: 'added' | 'changed' | 'removed' };
 export type RelationEdgeType = Edge<RelationEdgeData, 'relation'>;
 
-interface Anchor {
+export interface Anchor {
   x: number;
   y: number;
   position: Position;
 }
 
-function box(node: InternalNode) {
+export function box(node: InternalNode) {
   const { x, y } = node.internals.positionAbsolute;
   const w = node.measured.width ?? 0;
   const h = node.measured.height ?? 0;
@@ -18,7 +18,7 @@ function box(node: InternalNode) {
 }
 
 /** 두 테이블의 상대 위치를 보고 선이 나갈 면을 고른다. */
-function anchors(a: InternalNode, b: InternalNode): [Anchor, Anchor] {
+export function anchors(a: InternalNode, b: InternalNode): [Anchor, Anchor] {
   const A = box(a);
   const B = box(b);
   if (a.id === b.id) {
@@ -52,7 +52,7 @@ function at(anchor: Anchor, d: number, p: number): string {
 }
 
 /** 기호: 세로줄 두 개 = "반드시 하나", 까마귀발 + 세로줄 = "하나 이상" */
-function symbol(anchor: Anchor, kind: 'one' | 'many'): string {
+export function symbol(anchor: Anchor, kind: 'one' | 'many'): string {
   const bar = (d: number) => `M${at(anchor, d, -7)} L${at(anchor, d, 7)}`;
   if (kind === 'one') return `${bar(9)} ${bar(15)}`;
   return `M${at(anchor, 14, 0)} L${at(anchor, 0, -8)} M${at(anchor, 14, 0)} L${at(anchor, 0, 0)} M${at(anchor, 14, 0)} L${at(anchor, 0, 8)} ${bar(18)}`;

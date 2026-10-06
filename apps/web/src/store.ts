@@ -81,7 +81,8 @@ interface State extends LocalPrefs {
   searchQuery: string;
   /** 검색 결과에서 고른 것 (잠깐 강조) */
   searchFocus: { tableId: string; columnId?: string; at: number } | null;
-  setSearchOpen: (open: boolean) => void;
+  /** keepQuery: 창만 닫고 검색어는 남긴다 (결과를 골랐을 때 — 다시 열면 이어서 찾기) */
+  setSearchOpen: (open: boolean, keepQuery?: boolean) => void;
   setSearchQuery: (query: string) => void;
   setSearchFocus: (focus: { tableId: string; columnId?: string } | null) => void;
   /** 테이블·컬럼 댓글 */
@@ -187,7 +188,7 @@ export const useStore = create<State>()(
         searchOpen: false,
         searchQuery: '',
         searchFocus: null,
-        setSearchOpen: (searchOpen) => set(searchOpen ? { searchOpen } : { searchOpen, searchQuery: '' }),
+        setSearchOpen: (searchOpen, keepQuery) => set(searchOpen || keepQuery ? { searchOpen } : { searchOpen, searchQuery: '' }),
         setSearchQuery: (searchQuery) => set({ searchQuery }),
         setSearchFocus: (focus) => set({ searchFocus: focus ? { ...focus, at: Date.now() } : null }),
         role: null,

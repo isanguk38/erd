@@ -15,6 +15,7 @@ import { connectManyToMany, connectTables, findSameRelation, removeRelation, rem
 import { useStore } from '../store';
 import { TableNode } from './TableNode';
 import { RelationEdge } from './RelationEdge';
+import { ConnectionLine } from './ConnectionLine';
 import { buildCompareGraph, buildEdges, buildNodes } from '../lib/graph';
 import type { TableNodeType } from './TableNode';
 import { matchIds } from '../lib/search';
@@ -188,6 +189,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       nodesDraggable={!readOnly}
       nodesConnectable={!readOnly}
       connectionMode={ConnectionMode.Loose}
+      connectionLineComponent={ConnectionLine}
       onNodeClick={(e, node) => {
         // Ctrl/Shift를 누르고 클릭하면 여러 개 고르기 (캔버스가 처리)
         if (e.ctrlKey || e.metaKey || e.shiftKey) return;
