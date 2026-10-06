@@ -5,6 +5,7 @@ import {
   addIndex,
   addTable,
   alignToCurrent,
+  appliedChanges,
   applyChanges,
   cloneSchema,
   connectTables,
@@ -13,6 +14,8 @@ import {
   emptySchema,
   generateStatements,
   getDialect,
+  planPull,
+  syncedBaseline,
   type Schema,
 } from '@erd/core';
 import { cleanPgDefault, executePostgres, introspectPostgres, parsePgType, type Queryable } from '../src';
@@ -42,11 +45,16 @@ async function push(db: Queryable, schema: Schema) {
   const selected = new Set(diff.changes.filter((c) => c.category !== 'drop').map((c) => c.id));
   const statements = generateStatements(diff, pgDialect, selected);
   const result = await executePostgres(db, statements.map((s) => s.sql));
-  return { diff, statements, result };
+  // 화면처럼: 다시 읽은 DB를 기준 시점으로, 성공한 문장이 만든 식은 DB가 돌려준 모양과 짝으로 기억
+  const { schema: after } = await introspectPostgres(db, 'public');
+  const baseline = syncedBaseline(after, schema, { applied: appliedChanges(diff.changes, statements, result.results) });
+  return { diff, statements, result, baseline };
 }
 
-async function pendingChanges(db: Queryable, schema: Schema) {
+/** DB에서 ERD로 가져올 변경 (기준 시점이 있으면 식 짝을 적용) */
+async function pendingChanges(db: Queryable, schema: Schema, baseline?: Schema) {
   const { schema: dbSchema } = await introspectPostgres(db, 'public');
+  if (baseline) return planPull(schema, dbSchema, { dialect: pgDialect, baseline }).diff.changes.map((c) => c.summary);
   return diffIncoming(schema, dbSchema, pgDialect).changes.map((c) => c.summary);
 }
 
@@ -141,17 +149,18 @@ describe('PostgreSQL 연동 (PGlite)', { timeout: 30_000 }, () => {
     const erdCustomer = erdSchema.tables.find((t) => t.name === 'customer')!;
     addIndex(erdSchema, erdCustomer.id, { name: 'ix_customer_email_lower', columnIds: [], expression: 'lower(email)' });
     addIndex(erdSchema, erdCustomer.id, { name: 'ix_customer_meta', columnIds: [], expression: 'metadata', method: 'gin' });
-    const { statements, result } = await push(db, erdSchema);
+    const { statements, result, baseline } = await push(db, erdSchema);
     expect(statements.map((x) => x.sql)).toEqual([
       'CREATE INDEX ix_customer_email_lower ON customer (lower(email))',
       'CREATE INDEX ix_customer_meta ON customer USING gin (metadata)',
     ]);
     expect(result.results.filter((r) => !r.ok)).toEqual([]);
-    expect(await pendingChanges(db, erdSchema)).toEqual([]);
+    // PostgreSQL은 lower(email)을 lower((email)::text)로 바꿔 저장하지만, 내보낼 때 기억한 짝으로 같다고 본다
+    expect(await pendingChanges(db, erdSchema, baseline)).toEqual([]);
 
     // 식을 바꾸면 다른 인덱스로 본다
     erdCustomer.indexes.find((i) => i.name === 'ix_customer_email_lower')!.expression = 'upper(email)';
-    const changed = await pendingChanges(db, erdSchema);
+    const changed = await pendingChanges(db, erdSchema, baseline);
     // (DB에서 ERD 방향 비교: ERD의 upper 식은 DB에 없고, DB의 lower 식은 ERD에 없다)
     expect(changed).toEqual(['customer 인덱스 삭제 (upper(email))', 'customer 인덱스 생성 (lower((email)::text))']);
   });
@@ -172,9 +181,9 @@ describe('PostgreSQL 연동 (PGlite)', { timeout: 30_000 }, () => {
 
     // 빈 DB에 다시 만들기
     const copy = new PGlite();
-    const { result } = await push(copy, schema);
+    const { result, baseline } = await push(copy, schema);
     expect(result.results.filter((r) => !r.ok)).toEqual([]);
-    expect(await pendingChanges(copy, schema)).toEqual([]);
+    expect(await pendingChanges(copy, schema, baseline)).toEqual([]);
 
     // 바꾸기: qty 검사 삭제, 새 검사 추가, 계산식 변경
     const next = cloneSchema(schema);
@@ -185,7 +194,8 @@ describe('PostgreSQL 연동 (PGlite)', { timeout: 30_000 }, () => {
     const statements = generateStatements(diff, pgDialect, new Set(diff.changes.map((c) => c.id)));
     const exec = await executePostgres(src, statements.map((x) => x.sql));
     expect(exec.results.filter((r) => !r.ok)).toEqual([]);
-    expect(await pendingChanges(src, next)).toEqual([]);
+    const after = syncedBaseline((await introspectPostgres(src, 'public')).schema, next, { applied: appliedChanges(diff.changes, statements, exec.results) });
+    expect(await pendingChanges(src, next, after)).toEqual([]);
     const totals = (await src.query<{ total: string }>('SELECT total FROM item ORDER BY id')).rows.map((r) => Number(r.total));
     expect(totals).toEqual([40, 33]);
   });
