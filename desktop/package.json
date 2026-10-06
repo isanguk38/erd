@@ -1,7 +1,7 @@
 {
   "name": "erd-desktop",
   "productName": "ERD",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "ERD 설치형 앱: 웹 화면 + 내 PC에서 직접 하는 DB 연결",
   "author": "isanguk38",
