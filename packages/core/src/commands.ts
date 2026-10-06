@@ -301,6 +301,7 @@ export function describeSchema(schema: Schema) {
         childColumns: r.fromColumnIds.map((id) => child?.columns.find((c) => c.id === id)?.name),
         cardinality: r.cardinality,
         onDelete: r.onDelete !== 'NO ACTION' ? r.onDelete : undefined,
+        onUpdate: r.onUpdate !== 'NO ACTION' ? r.onUpdate : undefined,
       };
     }),
   };

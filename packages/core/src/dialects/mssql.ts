@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
+import { quoteExpression, columnNames, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect } from './types';
 
 // SQL Server 2016 이상. 이름은 [대괄호], 코멘트는 확장 속성(MS_Description),
@@ -66,7 +66,7 @@ function defaultValue(column: Column): string {
 function columnDefinition(column: Column): string {
   const generated = column.generated?.expression.trim();
   // NOT NULL은 PERSISTED일 때만 쓸 수 있다
-  if (generated) return `${q(column.name)} AS (${generated})${column.generated!.stored ? ` PERSISTED${!column.nullable || column.primaryKey ? ' NOT NULL' : ''}` : ''}`;
+  if (generated) return `${q(column.name)} AS (${quoteExpression(generated, q)})${column.generated!.stored ? ` PERSISTED${!column.nullable || column.primaryKey ? ' NOT NULL' : ''}` : ''}`;
   let def = `${q(column.name)} ${renderType(column)}`;
   if (column.autoIncrement) def += ' IDENTITY(1,1)';
   def += column.nullable && !column.primaryKey ? ' NULL' : ' NOT NULL';

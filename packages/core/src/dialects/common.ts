@@ -19,7 +19,12 @@ export function columnNames(table: Table, ids: string[]): string[] {
 
 /** CREATE INDEX ... ON 테이블 ( 여기 ): 식 인덱스면 식 원문, 아니면 컬럼 이름들 */
 export function indexKeys(table: Table, index: Index, q: (name: string) => string): string {
-  return index.expression?.trim() || columnNames(table, index.columnIds).map(q).join(', ');
+  return index.expression?.trim() ? quoteExpression(index.expression.trim(), q) : columnNames(table, index.columnIds).map(q).join(', ');
+}
+
+/** 식 안의 MySQL 백틱 이름(`col`)을 이 DB의 표기로 바꾼다 (PostgreSQL·Oracle "col", SQL Server [col]). MySQL은 그대로 */
+export function quoteExpression(expression: string, q: (name: string) => string): string {
+  return expression.replace(/`([^`]+)`/g, (_m, name: string) => q(name));
 }
 
 /** 괄호·따옴표 밖의 콤마로 나눈다 */
@@ -57,6 +62,8 @@ export function indexWarnings(dialect: Dialect, table: Table, index: Index): str
   if (expression && !support.expression) messages.push(`${label}는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)`);
   else if (expression && dialect.id !== 'postgresql' && /::|\bto_tsvector\b|\bto_tsquery\b|\bjsonb_/i.test(expression)) {
     messages.push(`식에 PostgreSQL 전용 문법이 있어 ${label}에서는 실패할 수 있습니다: ${expression}`);
+  } else if (expression && dialect.id !== 'mysql' && dialect.id !== 'mariadb' && /->>?\s*'\$/.test(expression)) {
+    messages.push(`식에 MySQL JSON 경로('$.키') 문법이 있어 ${label}에서는 실패할 수 있습니다: ${expression}`);
   }
   if (index.where?.trim() && !support.where) messages.push(`${label}는 부분 인덱스를 지원하지 않아 조건(WHERE ${index.where.trim()})을 빼고 만듭니다`);
   const method = index.method?.trim().toLowerCase();
@@ -80,7 +87,7 @@ export function columnWarnings(dialect: Dialect, column: Column): string | undef
 
 /** CHECK 제약 기본 문장 */
 export function addCheckSql(q: (name: string) => string, table: Table, check: CheckConstraint): string {
-  return `ALTER TABLE ${q(table.name)} ADD CONSTRAINT ${q(checkName(table, check))} CHECK (${check.expression.trim()})`;
+  return `ALTER TABLE ${q(table.name)} ADD CONSTRAINT ${q(checkName(table, check))} CHECK (${quoteExpression(check.expression.trim(), q)})`;
 }
 
 /** 부분 인덱스 조건 ( WHERE ...) */

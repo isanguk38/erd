@@ -117,8 +117,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const { status: dbStatus, error: dbError } = useDbStatus();
   const dbChanged = (dbStatus?.db ?? 0) + (dbStatus?.conflict ?? 0);
   const erdPending = dbStatus?.erd ?? 0;
-  // 기준 시점이 없으면 누가 바꿨는지 몰라 전체 차이만 보여준다
-  const unknownDiff = dbStatus?.baselineAt ? 0 : dbStatus?.unknown ?? 0;
   const dbTitle = dbError
     ? `DB 상태 확인 실패: ${dbError}`
     : dbStatus?.connected
@@ -285,7 +283,8 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               <button className="btn btn-tool btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? '보기 권한에서는 ERD를 바꿀 수 없습니다' : dbTitle}>
                 <Icon name="dbIn" />
                 <span><span className="hide-narrow">DB에서 </span>가져오기</span>
-                {(dbChanged > 0 || unknownDiff > 0) && <span className="db-badge" title={dbTitle}>{dbChanged || unknownDiff}</span>}
+                {/* DB와 처음 맞추기 전(기준 시점 없음)에는 누가 바꿨는지 몰라 배지를 띄우지 않는다. 차이는 버튼 설명에만 */}
+                {dbChanged > 0 && <span className="db-badge" title={dbTitle}>{dbChanged}</span>}
               </button>
               <button className="btn btn-tool btn-with-badge" disabled={isEmpty} onClick={() => onOpen('dbPush')} title={dbStatus?.connected ? `ERD에서 바뀌고 아직 DB에 안 넣은 것 ${erdPending}건` : 'ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다'}>
                 <Icon name="dbOut" />

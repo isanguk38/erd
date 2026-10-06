@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
+import { quoteExpression, columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect } from './types';
 
 const TYPE_MAP: Record<string, string> = {
@@ -48,7 +48,7 @@ function q(name: string): string {
 
 function renderType(column: Column): string {
   // PostgreSQL에는 UNSIGNED가 없다
-  const raw = column.type.trim().toUpperCase().replace(/\s+(UNSIGNED|ZEROFILL)/g, '');
+  const raw = column.type.trim().toUpperCase().replace(/\s+(UNSIGNED|ZEROFILL)\b/g, '');
   const type = TYPE_MAP[raw] ?? raw;
   const length = NO_LENGTH.has(type) ? '' : column.length;
   return typeWithLength(type, length);
@@ -58,7 +58,7 @@ function columnDefinition(column: Column): string {
   const parts = [q(column.name), renderType(column)];
   const generated = column.generated?.expression.trim();
   if (generated) {
-    parts.push(`GENERATED ALWAYS AS (${generated}) STORED`);
+    parts.push(`GENERATED ALWAYS AS (${quoteExpression(generated, q)}) STORED`);
     if (!column.nullable || column.primaryKey) parts.push('NOT NULL');
     return parts.join(' ');
   }
