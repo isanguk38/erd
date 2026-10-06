@@ -79,6 +79,8 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
     if (synced) setTimeout(() => fitView({ padding: 0.15 }), 60);
   }, [synced, fitView]);
   const lastCursor = useRef(0);
+  const pointerDown = useRef(false);
+  const pendingIds = useRef<string[] | null>(null); // 마우스를 놓을 때 스토어에 알릴 선택
 
   const selectedRelation = selection?.type === 'relation' ? selection.id : null;
   const selectedIds = useMemo(() => new Set(selectedTables), [selectedTables]);
@@ -94,7 +96,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const measured = new Map(prev.map((n) => [n.id, n.measured]));
         return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
       }
-      return buildNodes(schema, viewMode, selectedIds, prev, peers, searchMarks, { remote: remoteChanges, comments: commentMarks });
+      return buildNodes(schema, viewMode, pendingIds.current ? new Set(pendingIds.current) : selectedIds, prev, peers, searchMarks, { remote: remoteChanges, comments: commentMarks });
     });
   }, [schema, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks]);
   const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
@@ -105,6 +107,33 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   // 선택은 사용자가 캔버스에서 직접 바꾼 것(클릭, Ctrl+클릭, Shift+끌기 상자)만 스토어에 알린다.
   // onNodesChange의 select 변경은 사용자 조작일 때만 오고, 스토어가 바꾼 선택(검색 결과 클릭 등)으로는 오지 않는다.
   // (onSelectionChange는 스토어가 바꾼 선택에도 한 박자 늦게 불려 서로 덮어쓰며 무한 반복된 적이 있다)
+  // 마우스 버튼을 누르고 있는 동안(테이블을 잡고 끄는 중)에는 선택을 스토어에 알리지 않고, 놓는 순간 알린다.
+  // 누르자마자 오른쪽 편집 창이 열리면 아직 잡고 있는지 헷갈린다
+  const commitSelection = useCallback((ids: string[]) => {
+    const state = useStore.getState();
+    if (sameIds(state.selectedTables, ids)) return;
+    if (ids.length === 0 && state.selection?.type === 'relation') return; // 관계를 고른 상태는 유지
+    state.selectTables(ids);
+  }, []);
+  useEffect(() => {
+    const down = (e: PointerEvent) => { if (e.button === 0) pointerDown.current = true; };
+    const up = () => {
+      pointerDown.current = false;
+      const ids = pendingIds.current;
+      pendingIds.current = null;
+      if (ids) commitSelection(ids);
+    };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    window.addEventListener('blur', up);
+    return () => {
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      window.removeEventListener('blur', up);
+    };
+  }, [commitSelection]);
   const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
     const picked = changes.some((c) => c.type === 'select');
     setNodes((prev) => {
@@ -112,15 +141,13 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       if (picked) {
         const ids = next.filter((n) => n.selected).map((n) => n.id);
         queueMicrotask(() => {
-          const state = useStore.getState();
-          if (sameIds(state.selectedTables, ids)) return;
-          if (ids.length === 0 && state.selection?.type === 'relation') return; // 관계를 고른 상태는 유지
-          state.selectTables(ids);
+          if (pointerDown.current) pendingIds.current = ids;
+          else commitSelection(ids);
         });
       }
       return next;
     });
-  }, []);
+  }, [commitSelection]);
 
   const onConnect = useCallback(
     ({ source, target }: Connection) => {
