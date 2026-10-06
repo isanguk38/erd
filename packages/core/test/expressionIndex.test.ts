@@ -34,10 +34,10 @@ describe('식(expression) 인덱스', () => {
     expect(sqlFor('mssql', { expression: 'email', where: 'deleted_at IS NULL' })[0]).toMatch(/\(\[email\]\)|\(email\)/);
   });
 
-  it('식이 같으면(공백·따옴표·형 변환 차이) 변경 없음, 다르면 삭제 후 생성', () => {
+  it('식이 같으면(공백·따옴표·괄호 차이) 변경 없음, 다르면 삭제 후 생성', () => {
     const a = applyCommands(base(), [{ op: 'addIndex', table: 'customer', name: 'ix_l', expression: "(email->>'x')" }]).schema;
     const b = cloneSchema(a);
-    b.tables[0].indexes[0].expression = "((email ->> 'x'::text))";
+    b.tables[0].indexes[0].expression = `(( "email" ->> 'x'))`;
     expect(diffSchemas(a, b, getDialect('postgresql')).changes).toEqual([]);
     b.tables[0].indexes[0].expression = "(email->>'y')";
     expect(diffSchemas(a, b, getDialect('postgresql')).changes.map((c) => c.kind)).toEqual(['dropIndex', 'addIndex']);

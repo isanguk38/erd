@@ -208,26 +208,13 @@ export function expressionColumns(table: Table, expression: string | undefined):
   return ids;
 }
 
-/** 두 식이 같은지 (공백·따옴표·대소문자·괄호·PostgreSQL 형 변환(::text) 차이는 무시) */
+/**
+ * 두 식이 글자로 같은지 (대소문자·공백·따옴표·괄호 차이만 무시).
+ * DB가 식을 자기 표기로 바꿔 저장하는 것(형 변환, IN → = ANY 등)은 여기서 맞추지 않는다.
+ * 그건 DB와 맞출 때 기억한 식 짝으로 맞춘다 (expressionMemory.ts) — DB별 규칙을 계속 늘리지 않기 위해.
+ */
 export function sameExpression(a: string | undefined, b: string | undefined): boolean {
-  const norm = (v: string | undefined) =>
-    (v ?? '')
-      .toLowerCase()
-      .replace(/::\s*(character varying|double precision|timestamp with(out)? time zone|[a-z_][a-z0-9_]*)(\[\])?/g, '')
-      // MySQL은 문자열 앞에 문자셋을 붙여 돌려준다: _utf8mb4'A' = 'A'
-      .replace(/_(utf8mb4|utf8mb3|utf8|latin1|binary|ascii)'/g, "'")
-      // PostgreSQL은 BETWEEN을 풀어서 저장한다: a BETWEEN 0 AND 100 = (a >= 0) AND (a <= 100)
-      .replace(/([\w."`]+)\s+between\s+(\S+)\s+and\s+(\S+)/g, '$1 >= $2 and $1 <= $3')
-      .replace(/["`\s]/g, '')
-      // MySQL은 JSON 줄임 문법을 풀어서 저장한다: profile->>'$.a' = json_unquote(json_extract(profile,'$.a')), -> = json_extract
-      .replace(/json_unquote\(json_extract\(([\w$.]+),('[^']*')\)\)/g, '$1->>$2')
-      .replace(/json_extract\(([\w$.]+),('[^']*')\)/g, '$1->$2')
-      // CAST(... AS CHAR(30)) 뒤에 붙는 문자셋 표기
-      .replace(/charset[a-z0-9_]+/g, '')
-      .replace(/[[\]()]/g, '')
-      // PostgreSQL은 IN 목록을 배열 비교로 저장한다: a IN ('X','Y') = a = ANY (ARRAY['X','Y']), NOT IN = <> ALL
-      .replace(/=anyarray/g, 'in')
-      .replace(/<>allarray/g, 'notin');
+  const norm = (v: string | undefined) => (v ?? '').toLowerCase().replace(/["`\s[\]()]/g, '');
   return norm(a) === norm(b);
 }
 

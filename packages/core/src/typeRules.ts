@@ -155,10 +155,12 @@ const RULES: Rule[] = [
       const types = FRACTION_TYPES[ctx.dialect];
       if (!types?.has(ctx.base) || !ctx.args) return undefined;
       if (isInt(ctx.args) && Number(ctx.args) <= 6) return undefined;
+      // PostgreSQL은 실패하지 않고 6으로 줄여 만든다 (실제 서버로 확인)
+      const pg = ctx.dialect === 'postgresql';
       return {
-        severity: 'error',
+        severity: pg ? 'warning' : 'error',
         field: 'length',
-        message: `${ctx.column.name}: ${ctx.base}의 괄호 숫자는 초 아래 자릿수라 0~6만 됩니다 (지금 ${ctx.args})`,
+        message: `${ctx.column.name}: ${ctx.base}의 괄호 숫자는 초 아래 자릿수라 0~6만 됩니다 (지금 ${ctx.args})${pg ? '. PostgreSQL은 6으로 줄여 만듭니다' : ''}`,
         fix: { label: '길이 지우기', patch: { length: '' } },
       };
     },

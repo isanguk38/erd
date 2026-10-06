@@ -42,10 +42,12 @@ describe('타입 검사: 자동 증가', () => {
 
 describe('타입 검사: 날짜·시간', () => {
   it('MySQL·MariaDB·PostgreSQL: 괄호 숫자는 0~6', () => {
-    for (const d of ['mysql', 'mariadb', 'postgresql'] as DialectId[]) {
+    for (const d of ['mysql', 'mariadb'] as DialectId[]) {
       expect(errors(d, { type: 'DATETIME', length: '255' }), d).toContain('time-precision');
       expect(errors(d, { type: 'TIMESTAMP', length: '6' }), d).toEqual([]);
     }
+    // PostgreSQL은 실패하지 않고 6으로 줄인다 → 주의
+    expect(codes('postgresql', { type: 'TIMESTAMP', length: '255' })).toEqual(['warning:time-precision']);
   });
   it('Oracle·SQL Server는 날짜 길이를 쓰지 않는다고 알려 준다 (실패는 아님)', () => {
     expect(codes('oracle', { type: 'DATETIME', length: '255' })).toEqual(['info:length-ignored']);
