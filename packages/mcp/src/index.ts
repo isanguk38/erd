@@ -10,6 +10,7 @@ const INSTRUCTIONS = [
   '테이블과 컬럼에는 한글 논리명(logicalName)도 함께 넣어 주세요.',
   'DB에 실제로 실행하는 db_push(execute=true)는 반드시 사용자에게 SQL을 보여주고 승인을 받은 뒤에만 호출합니다.',
   '설계 검토: 설계 작업(edit_schema 여러 번)을 마치면 한 번 check_design으로 기본 검사와 지난 AI 검토를 읽고, 직접 설계를 검토해 save_design_review로 오류(error)·경고(warning)·참고(info)를 저장합니다. 명령마다 검토하지 않습니다.',
+  '기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토하고 save_design_review의 tables에 그 이름들을 넣습니다 (다른 테이블의 기존 지적은 남음). edit_schema 결과의 designReview에 검토가 필요한 테이블이 나옵니다.',
   '사람이 무시한 항목(check_design에 나오지 않음)은 고치지 않습니다. 검토 항목을 고쳤으면 resolve_design_review로 해결 표시하고, 사용자에게 오류·경고·참고별로 무엇을 고쳤고 무엇을 남겼는지 알려 줍니다.',
 ].join('\n');
 

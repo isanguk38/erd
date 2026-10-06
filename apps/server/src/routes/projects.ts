@@ -5,6 +5,7 @@ import {
   appliedChanges,
   buildReview,
   resolveReviewItems,
+  unreviewedTables,
   type AiReviewInput,
   applyChanges,
   applyCommands,
@@ -145,18 +146,19 @@ export function registerProjectRoutes(
 
   // ── AI 설계 검토 ───────────────────────────
   // MCP로 연결한 AI가 검토한 결과(오류·경고·참고)를 저장한다. 화면의 설계 검사 패널에 기본 검사와 함께 보인다.
-  app.put<{ Params: { id: string }; Body: { items?: AiReviewInput[]; summary?: string; by?: string } }>('/api/projects/:id/ai-review', async (req) => {
+  app.put<{ Params: { id: string }; Body: { items?: AiReviewInput[]; summary?: string; by?: string; scope?: string[] } }>('/api/projects/:id/ai-review', async (req) => {
     const { id } = req.params;
     let review;
     try {
-      review = buildReview(store.schema(id), { items: req.body?.items ?? [], summary: req.body?.summary, by: req.body?.by }, store.meta(id).aiReview);
+      const scope = Array.isArray(req.body?.scope) ? req.body.scope.filter((x): x is string => typeof x === 'string') : undefined;
+      review = buildReview(store.schema(id), { items: req.body?.items ?? [], summary: req.body?.summary, by: req.body?.by, scope }, store.meta(id).aiReview);
     } catch (e) {
       throw badRequest(e instanceof Error ? e.message : String(e));
     }
     store.setMeta(id, { aiReview: review });
     const ignored = new Set(store.meta(id).lintIgnored ?? []);
     const open = review.items.filter((i) => i.status === 'open');
-    return { reviewedAt: review.reviewedAt, saved: open.length, ignored: open.filter((i) => ignored.has(i.id)).map((i) => i.id), items: open };
+    return { reviewedAt: review.reviewedAt, saved: open.length, ignored: open.filter((i) => ignored.has(i.id)).map((i) => i.id), items: open, stillUnreviewed: unreviewedTables(store.schema(id), review) ?? [] };
   });
 
   /** AI가 고친 검토 항목을 해결됨으로 표시 */

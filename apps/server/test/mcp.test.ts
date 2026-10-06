@@ -134,6 +134,20 @@ describe('MCP', () => {
     expect(again.alreadyIgnoredByHuman).toContain('1개');
     erd.projects.setMeta(pid, { lintIgnored: [] });
 
+    // 기능 추가: AI가 설계를 바꾸면 결과에 검토가 필요한 테이블이 붙고, 그 테이블만 범위 검토하면 다른 테이블 항목은 남는다
+    const added = JSON.parse(textOf(await client.callTool({ name: 'edit_schema', arguments: { project: '쇼핑몰', commands: [
+      { op: 'createTable', name: 'payment', logicalName: '결제', columns: [{ name: 'payment_id', logicalName: '결제번호', type: 'BIGINT', primaryKey: true }] },
+      { op: 'addRelation', parent: 'orders', child: 'payment' },
+    ] } })));
+    expect(added.designReview).toContain('payment');
+    expect(added.designReview).toContain('orders');
+    await client.callTool({ name: 'save_design_review', arguments: { project: '쇼핑몰', items: [{ severity: 'warning', table: 'member', message: '회원 이름이 없습니다' }] } });
+    const scopedReview = JSON.parse(textOf(await client.callTool({ name: 'save_design_review', arguments: { project: '쇼핑몰', tables: ['payment', 'orders'], items: [{ severity: 'error', table: 'payment', message: '결제 금액이 없습니다' }] } })));
+    expect(scopedReview.stillUnreviewed).toBeUndefined();
+    design = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
+    expect(design.aiReview.items.map((i: { message: string }) => i.message).sort()).toEqual(['결제 금액이 없습니다', '회원 이름이 없습니다']);
+    expect(design.reviewNeeded).toBeUndefined();
+
     // 화면(서버 문서)에도 반영됨 + AI 작업으로 기록됨
     const id = erd.projects.list()[0].id;
     expect(erd.projects.meta(id).aiSession?.changeCount).toBeGreaterThan(0);

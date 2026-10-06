@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, buildReview, emptySchema, resolveReviewItems, reviewItemId, reviewItemState } from '../src';
+import { applyCommands, buildReview, emptySchema, resolveReviewItems, reviewItemId, reviewItemState, unreviewedTables } from '../src';
 
 const design = () =>
   applyCommands(emptySchema(), [
@@ -38,6 +38,33 @@ describe('AI 설계 검토', () => {
     const dropped = applyCommands(s, [{ op: 'dropTable', table: 'orders' }]).schema;
     expect(reviewItemState(item!, dropped)).toBe('missing');
     expect(reviewItemState(general!, changed)).toBe('open');
+  });
+
+  it('범위 검토: 검토한 테이블의 항목만 바뀌고 다른 테이블 항목·전체 의견은 남는다', () => {
+    const s = design();
+    const full = buildReview(s, { items: [
+      { severity: 'warning', table: 'member', message: '이메일 UNIQUE 아님' },
+      { severity: 'warning', table: 'orders', message: '상태 없음' },
+      { severity: 'info', message: '공통 생성일시' },
+    ] });
+    // 기능 추가: payment 테이블 추가 후 payment·orders만 검토
+    const next = applyCommands(s, [
+      { op: 'createTable', name: 'payment', columns: [{ name: 'payment_id', type: 'BIGINT', primaryKey: true }] },
+      { op: 'addRelation', parent: 'orders', child: 'payment' },
+    ]).schema;
+    expect(unreviewedTables(next, full)).toEqual(['orders', 'payment']);
+    const scoped = buildReview(next, { items: [{ severity: 'error', table: 'payment', message: '결제 금액 없음' }], scope: ['orders', 'payment'] }, full);
+    const open = scoped.items.filter((i) => i.status === 'open').map((i) => i.message).sort();
+    // orders의 '상태 없음'은 이번 범위에서 다시 안 나왔으니 빠지고, member 항목과 전체 의견은 남는다
+    expect(open).toEqual(['결제 금액 없음', '공통 생성일시', '이메일 UNIQUE 아님']);
+    expect(unreviewedTables(next, scoped)).toEqual([]);
+    // 범위에 없는 테이블 이름은 거절
+    expect(() => buildReview(next, { items: [], scope: ['nope'] }, full)).toThrow('검토 범위');
+    // 사람이 member를 고치면 검토가 필요한 테이블로 나온다
+    const edited = applyCommands(next, [{ op: 'addColumn', table: 'member', column: { name: 'name', type: 'VARCHAR(50)' } }]).schema;
+    expect(unreviewedTables(edited, scoped)).toEqual(['member']);
+    // 검토를 한 번도 안 했으면 null
+    expect(unreviewedTables(s, null)).toBeNull();
   });
 
   it('해결 표시, 다음 검토에서 해결 기록은 남고 다시 나오면 다시 열림', () => {

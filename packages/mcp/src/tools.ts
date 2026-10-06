@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { describeSchema, dialects, LINT_RULES, lintSchema, reviewItemState, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { describeSchema, dialects, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -96,6 +96,16 @@ function safe<A>(fn: (args: A) => Promise<ReturnType<typeof text>>) {
 }
 
 export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOptions): void {
+  /** 설계를 바꾼 뒤 아직 AI 검토하지 않은 테이블을 알려 준다 (AI가 작업을 마칠 때 검토하게) */
+  async function reviewReminder(projectId: string): Promise<string | undefined> {
+    try {
+      const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${projectId}`);
+      return reviewNeeded(schema, (meta.aiReview as AiReview | null | undefined) ?? null);
+    } catch {
+      return undefined;
+    }
+  }
+
   const resolveProject = async (ref: string): Promise<ProjectInfo> => {
     const list = await api.request<ProjectInfo[]>('GET', '/api/projects');
     const found = list.find((p) => p.id === ref) ?? list.find((p) => p.name.toLowerCase() === ref.toLowerCase());
@@ -172,6 +182,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       for (const i of [...issues, ...reviewItems]) counts[i.severity]++;
       return text({
         summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외 — 고치지 말 것)` : ''}`,
+        reviewNeeded: reviewNeeded(schema, review),
         basicChecks: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
         aiReview: review
           ? {
@@ -190,7 +201,9 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       description: [
         '내가(AI) 설계를 검토해 찾은 문제를 설계 검사 목록에 저장한다. 사람은 화면의 설계 검사 패널에서 보고, 동의하지 않으면 "무시"한다.',
         'severity: error(이대로면 DB에서 실패하거나 데이터가 깨짐) / warning(실무에서 문제가 될 가능성이 큼) / info(개선 제안).',
-        '기본 검사(check_design의 basicChecks)와 같은 내용은 다시 넣지 않는다. 이번 검토의 전체 결과를 보낸다 — 이전 검토의 열린 항목은 이것으로 바뀐다.',
+        '기본 검사(check_design의 basicChecks)와 같은 내용은 다시 넣지 않는다.',
+        'tables(검토 범위): 이번에 검토한 테이블 이름. 주면 그 테이블의 이전 항목만 이번 결과로 바뀌고 다른 테이블의 항목은 남는다 — 기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토해 tables에 넣는다.',
+        '생략하면 ERD 전체를 검토한 것으로 보고 이전 열린 항목 전체가 이번 결과로 바뀐다.',
         '같은 내용은 같은 id가 되어 사람이 무시한 기록이 이어진다. 언제: 설계 작업(edit_schema 여러 번)을 마쳤을 때 한 번, 또는 사용자가 검토를 요청할 때. 명령마다 하지 않는다.',
       ].join(' '),
       inputSchema: {
@@ -207,13 +220,19 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
           )
           .describe('검토 결과 전체 (문제가 없으면 빈 배열)'),
         summary: z.string().optional().describe('검토 요약 한두 문장'),
+        tables: z.array(z.string()).optional().describe('검토 범위: 이번에 검토한 테이블 이름 (생략하면 ERD 전체)'),
       },
     },
-    safe(async ({ project, items, summary }: { project: string; items: unknown[]; summary?: string }) => {
+    safe(async ({ project, items, summary, tables }: { project: string; items: unknown[]; summary?: string; tables?: string[] }) => {
       const p = await resolveProject(project);
-      const r = await api.request<{ saved: number; ignored: string[]; items: { id: string; severity: string; table: string; message: string }[] }>('PUT', `/api/projects/${p.id}/ai-review`, { items, summary, by: 'AI' });
+      const r = await api.request<{ saved: number; ignored: string[]; items: { id: string; severity: string; table: string; message: string }[]; stillUnreviewed: string[] }>(
+        'PUT',
+        `/api/projects/${p.id}/ai-review`,
+        { items, summary, by: 'AI', scope: tables },
+      );
       return text({
         saved: r.saved,
+        stillUnreviewed: r.stillUnreviewed.length ? `아직 검토하지 않은 바뀐 테이블: ${r.stillUnreviewed.join(', ')}` : undefined,
         alreadyIgnoredByHuman: r.ignored.length ? `${r.ignored.length}개는 사람이 전에 무시한 항목이라 화면에 보이지 않고 고치지도 않는다` : undefined,
         items: r.items.map((i) => ({ id: i.id, severity: i.severity, table: i.table || undefined, message: i.message })),
       });
@@ -250,8 +269,8 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     },
     safe(async ({ project, commands, mode: m }: { project: string; commands: unknown[]; mode?: string }) => {
       const p = await resolveProject(project);
-      const result = await api.request('POST', `/api/projects/${p.id}/commands`, { commands, mode: m, source: 'ai', title: 'AI 제안' });
-      return text(result);
+      const result = await api.request<Record<string, unknown>>('POST', `/api/projects/${p.id}/commands`, { commands, mode: m, source: 'ai', title: 'AI 제안' });
+      return text({ ...result, designReview: await reviewReminder(p.id) });
     }),
   );
 
@@ -264,7 +283,8 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     },
     safe(async ({ project, sql, dialect, mode: m }: { project: string; sql: string; dialect?: string; mode?: string }) => {
       const p = await resolveProject(project);
-      return text(await api.request('POST', `/api/projects/${p.id}/import-ddl`, { sql, dialect, mode: m, source: 'ai' }));
+      const result = await api.request<Record<string, unknown>>('POST', `/api/projects/${p.id}/import-ddl`, { sql, dialect, mode: m, source: 'ai' });
+      return text({ ...result, designReview: await reviewReminder(p.id) });
     }),
   );
 
@@ -494,4 +514,14 @@ export function httpApi(baseUrl: string, token?: string): ErdApi {
     request: async <T>(method: string, path: string, body?: unknown) => (await (await call(method, path, body)).json()) as T,
     download: async (path: string) => (await call('GET', path)).arrayBuffer(),
   };
+}
+
+/** 검토가 필요한 테이블 안내 (없으면 undefined) */
+function reviewNeeded(schema: Schema, review: AiReview | null): string | undefined {
+  if (!schema.tables.length) return undefined;
+  const pending = unreviewedTables(schema, review);
+  if (pending === null) return '아직 AI 설계 검토가 없습니다. 이번 설계 작업을 마치면 ERD 전체를 검토해 save_design_review로 저장하세요.';
+  if (!pending.length) return undefined;
+  const names = pending.length > 30 ? `${pending.slice(0, 30).join(', ')} 외 ${pending.length - 30}개` : pending.join(', ');
+  return `AI 검토 이후 바뀐 테이블 ${pending.length}개: ${names}. 이번 설계 작업을 마치면 이 테이블들(과 관계 상대)을 검토해 save_design_review(tables에 이 이름들)로 저장하세요.`;
 }

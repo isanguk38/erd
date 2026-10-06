@@ -688,6 +688,9 @@ label.btn { display: inline-flex; align-items: center; }
 @keyframes remote-pulse { 0% { box-shadow: 0 0 0 0 rgb(245 158 11 / .7); } 70% { box-shadow: 0 0 0 10px rgb(245 158 11 / 0); } 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0); } }
 .table-node.remote-changed { outline: 2px solid #f59e0b; outline-offset: 2px; animation: remote-pulse 1.2s ease-out 2; }
 .table-node__column.col-remote { background: rgb(245 158 11 / .18); transition: background .6s; }
+.lint-pending { display: flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: 12px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); color: var(--text); }
+.lint-pending > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lint-pending svg { color: var(--accent); flex: none; }
 /* AI 검토 항목 */
 .lint-group--ai .lint-group__head { color: var(--accent); }
 .lint-ai-item .lint-item { line-height: 1.5; }

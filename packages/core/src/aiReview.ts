@@ -2,6 +2,9 @@
 // ERD 코드의 설계 검사(lint.ts)는 DB에서 실패하는 것처럼 확실한 사실만 보고, 설계 판단·업무 맥락은 AI 검토가 맡는다.
 // - 같은 문제(등급·테이블·컬럼·내용)는 같은 id → 사람이 "무시"한 항목은 다음 검토에서도 무시된 채로 남는다.
 // - 항목마다 대상 테이블의 모양 지문을 남겨, 그 뒤 사람이 테이블을 고치면 "다시 확인 필요"로 보여 준다.
+// - 범위 검토: 검토할 때 "이번에 본 테이블"(scope)을 함께 보내면 그 테이블의 항목만 바꾸고 다른 테이블의 항목은 그대로 둔다.
+//   기능을 추가할 때 새로 만들거나 고친 테이블만 검토하면 되고, 기존 지적은 남는다. scope를 안 보내면 ERD 전체 검토.
+// - 테이블마다 마지막으로 검토한 모양(reviewed)을 기억해, 그 뒤 바뀐 테이블을 "검토 필요"로 알려 준다.
 
 import type { Schema, Table } from './model';
 
@@ -28,6 +31,8 @@ export interface AiReviewItem {
 export interface AiReview {
   items: AiReviewItem[];
   reviewedAt: string;
+  /** 테이블별 마지막 검토 때의 모양 지문 (소문자 이름 → 지문). 지금과 다르면 검토 뒤 바뀐 것 */
+  reviewed?: Record<string, string>;
   /** 검토한 AI (MCP 클라이언트 이름) */
   by?: string;
   summary?: string;
@@ -83,7 +88,16 @@ export function tableFingerprint(schema: Schema, tableName: string): string {
  * AI가 보낸 검토 결과로 새 검토를 만든다.
  * 이번 검토의 항목이 지금 열린 항목이 되고, 이전에 해결한 항목은 기록으로 남긴다 (이번에 다시 나오면 다시 열림).
  */
-export function buildReview(schema: Schema, input: { items: AiReviewInput[]; summary?: string; by?: string }, previous?: AiReview | null, now = new Date().toISOString()): AiReview {
+/**
+ * scope: 이번에 검토한 테이블 이름들. 주면 그 테이블(과 항목에 나온 테이블)의 이전 항목만 이번 결과로 바꾸고,
+ * 다른 테이블의 열린 항목·테이블 지정 없는 전체 의견은 그대로 둔다. 안 주면 ERD 전체를 검토한 것으로 본다.
+ */
+export function buildReview(
+  schema: Schema,
+  input: { items: AiReviewInput[]; summary?: string; by?: string; scope?: string[] },
+  previous?: AiReview | null,
+  now = new Date().toISOString(),
+): AiReview {
   if (!Array.isArray(input.items)) throw new Error('items가 필요합니다');
   if (input.items.length > MAX_ITEMS) throw new Error(`검토 항목은 한 번에 ${MAX_ITEMS}개까지 저장할 수 있습니다`);
   const items = new Map<string, AiReviewItem>();
@@ -109,8 +123,32 @@ export function buildReview(schema: Schema, input: { items: AiReviewInput[]; sum
       createdAt: now,
     });
   }
+  // 이번 검토 범위 (소문자 테이블 이름). 전체 검토면 null
+  let scope: Set<string> | null = null;
+  if (input.scope) {
+    scope = new Set();
+    for (const name of input.scope) {
+      const t = findByName(schema, String(name));
+      if (!t) throw new Error(`검토 범위의 테이블을 찾을 수 없습니다: ${String(name)}`);
+      scope.add(t.name.toLowerCase());
+    }
+    for (const i of items.values()) if (i.table) scope.add(i.table.toLowerCase());
+  }
+  const inScope = (i: AiReviewItem) => (scope ? Boolean(i.table) && scope.has(i.table.toLowerCase()) : true);
+  // 범위 밖의 열린 항목은 그대로 둔다 (이번에 다시 나온 것은 새 항목으로)
+  const kept = scope ? (previous?.items ?? []).filter((i) => i.status === 'open' && !inScope(i) && !items.has(i.id)) : [];
   const resolved = (previous?.items ?? []).filter((i) => i.status === 'resolved' && !items.has(i.id)).slice(0, MAX_RESOLVED_KEPT);
-  return { items: [...items.values(), ...resolved], reviewedAt: now, by: input.by?.trim() || undefined, summary: input.summary?.trim() || undefined };
+  // 테이블별 검토한 모양: 전체 검토면 모든 테이블, 범위 검토면 이전 기록 + 이번 범위
+  const reviewed: Record<string, string> = scope ? { ...(previous?.reviewed ?? {}) } : {};
+  for (const t of schema.tables) if (!scope || scope.has(t.name.toLowerCase())) reviewed[t.name.toLowerCase()] = tableFingerprint(schema, t.name);
+  for (const name of Object.keys(reviewed)) if (!findByName(schema, name)) delete reviewed[name];
+  return {
+    items: [...items.values(), ...kept, ...resolved],
+    reviewedAt: now,
+    reviewed,
+    by: input.by?.trim() || undefined,
+    summary: input.summary?.trim() || (scope ? previous?.summary : undefined),
+  };
 }
 
 /** AI가 고친 항목을 해결됨으로 표시한다 */
@@ -133,4 +171,14 @@ export function reviewItemState(item: AiReviewItem, schema: Schema): AiReviewSta
   if (!item.table) return 'open';
   if (!findByName(schema, item.table)) return 'missing';
   return tableFingerprint(schema, item.table) === item.fingerprint ? 'open' : 'stale';
+}
+
+/**
+ * 마지막 AI 검토 뒤 새로 생기거나 모양이 바뀐 테이블 (검토가 필요한 것).
+ * 검토를 한 번도 안 했으면 null (전체 검토가 필요).
+ */
+export function unreviewedTables(schema: Schema, review: AiReview | null | undefined): string[] | null {
+  if (!review) return null;
+  const reviewed = review.reviewed ?? {};
+  return schema.tables.filter((t) => reviewed[t.name.toLowerCase()] !== tableFingerprint(schema, t.name)).map((t) => t.name);
 }
