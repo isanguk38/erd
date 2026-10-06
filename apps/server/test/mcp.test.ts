@@ -65,7 +65,7 @@ describe('MCP', () => {
     // 설계 검사: 컬럼 논리명이 비어 있는 것을 알려주고, 고치면 사라진다
     const lint = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
     expect(lint.summary).toContain('참고');
-    expect(lint.issues.map((i: { table: string; column?: string }) => `${i.table}.${i.column ?? ''}`)).toEqual(
+    expect(lint.basicChecks.map((i: { table: string; column?: string }) => `${i.table}.${i.column ?? ''}`)).toEqual(
       expect.arrayContaining(['member.member_id', 'member.email', 'orders.order_id', 'orders.member_id']),
     );
     await client.callTool({
@@ -82,15 +82,57 @@ describe('MCP', () => {
     // FK 컬럼은 관계를 만들 때 부모 논리명(그때는 비어 있음)을 물려받았으므로 그것만 남는다
     const remaining = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
     expect(remaining.summary).toBe('오류 0 · 경고 0 · 참고 1');
-    expect(remaining.issues[0].message).toContain('orders.member_id');
+    expect(remaining.basicChecks[0].message).toContain('orders.member_id');
 
     // 사람이 화면에서 "무시"한 항목은 AI에게도 빼고 알려준다
     const pid = erd.projects.list().find((p) => p.name === '쇼핑몰')!.id;
     const [left] = lintSchema(erd.projects.schema(pid), 'postgresql');
     erd.projects.setMeta(pid, { lintIgnored: [left.id] });
-    expect(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } }))).toBe('설계 검사: 문제 없음 (사람이 무시한 항목 1개 제외)');
+    const quiet = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
+    expect(quiet.summary).toBe('오류 0 · 경고 0 · 참고 0 (사람이 무시한 항목 1개 제외 — 고치지 말 것)');
+    expect(quiet.basicChecks).toEqual([]);
     erd.projects.setMeta(pid, { lintIgnored: [] });
     expect(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } }))).toContain('참고 1');
+
+    // AI 설계 검토: AI가 검토 결과를 저장 → 화면(문서 meta)에 보이고, check_design으로 다시 읽힌다
+    const saved = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: 'save_design_review',
+          arguments: {
+            project: '쇼핑몰',
+            summary: '주문에 상태·금액이 없습니다',
+            items: [
+              { severity: 'error', table: 'orders', message: '주문 금액 컬럼이 없습니다', suggestion: 'amount NUMERIC(12,2) NOT NULL 추가' },
+              { severity: 'warning', table: 'orders', message: '주문 상태 컬럼이 없습니다' },
+              { severity: 'info', message: '생성일시 컬럼을 공통으로 두면 좋습니다' },
+            ],
+          },
+        }),
+      ),
+    );
+    expect(saved.saved).toBe(3);
+    const [amountId, statusId] = saved.items.map((i: { id: string }) => i.id);
+    expect(erd.projects.meta(pid).aiReview?.items).toHaveLength(3);
+    // 없는 테이블은 거절
+    const badReview = await client.callTool({ name: 'save_design_review', arguments: { project: '쇼핑몰', items: [{ severity: 'error', table: 'nope', message: 'x' }] } });
+    expect((badReview as ToolResult).isError).toBe(true);
+    // 사람이 경고를 무시하면 AI에게 보이지 않는다
+    erd.projects.setMeta(pid, { lintIgnored: [statusId] });
+    let design = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
+    expect(design.aiReview.items.map((i: { id: string }) => i.id)).toEqual([amountId, expect.any(String)]);
+    expect(design.summary).toContain('무시한 항목 1개');
+    // AI가 고치고 해결 표시 → 열린 항목에서 빠지고 해결 기록이 남는다
+    await client.callTool({ name: 'edit_schema', arguments: { project: '쇼핑몰', commands: [{ op: 'addColumn', table: 'orders', column: { name: 'amount', logicalName: '금액', type: 'NUMERIC(12,2)', nullable: false } }] } });
+    const resolved = JSON.parse(textOf(await client.callTool({ name: 'resolve_design_review', arguments: { project: '쇼핑몰', ids: [amountId], resolution: 'orders.amount 추가' } })));
+    expect(resolved.resolved[0]).toMatchObject({ id: amountId, status: 'resolved', resolution: 'orders.amount 추가' });
+    design = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
+    expect(design.aiReview.items.map((i: { id: string }) => i.id)).not.toContain(amountId);
+    // 다시 검토해 같은 경고를 또 보내도 같은 id → 사람이 무시한 기록이 이어진다
+    const again = JSON.parse(textOf(await client.callTool({ name: 'save_design_review', arguments: { project: '쇼핑몰', items: [{ severity: 'warning', table: 'orders', message: '주문 상태 컬럼이 없습니다' }] } })));
+    expect(again.items[0].id).toBe(statusId);
+    expect(again.alreadyIgnoredByHuman).toContain('1개');
+    erd.projects.setMeta(pid, { lintIgnored: [] });
 
     // 화면(서버 문서)에도 반영됨 + AI 작업으로 기록됨
     const id = erd.projects.list()[0].id;

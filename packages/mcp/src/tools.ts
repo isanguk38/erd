@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { describeSchema, dialects, LINT_RULES, lintSchema, type DialectId, type Schema } from '@erd/core';
+import { describeSchema, dialects, LINT_RULES, lintSchema, reviewItemState, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -149,8 +149,10 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     {
       title: '설계 검사',
       description: [
-        'ERD의 설계 문제(기본키 없음, FK 타입 불일치, FK 인덱스 없음, 이름 규칙 섞임, 논리명 없음, 중복 인덱스, 문자 길이 없음)를 찾는다.',
-        '고칠 때는 edit_schema를 쓰고, 고친 뒤 다시 호출해 남은 문제를 확인한다. 논리명은 한글로 넣는다.',
+        '설계 검사 목록을 읽는다: ① 기본 검사(ERD가 코드로 찾는 확실한 문제: 기본키 없음, DB에서 실패하는 타입, FK 타입 불일치 등)',
+        '② 지난 AI 검토에서 남은 항목(save_design_review로 저장한 것, id 포함). 사람이 "무시"한 항목은 빠진다 — 무시한 항목은 고치지 않는다.',
+        '"다시 확인 필요"(stale)는 검토 뒤 사람이 그 테이블을 고친 것이라 지금도 문제인지 다시 본다.',
+        '고칠 때는 edit_schema를 쓰고, AI 검토 항목을 고쳤으면 resolve_design_review로 해결 표시한다.',
       ].join(' '),
       inputSchema: { project: projectArg },
       annotations: { readOnlyHint: true },
@@ -162,14 +164,75 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       const ignored = new Set(Array.isArray(meta.lintIgnored) ? (meta.lintIgnored as string[]) : []);
       const all = lintSchema(schema, String(meta.dialect ?? 'mysql'));
       const issues = all.filter((i) => !ignored.has(i.id));
-      const skipped = all.length - issues.length;
-      if (!issues.length) return text(`설계 검사: 문제 없음${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외)` : ''}`);
+      const review = (meta.aiReview as AiReview | null | undefined) ?? null;
+      const reviewOpen = (review?.items ?? []).filter((i) => i.status === 'open');
+      const reviewItems = reviewOpen.filter((i) => !ignored.has(i.id)).map((i) => ({ ...i, state: reviewItemState(i, schema) })).filter((i) => i.state !== 'missing');
+      const skipped = all.length - issues.length + (reviewOpen.length - reviewOpen.filter((i) => !ignored.has(i.id)).length);
       const counts = { error: 0, warning: 0, info: 0 };
-      for (const i of issues) counts[i.severity]++;
+      for (const i of [...issues, ...reviewItems]) counts[i.severity]++;
       return text({
-        summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (무시한 항목 ${skipped}개 제외)` : ''}`,
-        issues: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
+        summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외 — 고치지 말 것)` : ''}`,
+        basicChecks: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
+        aiReview: review
+          ? {
+              reviewedAt: review.reviewedAt,
+              items: reviewItems.map((i) => ({ id: i.id, severity: i.severity, table: i.table || undefined, column: i.column, message: i.message, suggestion: i.suggestion, state: i.state === 'stale' ? '다시 확인 필요' : '열림' })),
+            }
+          : '아직 AI 검토가 없습니다. 설계를 검토해 save_design_review로 저장하세요.',
       });
+    }),
+  );
+
+  server.registerTool(
+    'save_design_review',
+    {
+      title: 'AI 설계 검토 저장',
+      description: [
+        '내가(AI) 설계를 검토해 찾은 문제를 설계 검사 목록에 저장한다. 사람은 화면의 설계 검사 패널에서 보고, 동의하지 않으면 "무시"한다.',
+        'severity: error(이대로면 DB에서 실패하거나 데이터가 깨짐) / warning(실무에서 문제가 될 가능성이 큼) / info(개선 제안).',
+        '기본 검사(check_design의 basicChecks)와 같은 내용은 다시 넣지 않는다. 이번 검토의 전체 결과를 보낸다 — 이전 검토의 열린 항목은 이것으로 바뀐다.',
+        '같은 내용은 같은 id가 되어 사람이 무시한 기록이 이어진다. 언제: 설계 작업(edit_schema 여러 번)을 마쳤을 때 한 번, 또는 사용자가 검토를 요청할 때. 명령마다 하지 않는다.',
+      ].join(' '),
+      inputSchema: {
+        project: projectArg,
+        items: z
+          .array(
+            z.object({
+              severity: z.enum(['error', 'warning', 'info']),
+              table: z.string().optional().describe('대상 테이블 물리명 (프로젝트 전체에 대한 것이면 생략)'),
+              column: z.string().optional(),
+              message: z.string().describe('무엇이 문제인지 (한국어, 한 문장)'),
+              suggestion: z.string().optional().describe('어떻게 고치면 되는지'),
+            }),
+          )
+          .describe('검토 결과 전체 (문제가 없으면 빈 배열)'),
+        summary: z.string().optional().describe('검토 요약 한두 문장'),
+      },
+    },
+    safe(async ({ project, items, summary }: { project: string; items: unknown[]; summary?: string }) => {
+      const p = await resolveProject(project);
+      const r = await api.request<{ saved: number; ignored: string[]; items: { id: string; severity: string; table: string; message: string }[] }>('PUT', `/api/projects/${p.id}/ai-review`, { items, summary, by: 'AI' });
+      return text({
+        saved: r.saved,
+        alreadyIgnoredByHuman: r.ignored.length ? `${r.ignored.length}개는 사람이 전에 무시한 항목이라 화면에 보이지 않고 고치지도 않는다` : undefined,
+        items: r.items.map((i) => ({ id: i.id, severity: i.severity, table: i.table || undefined, message: i.message })),
+      });
+    }),
+  );
+
+  server.registerTool(
+    'resolve_design_review',
+    {
+      title: 'AI 검토 항목 해결 표시',
+      description: [
+        'edit_schema로 고친 AI 검토 항목(check_design의 aiReview id)을 해결됨으로 표시한다. resolution에 무엇을 어떻게 고쳤는지 적는다.',
+        '고친 뒤 사용자에게 오류·경고·참고별로 무엇을 고쳤고 무엇을 남겼는지(무시된 것 포함) 알려 준다.',
+      ].join(' '),
+      inputSchema: { project: projectArg, ids: z.array(z.string()).min(1), resolution: z.string().optional() },
+    },
+    safe(async ({ project, ids, resolution }: { project: string; ids: string[]; resolution?: string }) => {
+      const p = await resolveProject(project);
+      return text(await api.request('POST', `/api/projects/${p.id}/ai-review/resolve`, { ids, resolution }));
     }),
   );
 

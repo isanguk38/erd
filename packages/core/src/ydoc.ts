@@ -8,6 +8,7 @@
 //  └ relations (Y.Map<relationId, Y.Map>)
 
 import * as Y from 'yjs';
+import type { AiReview } from './aiReview';
 import type { CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
@@ -177,8 +178,10 @@ export interface ProjectMeta {
   pendingProposals?: number;
   /** 이 프로젝트와 연결한 DB (서버의 연결 id). 함께 작업하는 사람 모두가 같은 DB를 본다 */
   dbConnectionId?: string | null;
-  /** 설계 검사에서 무시하기로 한 항목 id */
+  /** 설계 검사에서 무시하기로 한 항목 id (기본 검사·AI 검토 모두) */
   lintIgnored?: string[];
+  /** MCP로 연결한 AI의 설계 검토 결과 (aiReview.ts) */
+  aiReview?: AiReview | null;
 }
 
 export function readMeta(doc: Y.Doc): ProjectMeta {
@@ -192,6 +195,7 @@ export function readMeta(doc: Y.Doc): ProjectMeta {
     pendingProposals: (meta.get('pendingProposals') as number) ?? 0,
     dbConnectionId: (meta.get('dbConnectionId') as string) ?? null,
     lintIgnored: Array.isArray(meta.get('lintIgnored')) ? [...(meta.get('lintIgnored') as string[])] : [],
+    aiReview: (meta.get('aiReview') as AiReview | undefined) ?? null,
   };
 }
 

@@ -1,20 +1,30 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, removeRelation, updateColumn, type LintIssue, type LintRule } from '@erd/core';
+import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Icon } from './ui';
 
-/** 설계 문제 수 (도구 막대 배지용: 오류+경고) */
+/** AI 검토 항목 중 지금 보여 줄 것 (열림·다시 확인 필요, 대상 테이블이 지워진 것은 뺀다) */
+function openReviewItems(items: AiReviewItem[] | undefined, schema: Schema): (AiReviewItem & { state: AiReviewState })[] {
+  return (items ?? []).filter((i) => i.status === 'open').map((i) => ({ ...i, state: reviewItemState(i, schema) })).filter((i) => i.state !== 'missing');
+}
+
+/** 설계 문제 수 (도구 막대 배지용: 오류+경고, 기본 검사 + AI 검토) */
 export function useLintCount(): number {
   const schema = useStore((s) => s.schema);
   const dialect = useStore((s) => s.meta.dialect);
   const ignored = useStore((s) => s.meta.lintIgnored);
+  const review = useStore((s) => s.meta.aiReview);
   return useMemo(() => {
     const skip = new Set(ignored ?? []);
-    return lintSchema(schema, dialect).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
-  }, [schema, dialect, ignored]);
+    const basic = lintSchema(schema, dialect).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
+    const ai = openReviewItems(review?.items, schema).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
+    return basic + ai;
+  }, [schema, dialect, ignored, review]);
 }
+
+const SEV_LABEL: Record<AiReviewItem['severity'], string> = { error: '오류', warning: '경고', info: '참고' };
 
 /** 타입 검사의 고치기: 그 고침 때문에 생기는 문제(예: BIGINT로 바꾸면 남는 길이)도 함께 바로잡는다 */
 function applyColumnFix(issue: LintIssue) {
@@ -40,13 +50,21 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const ignoredSet = useMemo(() => new Set(ignoredIds ?? []), [ignoredIds]);
   const issues = useMemo(() => all.filter((i) => !ignoredSet.has(i.id)), [all, ignoredSet]);
   const ignored = useMemo(() => all.filter((i) => ignoredSet.has(i.id)), [all, ignoredSet]);
+  // AI 검토 (MCP로 연결한 AI가 저장한 것)
+  const review = useStore((s) => s.meta.aiReview);
+  const reviewAll = useMemo(() => openReviewItems(review?.items, schema), [review, schema]);
+  const reviewItems = useMemo(() => reviewAll.filter((i) => !ignoredSet.has(i.id)), [reviewAll, ignoredSet]);
+  const reviewIgnored = useMemo(() => reviewAll.filter((i) => ignoredSet.has(i.id)), [reviewAll, ignoredSet]);
+  const reviewResolved = useMemo(() => (review?.items ?? []).filter((i) => i.status === 'resolved'), [review]);
+  const [showResolved, setShowResolved] = useState(false);
+  const [aiOpen, setAiOpen] = useState(true);
   const [showIgnored, setShowIgnored] = useState(false);
   const setIgnored = (id: string, on: boolean) => {
     const next = new Set(ignoredIds ?? []);
     if (on) next.add(id);
     else next.delete(id);
     // 이미 고쳐져 없어진 항목의 무시 기록은 정리한다
-    const live = new Set(all.map((i) => i.id));
+    const live = new Set([...all.map((i) => i.id), ...(review?.items ?? []).map((i) => i.id)]);
     useStore.getState().setLintIgnored([...next].filter((x) => live.has(x)));
   };
   const [open, setOpen] = useState<Partial<Record<LintRule, boolean>>>({ 'no-primary-key': true, 'fk-type-mismatch': true, 'fk-without-index': true });
@@ -57,7 +75,7 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
     for (const i of issues) map.set(i.rule, [...(map.get(i.rule) ?? []), i]);
     return [...map.entries()];
   }, [issues]);
-  const count = (sev: LintIssue['severity']) => issues.filter((i) => i.severity === sev).length;
+  const count = (sev: LintIssue['severity']) => issues.filter((i) => i.severity === sev).length + reviewItems.filter((i) => i.severity === sev).length;
 
   const go = (issue: LintIssue) => {
     const { select, setSearchFocus } = useStore.getState();
@@ -66,8 +84,15 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
     fitView({ nodes: [{ id: issue.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
   };
 
+  const goTable = (tableName: string, columnName?: string) => {
+    const t = schema.tables.find((x) => x.name.toLowerCase() === tableName.toLowerCase());
+    if (!t) return;
+    const c = columnName ? t.columns.find((x) => x.name.toLowerCase() === columnName.toLowerCase()) : undefined;
+    go({ tableId: t.id, columnId: c?.id } as LintIssue);
+  };
+
   const askAi = async () => {
-    const text = `ERD 프로젝트 "${projectName}"의 설계 검사 결과를 고쳐줘. erd MCP의 check_design으로 문제를 확인하고 edit_schema로 고친 뒤, check_design을 다시 호출해 남은 문제를 알려줘. 논리명은 한글로 넣어줘.`;
+    const text = `ERD 프로젝트 "${projectName}"의 설계를 검토하고 고쳐줘. erd MCP의 check_design으로 문제를 확인하고(사람이 무시한 항목은 고치지 마) edit_schema로 고친 뒤, 고친 AI 검토 항목은 resolve_design_review로 해결 표시해줘. 마지막으로 설계를 다시 검토해 save_design_review로 저장하고, 오류·경고·참고별로 무엇을 고쳤는지 알려줘. 논리명은 한글로 넣어줘.`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -88,13 +113,48 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
         </span>
         <button className="icon-btn" onClick={onClose} title="닫기"><Icon name="close" size={14} /></button>
       </div>
-      {issues.length === 0 ? (
+      {issues.length === 0 && reviewItems.length === 0 ? (
         <div className="lint-empty">
           <Icon name="check" size={20} />
-          <p>{ignored.length ? '무시한 항목 외에는 문제가 없습니다.' : '문제가 없습니다.'}</p>
+          <p>{ignored.length || reviewIgnored.length ? '무시한 항목 외에는 문제가 없습니다.' : '문제가 없습니다.'}</p>
         </div>
       ) : (
         <div className="lint-groups">
+          {reviewItems.length > 0 && (
+            <section className="lint-group lint-group--ai">
+              <button className="lint-group__head" onClick={() => setAiOpen(!aiOpen)} title="MCP로 연결한 AI가 설계를 검토해 남긴 항목입니다. 동의하지 않으면 무시하세요. AI는 무시한 항목을 고치지 않습니다.">
+                <Icon name="sparkles" size={14} />
+                <b>AI 검토</b>
+                <span className="muted">{reviewItems.length}</span>
+                <span className="muted small">{review ? new Date(review.reviewedAt).toLocaleString() : ''}</span>
+                <span className="lint-group__chev">{aiOpen ? '▾' : '▸'}</span>
+              </button>
+              {aiOpen && (
+                <>
+                  {review?.summary && <p className="lint-group__desc">{review.summary}</p>}
+                  <ul>
+                    {reviewItems.map((item) => (
+                      <li key={item.id} className="lint-ai-item">
+                        <span className={`sev-dot sev-${item.severity}`} title={SEV_LABEL[item.severity]} />
+                        <button className="lint-item" onClick={() => item.table && goTable(item.table, item.column)}>
+                          <span className={`lint-sev-text sev-${item.severity}`}>{SEV_LABEL[item.severity]}</span>
+                          {item.table ? <b className="lint-ai-target">{item.table}{item.column ? `.${item.column}` : ''}</b> : null}
+                          {item.message}
+                          {item.state === 'stale' && <span className="lint-stale" title="AI가 검토한 뒤 이 테이블이 바뀌었습니다. 지금도 문제인지 다시 확인하세요">다시 확인 필요</span>}
+                          {item.suggestion && <span className="lint-ai-suggestion">→ {item.suggestion}</span>}
+                        </button>
+                        {!readOnly && (
+                          <button className="btn btn-ghost small lint-ignore" title="동의하지 않는 항목: 목록·배지에서 숨기고, AI도 다음 작업에서 고치지 않습니다" onClick={() => setIgnored(item.id, true)}>
+                            무시
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
+          )}
           {groups.map(([rule, list]) => (
             <section key={rule} className="lint-group">
               <button className="lint-group__head" onClick={() => setOpen((o) => ({ ...o, [rule]: !o[rule] }))} title={LINT_RULES[rule].description}>
@@ -153,10 +213,31 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
           ))}
         </div>
       )}
-      {ignored.length > 0 && (
+      {reviewResolved.length > 0 && (
+        <div className="lint-ignored">
+          <button className="lint-group__head" onClick={() => setShowResolved(!showResolved)}>
+            <span className="muted">AI가 해결한 항목 {reviewResolved.length}</span>
+            <span className="lint-group__chev">{showResolved ? '▾' : '▸'}</span>
+          </button>
+          {showResolved && (
+            <ul>
+              {reviewResolved.map((item) => (
+                <li key={item.id}>
+                  <span className={`sev-dot sev-${item.severity}`} />
+                  <span className="lint-item muted">
+                    {SEV_LABEL[item.severity]} · {item.table ? `${item.table}${item.column ? `.${item.column}` : ''}: ` : ''}{item.message}
+                    {item.resolution && <span className="lint-ai-suggestion">✓ {item.resolution}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {ignored.length + reviewIgnored.length > 0 && (
         <div className="lint-ignored">
           <button className="lint-group__head" onClick={() => setShowIgnored(!showIgnored)}>
-            <span className="muted">무시한 항목 {ignored.length}</span>
+            <span className="muted">무시한 항목 {ignored.length + reviewIgnored.length}</span>
             <span className="lint-group__chev">{showIgnored ? '▾' : '▸'}</span>
           </button>
           {showIgnored && (
@@ -170,14 +251,23 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                   )}
                 </li>
               ))}
+              {reviewIgnored.map((item) => (
+                <li key={item.id}>
+                  <span className={`sev-dot sev-${item.severity}`} />
+                  <span className="lint-item muted">AI 검토 · {item.table ? `${item.table}: ` : ''}{item.message}</span>
+                  {!readOnly && (
+                    <button className="btn btn-ghost small" onClick={() => setIgnored(item.id, false)}>무시 취소</button>
+                  )}
+                </li>
+              ))}
             </ul>
           )}
         </div>
       )}
       <div className="lint-panel__foot">
-        <button className="btn" onClick={askAi} disabled={!issues.length} title="AI(MCP)에게 보낼 요청 문장을 복사합니다">
+        <button className="btn" onClick={askAi} title="AI(MCP)에게 보낼 요청 문장을 복사합니다 (설계 검토 + 고치기)">
           <Icon name="sparkles" />
-          {copied ? '복사됨 — AI에 붙여넣으세요' : 'AI에게 고쳐 달라고 하기'}
+          {copied ? '복사됨 — AI에 붙여넣으세요' : 'AI에게 검토·수정 요청'}
         </button>
         <button className="btn btn-ghost small" onClick={onOpenAi}>AI 연결 방법</button>
       </div>

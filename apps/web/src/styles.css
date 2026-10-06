@@ -688,6 +688,16 @@ label.btn { display: inline-flex; align-items: center; }
 @keyframes remote-pulse { 0% { box-shadow: 0 0 0 0 rgb(245 158 11 / .7); } 70% { box-shadow: 0 0 0 10px rgb(245 158 11 / 0); } 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0); } }
 .table-node.remote-changed { outline: 2px solid #f59e0b; outline-offset: 2px; animation: remote-pulse 1.2s ease-out 2; }
 .table-node__column.col-remote { background: rgb(245 158 11 / .18); transition: background .6s; }
+/* AI 검토 항목 */
+.lint-group--ai .lint-group__head { color: var(--accent); }
+.lint-ai-item .lint-item { line-height: 1.5; }
+.lint-sev-text { font-size: 11px; font-weight: 700; margin-right: 6px; }
+.lint-sev-text.sev-error { color: var(--danger); }
+.lint-sev-text.sev-warning { color: var(--warning); }
+.lint-sev-text.sev-info { color: var(--muted); }
+.lint-ai-target { margin-right: 6px; font-family: ui-monospace, monospace; font-size: 11.5px; }
+.lint-ai-suggestion { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+.lint-stale { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: var(--warning-soft); color: var(--warning); }
 .lint-ignore { opacity: 0; transition: opacity .15s; }
 .lint-group li:hover .lint-ignore, .lint-ignore:focus { opacity: 1; }
 /* 무시한 항목: 머리줄은 줄어들지 않고, 펼친 목록만 스크롤 */

@@ -3,6 +3,9 @@
 import type { FastifyInstance } from 'fastify';
 import {
   appliedChanges,
+  buildReview,
+  resolveReviewItems,
+  type AiReviewInput,
   applyChanges,
   applyCommands,
   CommandError,
@@ -138,6 +141,34 @@ export function registerProjectRoutes(
       patch.dbConnectionId = b.dbConnectionId;
     }
     return store.setMeta(req.params.id, patch);
+  });
+
+  // ── AI 설계 검토 ───────────────────────────
+  // MCP로 연결한 AI가 검토한 결과(오류·경고·참고)를 저장한다. 화면의 설계 검사 패널에 기본 검사와 함께 보인다.
+  app.put<{ Params: { id: string }; Body: { items?: AiReviewInput[]; summary?: string; by?: string } }>('/api/projects/:id/ai-review', async (req) => {
+    const { id } = req.params;
+    let review;
+    try {
+      review = buildReview(store.schema(id), { items: req.body?.items ?? [], summary: req.body?.summary, by: req.body?.by }, store.meta(id).aiReview);
+    } catch (e) {
+      throw badRequest(e instanceof Error ? e.message : String(e));
+    }
+    store.setMeta(id, { aiReview: review });
+    const ignored = new Set(store.meta(id).lintIgnored ?? []);
+    const open = review.items.filter((i) => i.status === 'open');
+    return { reviewedAt: review.reviewedAt, saved: open.length, ignored: open.filter((i) => ignored.has(i.id)).map((i) => i.id), items: open };
+  });
+
+  /** AI가 고친 검토 항목을 해결됨으로 표시 */
+  app.post<{ Params: { id: string }; Body: { ids?: string[]; resolution?: string } }>('/api/projects/:id/ai-review/resolve', async (req) => {
+    const { id } = req.params;
+    const current = store.meta(id).aiReview;
+    if (!current) throw badRequest('저장된 AI 검토가 없습니다');
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x): x is string => typeof x === 'string') : [];
+    if (!ids.length) throw badRequest('ids가 필요합니다');
+    const { review, resolved, unknown } = resolveReviewItems(current, ids, req.body?.resolution);
+    store.setMeta(id, { aiReview: review });
+    return { resolved, unknown };
   });
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req) => {
