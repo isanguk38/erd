@@ -216,7 +216,13 @@ export function sameExpression(a: string | undefined, b: string | undefined): bo
       .replace(/::\s*(character varying|double precision|timestamp with(out)? time zone|[a-z_][a-z0-9_]*)(\[\])?/g, '')
       // MySQL은 문자열 앞에 문자셋을 붙여 돌려준다: _utf8mb4'A' = 'A'
       .replace(/_(utf8mb4|utf8mb3|utf8|latin1|binary|ascii)'/g, "'")
-      .replace(/["`\[\]()\s]/g, '');
+      .replace(/["`\s]/g, '')
+      // MySQL은 JSON 줄임 문법을 풀어서 저장한다: profile->>'$.a' = json_unquote(json_extract(profile,'$.a')), -> = json_extract
+      .replace(/json_unquote\(json_extract\(([\w$.]+),('[^']*')\)\)/g, '$1->>$2')
+      .replace(/json_extract\(([\w$.]+),('[^']*')\)/g, '$1->$2')
+      // CAST(... AS CHAR(30)) 뒤에 붙는 문자셋 표기
+      .replace(/charset[a-z0-9_]+/g, '')
+      .replace(/[[\]()]/g, '');
   return norm(a) === norm(b);
 }
 

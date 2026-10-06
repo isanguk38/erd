@@ -150,7 +150,10 @@ function applyOne(schema: Schema, command: Command, created: string[]): string {
     case 'updateColumn': {
       const table = tableByName(schema, command.table);
       const column = columnByName(table, command.column);
-      updateColumn(schema, table.id, column.id, columnPatch(command.changes));
+      const patch = columnPatch(command.changes);
+      // 계산식만 바꾸면 저장 방식(STORED/VIRTUAL)은 그대로 둔다
+      if (patch.generated && command.changes.generatedStored === undefined && column.generated) patch.generated.stored = column.generated.stored;
+      updateColumn(schema, table.id, column.id, patch);
       // 계산식은 그대로 두고 저장 방식만 바꾸는 경우
       if (command.changes.generated === undefined && command.changes.generatedStored !== undefined && column.generated) {
         column.generated = { ...column.generated, stored: command.changes.generatedStored };

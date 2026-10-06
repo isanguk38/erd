@@ -137,6 +137,15 @@ describe('CHECK 제약·계산 컬럼', () => {
     expect(at(/ADD CONSTRAINT `ck_item_qty` CHECK \(quantity >= 0\)/)).toBeGreaterThan(at(/CHANGE COLUMN `qty` `quantity`/));
   });
 
+  it('MCP로 계산식만 바꾸면 저장 방식(STORED)은 그대로, MySQL이 풀어 쓴 JSON 식은 같은 식으로 본다', () => {
+    const s = applyCommands(item(true), [{ op: 'updateColumn', table: 'item', column: 'total', changes: { generated: 'qty * price * 2' } }]).schema;
+    expect(s.tables[0].columns[3].generated).toEqual({ expression: 'qty * price * 2', stored: true });
+    const withJson = applyCommands(item(), [{ op: 'addIndex', table: 'item', name: 'ix_j', expression: "(CAST(meta->>'$.city' AS CHAR(30)))" }]).schema;
+    const fromDb = cloneSchema(withJson);
+    fromDb.tables[0].indexes[0].expression = "(cast(json_unquote(json_extract(`meta`,_utf8mb4'$.city')) as char(30) charset utf8mb4))";
+    expect(diffSchemas(fromDb, withJson, getDialect('mysql')).changes).toEqual([]);
+  });
+
   it('MCP: get_schema 요약에 CHECK·계산식이 보이고, 없는 CHECK를 지우면 알려 준다', () => {
     expect(() => applyCommands(item(), [{ op: 'dropCheck', table: 'item', name: 'nope' }])).toThrow(/CHECK 제약이 없습니다/);
     expect(() => applyCommands(item(), [{ op: 'addCheck', table: 'item', expression: ' ' }])).toThrow(/CHECK 식/);
