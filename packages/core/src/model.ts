@@ -216,13 +216,18 @@ export function sameExpression(a: string | undefined, b: string | undefined): bo
       .replace(/::\s*(character varying|double precision|timestamp with(out)? time zone|[a-z_][a-z0-9_]*)(\[\])?/g, '')
       // MySQL은 문자열 앞에 문자셋을 붙여 돌려준다: _utf8mb4'A' = 'A'
       .replace(/_(utf8mb4|utf8mb3|utf8|latin1|binary|ascii)'/g, "'")
+      // PostgreSQL은 BETWEEN을 풀어서 저장한다: a BETWEEN 0 AND 100 = (a >= 0) AND (a <= 100)
+      .replace(/([\w."`]+)\s+between\s+(\S+)\s+and\s+(\S+)/g, '$1 >= $2 and $1 <= $3')
       .replace(/["`\s]/g, '')
       // MySQL은 JSON 줄임 문법을 풀어서 저장한다: profile->>'$.a' = json_unquote(json_extract(profile,'$.a')), -> = json_extract
       .replace(/json_unquote\(json_extract\(([\w$.]+),('[^']*')\)\)/g, '$1->>$2')
       .replace(/json_extract\(([\w$.]+),('[^']*')\)/g, '$1->$2')
       // CAST(... AS CHAR(30)) 뒤에 붙는 문자셋 표기
       .replace(/charset[a-z0-9_]+/g, '')
-      .replace(/[[\]()]/g, '');
+      .replace(/[[\]()]/g, '')
+      // PostgreSQL은 IN 목록을 배열 비교로 저장한다: a IN ('X','Y') = a = ANY (ARRAY['X','Y']), NOT IN = <> ALL
+      .replace(/=anyarray/g, 'in')
+      .replace(/<>allarray/g, 'notin');
   return norm(a) === norm(b);
 }
 
