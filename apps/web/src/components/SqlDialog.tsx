@@ -3,6 +3,7 @@ import { diffSchemas, dialectList, emptySchema, getDialect, type DialectId } fro
 import { useStore } from '../store';
 import { useDialect, useProjectName, useVersions, useVersionSchema } from '../lib/hooks';
 import { safeFileName } from '../lib/download';
+import { defaultBaseVersion, VERSION_GROUPS, VERSION_KIND, versionTime } from '../lib/versions';
 import { Modal } from './Modal';
 import { MigrationPreview } from './MigrationPreview';
 
@@ -16,7 +17,8 @@ export function SqlDialog({ onClose }: { onClose: () => void }) {
   const [dialectId, setDialectId] = useState<DialectId>(projectDialect);
   const [mode, setMode] = useState<Mode>('full');
   const [pickedId, setPickedId] = useState('');
-  const baseId = pickedId || versions[0]?.id || '';
+  // 기본 시작점: 마지막으로 DB와 맞춘 버전 (그 뒤 ERD에서 바꾼 것 = DB에 아직 안 간 것)
+  const baseId = pickedId || defaultBaseVersion(versions)?.id || '';
   const setBaseId = setPickedId;
   const dialect = getDialect(dialectId);
   const versionSchema = useVersionSchema(mode === 'changes' ? baseId : null);
@@ -43,13 +45,21 @@ export function SqlDialog({ onClose }: { onClose: () => void }) {
           </select>
         </label>
         {mode === 'changes' && (
-          <label className="inline-field">
-            기준 버전
+          <label className="inline-field" title="고른 버전(그 시점의 ERD)에서 지금 ERD까지 바뀐 부분을 SQL로 만듭니다">
+            어느 버전부터
             <select value={baseId} onChange={(e) => setBaseId(e.target.value)} disabled={!versions.length}>
               {!versions.length && <option value="">저장된 버전 없음</option>}
-              {versions.map((v) => (
-                <option key={v.id} value={v.id}>{v.name} · {new Date(v.createdAt).toLocaleString()}</option>
-              ))}
+              {VERSION_GROUPS.map((g) => {
+                const items = versions.filter((v) => g.sources.includes(v.source));
+                if (!items.length) return null;
+                return (
+                  <optgroup key={g.title} label={g.title}>
+                    {items.map((v) => (
+                      <option key={v.id} value={v.id}>{v.name} · {versionTime(v)}</option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </select>
           </label>
         )}
@@ -61,7 +71,10 @@ export function SqlDialog({ onClose }: { onClose: () => void }) {
       ) : (
         <>
           {mode === 'changes' && baseVersion && (
-            <p className="muted small">"{baseVersion.name}" 버전 → 지금 ERD 로 가는 SQL입니다. 바뀌지 않은 테이블은 포함되지 않습니다.</p>
+            <p className="muted small">
+              <b>{baseVersion.name}</b> ({VERSION_KIND[baseVersion.source].label}, {versionTime(baseVersion)}) 시점의 ERD → <b>지금 ERD</b>로 가는 SQL입니다.
+              바뀌지 않은 테이블은 포함되지 않습니다.
+            </p>
           )}
           {mode === 'changes' && !versionSchema ? <div className="muted">버전을 불러오는 중…</div> : <MigrationPreview diff={diff} dialect={dialect} selected={selected} onSelectedChange={setSelected} fileName={fileName} />}
         </>

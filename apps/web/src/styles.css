@@ -345,6 +345,15 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
   overflow: auto; max-height: 52vh; min-height: 300px; font-size: 12px; line-height: 1.55; white-space: pre;
 }
 
+/* 버전: 지금 ERD(작업 중)를 맨 위에 따로 보여 주고, 버전마다 종류 표시 */
+.version-current { display: flex; align-items: flex-start; gap: 10px; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); border-radius: 8px; padding: 10px 12px; margin: 10px 0 12px; }
+.version-current__dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; margin-top: 6px; flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent); }
+.version-list__head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.version-kind { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 999px; line-height: 18px; margin-left: 4px; vertical-align: 1px; background: var(--border); color: var(--muted); }
+.version-kind--current { background: color-mix(in srgb, #22c55e 15%, transparent); color: #15803d; }
+.version-kind--manual { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.version-kind--db { background: color-mix(in srgb, #8b5cf6 15%, transparent); color: #7c3aed; }
+.version-kind--same { background: color-mix(in srgb, #22c55e 15%, transparent); color: #15803d; }
 .version-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .version-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 
