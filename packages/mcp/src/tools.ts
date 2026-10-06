@@ -295,6 +295,33 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
   );
 
   server.registerTool(
+    'create_connection',
+    {
+      title: 'DB 연결 만들기',
+      description: [
+        'DB 연결 정보를 저장한다. 저장하기 전에 실제로 접속해 확인한다 (실패하면 저장하지 않는다).',
+        '비밀번호는 서버에 암호화해 저장하고 결과에는 나오지 않는다.',
+        '로컬·자체 설치 서버에서 쓴다. 웹 서비스(배포 서버)는 사용자 PC·사내망 DB에 접속할 수 없어 설치형 앱에서 연결해야 한다.',
+      ].join(' '),
+      inputSchema: {
+        name: z.string().describe('연결 이름 (예: 로컬 MySQL)'),
+        dialect: dialectArg,
+        host: z.string(),
+        port: z.number().int(),
+        database: z.string().describe('데이터베이스 이름 (Oracle은 서비스 이름, 예: FREEPDB1)'),
+        user: z.string(),
+        password: z.string().optional(),
+        schema: z.string().optional().describe('PostgreSQL·SQL Server 스키마 (기본 public·dbo)'),
+      },
+    },
+    safe(async (input: { name: string; dialect: string; host: string; port: number; database: string; user: string; password?: string; schema?: string }) => {
+      const tested = await api.request<{ serverVersion: string }>('POST', '/api/connections/test', input);
+      const saved = await api.request<{ id: string; name: string }>('POST', '/api/connections', input);
+      return text({ ...saved, serverVersion: tested.serverVersion });
+    }),
+  );
+
+  server.registerTool(
     'db_pull',
     {
       title: 'DB에서 ERD 갱신',

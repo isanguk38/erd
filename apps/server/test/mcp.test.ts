@@ -101,6 +101,15 @@ describe('MCP', () => {
     expect((bad as ToolResult).isError).toBe(true);
     expect(textOf(bad)).toContain('있는 테이블: member, orders');
 
+    // DB 연결 만들기: 접속이 안 되면 저장하지 않고 이유를 알려준다
+    const noDb = await client.callTool({
+      name: 'create_connection',
+      arguments: { name: '없는 DB', dialect: 'mysql', host: '127.0.0.1', port: 1, database: 'x', user: 'root', password: 'secret-pass' },
+    });
+    expect((noDb as ToolResult).isError).toBe(true);
+    expect(textOf(noDb)).not.toContain('secret-pass');
+    expect(JSON.parse(textOf(await client.callTool({ name: 'list_connections', arguments: {} })))).toEqual([]);
+
     // AI는 허용 없이는 DB에 실행할 수 없다
     await client.close();
   });
