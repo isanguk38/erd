@@ -50,5 +50,5 @@ export interface Dialect {
   addCheck?(table: Table, check: CheckConstraint): string[];
   dropCheck?(table: Table, check: CheckConstraint): string[];
   /** 계산 컬럼에서 쓸 수 있는 방식: virtual(값을 저장하지 않음)·stored(저장) */
-  generatedSupport?: { virtual?: boolean; stored?: boolean };
+  generatedSupport?: { virtual?: boolean; stored?: boolean; /** false면 계산 컬럼의 타입을 DB가 정한다 (SQL Server) → 타입은 비교하지 않는다 */ typed?: boolean };
 }

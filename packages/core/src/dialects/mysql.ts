@@ -39,7 +39,8 @@ function columnDefinition(column: Column): string {
   const generated = column.generated?.expression.trim();
   if (generated) {
     parts.push(`GENERATED ALWAYS AS (${generated}) ${column.generated!.stored ? 'STORED' : 'VIRTUAL'}`);
-    parts.push(column.nullable && !column.primaryKey ? 'NULL' : 'NOT NULL');
+    // MariaDB는 계산 컬럼 뒤에 NULL을 쓸 수 없다 → NULL 허용은 생략하고 NOT NULL만 쓴다
+    if (!column.nullable || column.primaryKey) parts.push('NOT NULL');
     const comment = sqlComment(column);
     if (comment) parts.push(`COMMENT ${str(comment)}`);
     return parts.join(' ');

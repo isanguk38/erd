@@ -286,7 +286,8 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     }
     const fields: ColumnField[] = [];
     if (old.name !== column.name) fields.push('name');
-    if (dialect.renderType(old) !== dialect.renderType(column)) fields.push('type');
+    const untypedGenerated = dialect.generatedSupport?.typed === false && Boolean(column.generated?.expression.trim() && old.generated?.expression.trim());
+    if (!untypedGenerated && dialect.renderType(old) !== dialect.renderType(column)) fields.push('type');
     if (effectiveNullable(old) !== effectiveNullable(column)) fields.push('nullable');
     if (dialect.normalizeDefault(old.defaultValue) !== dialect.normalizeDefault(column.defaultValue)) fields.push('defaultValue');
     // ON UPDATE CURRENT_TIMESTAMP는 MySQL·MariaDB에만 있다

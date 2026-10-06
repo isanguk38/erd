@@ -37,7 +37,7 @@ const sqlOf = (dialect: DialectId, from: Schema, to: Schema) => {
 describe('CHECK 제약·계산 컬럼', () => {
   it('DB 종류별 CREATE 문법', () => {
     const mysql = sqlOf('mysql', emptySchema(), item()).sql.join('\n');
-    expect(mysql).toContain('`total` DECIMAL(12,2) GENERATED ALWAYS AS (qty * price) VIRTUAL NULL');
+    expect(mysql).toContain('`total` DECIMAL(12,2) GENERATED ALWAYS AS (qty * price) VIRTUAL');
     expect(mysql).toContain('ALTER TABLE `item` ADD CONSTRAINT `ck_item_qty` CHECK (qty >= 0)');
     expect(mysql).toContain('ALTER TABLE `item` ADD CONSTRAINT `ck_item_2` CHECK (price > 0)'); // 이름이 없으면 ck_테이블_번호
     expect(sqlOf('mysql', emptySchema(), item(true)).sql.join('\n')).toContain('GENERATED ALWAYS AS (qty * price) STORED');
@@ -70,7 +70,7 @@ describe('CHECK 제약·계산 컬럼', () => {
     expect(sql).toEqual([
       'ALTER TABLE `item` DROP CHECK `ck_item_qty`',
       'ALTER TABLE `item` DROP COLUMN `total`',
-      'ALTER TABLE `item` ADD COLUMN `total` DECIMAL(12,2) GENERATED ALWAYS AS (qty * price * 2) VIRTUAL NULL AFTER `price`',
+      'ALTER TABLE `item` ADD COLUMN `total` DECIMAL(12,2) GENERATED ALWAYS AS (qty * price * 2) VIRTUAL AFTER `price`',
       'ALTER TABLE `item` ADD CONSTRAINT `ck_item_qty_max` CHECK (qty <= 1000)',
     ]);
     expect(sqlOf('postgresql', before, after).sql[0]).toBe('ALTER TABLE item DROP CONSTRAINT ck_item_qty');
