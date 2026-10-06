@@ -220,6 +220,8 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
   const projectId = useStore((s) => s.projectId)!;
   const meta = useStore((s) => s.meta);
   const role = useStore((s) => s.role);
+  // 서버가 DB에 접속하는 환경(로컬·자체 설치)에서만 AI가 DB에 실행할 수 있다. 웹 서비스는 설치형 앱에서 사람이 실행한다.
+  const serverDb = useStore((s) => s.me?.serverDb !== false);
   const [info, setInfo] = useState<{ authEnabled: boolean; url: string; token: string | null; serverUrl: string; mcpCommand: string[] } | null>(null);
   const [showToken, setShowToken] = useState(false);
   const [copied, setCopied] = useState('');
@@ -272,10 +274,14 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
             </div>
           </label>
         </div>
-        <label className="check" title={role !== 'owner' ? '프로젝트 소유자만 바꿀 수 있습니다' : ''}>
-          <input type="checkbox" disabled={role !== 'owner'} checked={Boolean(meta.aiAllowDbExecute)} onChange={(e) => projectApi.update(projectId, { aiAllowDbExecute: e.target.checked })} />
-          AI가 DB에 SQL을 실행하도록 허용 (기본: 끔 — 꺼져 있으면 AI는 SQL 미리보기까지만 할 수 있습니다. 소유자만 변경)
-        </label>
+        {serverDb ? (
+          <label className="check" title={role !== 'owner' ? '프로젝트 소유자만 바꿀 수 있습니다' : ''}>
+            <input type="checkbox" disabled={role !== 'owner'} checked={Boolean(meta.aiAllowDbExecute)} onChange={(e) => projectApi.update(projectId, { aiAllowDbExecute: e.target.checked })} />
+            AI가 DB에 SQL을 실행하도록 허용 (기본: 끔 — 꺼져 있으면 AI는 SQL 미리보기까지만 할 수 있습니다. 소유자만 변경)
+          </label>
+        ) : (
+          <p className="muted small">AI는 설계와 SQL 만들기까지 합니다. DB에 실행하는 것은 설치형 앱의 "DB로 내보내기"에서 사람이 직접 합니다.</p>
+        )}
         {(meta.pendingProposals ?? 0) > 0 && (
           <button className="btn btn-primary btn-sm" onClick={() => { onClose(); onOpenProposals(); }}>
             대기 중인 제안 {meta.pendingProposals}건 검토
