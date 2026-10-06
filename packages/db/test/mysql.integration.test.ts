@@ -17,6 +17,8 @@ import {
   planPush,
   toLink,
   alignDb,
+  appliedChanges,
+  syncedBaseline,
   type Schema,
 } from '@erd/core';
 import type { ConnectionConfig } from '../src';
@@ -100,6 +102,24 @@ async function remaining(config: ConnectionConfig, schema: Schema) {
 }
 
 describe.skipIf(!url)('MySQL 실제 서버', () => {
+  it('DB가 바꿔 쓴 식은 내보낼 때 짝으로 기억해 다음 비교에서 같다고 본다 (표준화 규칙 없이)', async () => {
+    const config = await freshDatabase();
+    // MySQL은 NOT x = 0을 (`x` <> 0)으로 바꿔 저장한다 (표준화 규칙으로는 같다고 볼 수 없는 모양)
+    const schema = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'pair_t', columns: [{ name: 'id', type: 'INT', primaryKey: true }, { name: 'x', type: 'INT', nullable: false }] },
+      { op: 'addCheck', table: 'pair_t', name: 'ck_pair_x', expression: 'NOT x = 0' },
+    ]).schema;
+    const { plan, statements, result } = await push(config, schema);
+    expect(result.ok).toBe(true);
+    const after = await mysqlConnector.introspect(config);
+    expect(after.schema.tables[0]!.checks![0]!.expression).not.toBe('NOT x = 0');
+    // 짝이 없으면 차이로 나오고, 짝을 기억하면 차이가 없다
+    expect(planPush(schema, after.schema, { dialect }).diff.changes.length).toBeGreaterThan(0);
+    const baseline = syncedBaseline(after.schema, schema, { applied: appliedChanges(plan.diff.changes, statements, result.results) });
+    expect(planPush(schema, after.schema, { dialect, baseline }).diff.changes).toEqual([]);
+    expect(planPull(schema, after.schema, { dialect, baseline }).diff.changes).toEqual([]);
+  });
+
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
     const config = await freshDatabase();
     const mismatches = await typeRuleMismatches('mysql', async (sqls) => (await mysqlConnector.execute(config, sqls)).results.find((r) => !r.ok)?.error ?? null);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { alignDb, applyChanges, getDialect, placeNewTables, planPull, type RenameLink, type Schema } from '@erd/core';
+import { applyChanges, getDialect, placeNewTables, planPull, syncedBaseline, type RenameLink, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type IntrospectResult } from '../lib/api';
 import { useStore } from '../store';
 import { saveVersion } from '../lib/hooks';
@@ -77,7 +77,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
       await saveVersion(`DB 가져오기 · ${label}`, 'db');
       // 지금 DB 상태를 기준 시점으로 저장 (다음 비교에서 누가 바꿨는지 구분)
       const erd = useStore.getState().schema;
-      await projectApi.saveBaseline(projectId, connection.id, alignDb(result.schema, erd, null, links));
+      await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(result.schema, erd, { links, previous: baseline?.schema }));
       onDone();
       onClose();
     } catch (e) {

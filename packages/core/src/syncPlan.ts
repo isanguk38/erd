@@ -12,6 +12,7 @@
 //    사람이 받아들이면 두 요소를 같은 것으로 묶어(link) RENAME으로 처리한다.
 
 import { diffSchemas, type Change, type DiffResult } from './diff';
+import { applyExpressionPairs, rememberExpressions, withExpressionPairs, type BaselineSchema } from './expressionMemory';
 import type { Dialect } from './dialects/types';
 import { cloneSchema, type Column, type Schema, type Table } from './model';
 import { alignToCurrent } from './sync';
@@ -142,7 +143,8 @@ export function alignDb(db: Schema, erd: Schema, baseline?: Schema | null, links
       dbColumn.comment = erdColumn.comment;
     }
   }
-  return aligned;
+  // DB가 바꿔 쓴 식은 내보낼 때 기억한 짝으로 ERD 식과 맞춘다 (expressionMemory.ts)
+  return applyExpressionPairs(aligned, erd, (baseline as BaselineSchema | null | undefined)?.expressionPairs);
 }
 
 function sameShape(dialect: Dialect, a: Column, b: Column): boolean {
@@ -243,7 +245,8 @@ function classify(diff: DiffResult, erd: Schema, dbAligned: Schema, baseline: Sc
     return origins;
   }
   // 기준 시점 스키마도 이름으로 ERD id에 맞춘다 (id가 어긋나 있어도 비교가 깨지지 않게)
-  const base = alignToCurrent(baseline, erd);
+  // 기준 시점의 식도 짝으로 ERD 식에 맞춘다 (그래야 DB가 바꿔 쓴 식을 "ERD에서 바뀜"으로 오해하지 않는다)
+  const base = applyExpressionPairs(alignToCurrent(baseline, erd), erd, (baseline as BaselineSchema).expressionPairs);
   const byErd = changedKeys(base, erd, dialect);
   const byDb = changedKeys(base, dbAligned, dialect);
   for (const c of diff.changes) {
@@ -310,4 +313,18 @@ export const ORIGIN_LABEL: Record<ChangeOrigin, string> = {
 export function summarizePlan(plan: SyncPlan) {
   const count = (o: ChangeOrigin) => plan.diff.changes.filter((c) => plan.origins[c.id] === o).length;
   return { total: plan.diff.changes.length, db: count('db'), erd: count('erd'), conflict: count('conflict'), unknown: count('unknown'), renames: plan.renames.length };
+}
+
+/**
+ * DB와 맞춘 뒤 저장할 기준 시점: 지금 DB 구조(ERD id로 맞춤) + 식 짝.
+ * applied: 이번에 DB에 실행해 성공한 변경 (내보내기). previous: 이전 기준 시점 (이어받을 짝).
+ */
+export function syncedBaseline(
+  db: Schema,
+  erd: Schema,
+  options: { links?: RenameLink[]; applied?: Change[]; previous?: Schema | null } = {},
+): BaselineSchema {
+  const aligned = alignDb(db, erd, null, options.links ?? []);
+  const previous = (options.previous as BaselineSchema | null | undefined)?.expressionPairs;
+  return withExpressionPairs(aligned, rememberExpressions(aligned, erd, { applied: options.applied, previous }));
 }

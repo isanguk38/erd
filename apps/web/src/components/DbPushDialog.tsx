@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { alignDb, generateStatements, getDialect, planPush, type RenameLink, type Schema } from '@erd/core';
+import { appliedChanges, generateStatements, getDialect, planPush, syncedBaseline, type RenameLink, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
@@ -75,7 +75,9 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       // 일부만 성공해도 DB는 바뀌었으므로 지금 DB를 다시 읽어 기준 시점으로 저장한다
       if (r.appliedCount > 0) {
         const after = await api.introspect(connection.id);
-        await projectApi.saveBaseline(projectId, connection.id, alignDb(after.schema, useStore.getState().schema, null, links));
+        // 성공한 문장이 만든 식은 DB가 돌려준 모양과 짝으로 기억한다 (다음 비교에서 DB가 바꿔 쓴 식을 같은 것으로 봄)
+        const applied = diff ? appliedChanges(diff.changes, statements, r.results) : [];
+        await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, useStore.getState().schema, { links, applied, previous: baseline?.schema }));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
