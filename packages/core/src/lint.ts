@@ -12,6 +12,7 @@ export type LintRule =
   | 'missing-logical-name'
   | 'duplicate-index'
   | 'varchar-no-length'
+  | 'duplicate-relation'
   | 'type-error'
   | 'type-warning'
   | 'type-ignored';
@@ -29,7 +30,7 @@ export interface LintIssue {
   columnName?: string;
   message: string;
   /** 바로 고칠 수 있으면 방법 */
-  fix?: { kind: 'addIndex'; tableId: string; columnIds: string[] } | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> };
+  fix?: { kind: 'addIndex'; tableId: string; columnIds: string[] } | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> } | { kind: 'removeRelation'; relationId: string };
 }
 
 export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverity; description: string }> = {
@@ -40,6 +41,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'missing-logical-name': { label: '논리명 없음', severity: 'info', description: '논리명(한글 이름)이나 설명이 없으면 정의서·다른 사람이 보기 어렵습니다.' },
   'duplicate-index': { label: '중복 인덱스', severity: 'warning', description: '같은 컬럼 조합의 인덱스가 두 개 이상이면 저장 공간과 쓰기 속도만 낭비됩니다.' },
   'varchar-no-length': { label: '문자 길이 없음', severity: 'warning', description: 'VARCHAR/CHAR에 길이가 없으면 DB에 따라 오류가 나거나 의도와 다른 길이가 됩니다.' },
+  'duplicate-relation': { label: '중복 관계', severity: 'error', description: '같은 FK 컬럼으로 같은 테이블을 가리키는 관계가 두 번 있습니다. DB로 내보내면 같은 외래키를 두 번 만들다 실패합니다.' },
   'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
@@ -151,6 +153,30 @@ export function lintSchema(schema: Schema, dialect: DialectId | string): LintIss
         add('varchar-no-length', t, `${t.name}.${c.name}: ${c.type}에 길이가 없습니다`, { columnId: c.id, columnName: c.name });
       }
     }
+  }
+
+  // 중복 관계 (같은 FK 컬럼 → 같은 기본키)
+  const seenRelations = new Map<string, string>();
+  for (const r of schema.relations) {
+    const key = `${r.fromTableId}:${r.fromColumnIds.join(',')}>${r.toTableId}:${r.toColumnIds.join(',')}`;
+    const child = schema.tables.find((t) => t.id === r.fromTableId);
+    const parent = schema.tables.find((t) => t.id === r.toTableId);
+    if (!child || !parent) continue;
+    const first = seenRelations.get(key);
+    if (!first) {
+      seenRelations.set(key, r.id);
+      continue;
+    }
+    const names = r.fromColumnIds.map((id) => child.columns.find((c) => c.id === id)?.name ?? '?').join(', ');
+    issues.push({
+      id: `duplicate-relation:${r.id}`,
+      rule: 'duplicate-relation',
+      severity: LINT_RULES['duplicate-relation'].severity,
+      tableId: child.id,
+      tableName: child.name,
+      message: `${child.name}(${names}) → ${parent.name}: 같은 관계가 두 번 있습니다`,
+      fix: { kind: 'removeRelation', relationId: r.id },
+    });
   }
 
   // 타입 검사 (DB별 규칙은 typeRules.ts)

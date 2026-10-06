@@ -8,6 +8,7 @@ import {
   createTable,
   findTable,
   primaryKeyColumns,
+  relationName,
   type Cardinality,
   type Column,
   type Index,
@@ -175,14 +176,40 @@ function fkColumnName(parent: Table, child: Table, parentColumn: Column): string
 }
 
 /**
+ * 같은 연결을 다시 하면 만들어질 관계와 똑같은 관계(같은 FK 컬럼 → 같은 기본키)가 이미 있으면 그 관계.
+ * FK 컬럼을 새로 만들게 되는 연결(예: 두 번째 회원 FK)은 다른 관계라서 없다고 본다.
+ */
+export function findSameRelation(schema: Schema, parentTableId: string, childTableId: string): Relation | undefined {
+  const parent = schema.tables.find((t) => t.id === parentTableId);
+  const child = schema.tables.find((t) => t.id === childTableId);
+  if (!parent || !child || parent.id === child.id) return undefined;
+  const pk = primaryKeyColumns(parent);
+  if (!pk.length) return undefined;
+  const fromColumnIds: string[] = [];
+  for (const parentColumn of pk) {
+    const existing = child.columns.find((c) => c.name === fkColumnName(parent, child, parentColumn) && c.id !== parentColumn.id);
+    if (!existing) return undefined;
+    fromColumnIds.push(existing.id);
+  }
+  const toColumnIds = pk.map((c) => c.id);
+  return schema.relations.find(
+    (r) => r.fromTableId === child.id && r.toTableId === parent.id && sameList(r.fromColumnIds, fromColumnIds) && sameList(r.toColumnIds, toColumnIds),
+  );
+}
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/**
  * 부모 테이블의 기본키를 참조하는 외래키를 만든다.
  * 자식 테이블에 같은 이름의 컬럼이 있으면 그 컬럼을 쓰고, 없으면 새로 만든다.
+ * 같은 FK 컬럼으로 된 관계가 이미 있으면 만들지 않는다 (DB에 같은 FK를 두 번 만들게 된다).
  */
 export function connectTables(schema: Schema, options: ConnectOptions): Relation {
   const parent = requireTable(schema, options.parentTableId);
   const child = requireTable(schema, options.childTableId);
   const pk = primaryKeyColumns(parent);
   if (pk.length === 0) throw new Error(`${parent.name} 테이블에 기본키가 없어 관계를 만들 수 없습니다`);
+  const same = findSameRelation(schema, parent.id, child.id);
+  if (same) throw new Error(`${child.name} → ${parent.name} 관계가 이미 있습니다 (${relationName(schema, same)})`);
 
   const fromColumnIds: string[] = [];
   for (const parentColumn of pk) {

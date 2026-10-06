@@ -11,7 +11,7 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { connectManyToMany, connectTables, removeRelation, removeTable } from '@erd/core';
+import { connectManyToMany, connectTables, findSameRelation, removeRelation, removeTable } from '@erd/core';
 import { useStore } from '../store';
 import { TableNode } from './TableNode';
 import { RelationEdge } from './RelationEdge';
@@ -152,6 +152,13 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const onConnect = useCallback(
     ({ source, target }: Connection) => {
       const tool = useStore.getState().relationTool;
+      // 이미 같은 관계(같은 FK 컬럼)가 있으면 또 만들지 않고 그 관계를 보여 준다
+      const same = tool === 'N:M' ? undefined : findSameRelation(useStore.getState().schema, source, target);
+      if (same) {
+        select({ type: 'relation', id: same.id }, true);
+        useStore.getState().showNotice({ text: '이미 같은 관계가 있습니다. 오른쪽에서 그 관계를 편집하세요.' });
+        return;
+      }
       edit((draft) => {
         if (tool === 'N:M') {
           const { table } = connectManyToMany(draft, source, target);

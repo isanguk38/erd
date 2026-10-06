@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, autoFixColumnPatch, canAutoIncrement, columnTypeIssues, createColumn, diffSchemas, emptySchema, generateStatements, getDialect, lintSchema, tableTypeIssues, type Column, type DialectId } from '../src';
+import { applyCommands, autoFixColumnPatch, canAutoIncrement, columnTypeIssues, connectTables, createColumn, findSameRelation, diffSchemas, emptySchema, generateStatements, getDialect, lintSchema, tableTypeIssues, type Column, type DialectId } from '../src';
 
 const col = (patch: Partial<Column>): Column => ({ ...createColumn({ name: 'c' }), type: 'INT', length: '', ...patch });
 const codes = (dialect: DialectId, patch: Partial<Column>) => columnTypeIssues(dialect, col(patch)).map((i) => `${i.severity}:${i.code}`);
@@ -152,6 +152,24 @@ describe('편집할 때 자동 보정', () => {
   it('canAutoIncrement', () => {
     expect(canAutoIncrement('mysql', col({ type: 'VARCHAR' }))).toBe(false);
     expect(canAutoIncrement('oracle', col({ type: 'BIGINT' }))).toBe(true);
+  });
+});
+
+describe('같은 관계를 다시 연결', () => {
+  it('같은 FK 컬럼이면 만들지 않고, 이미 있는 중복은 설계 검사에서 알린다', () => {
+    const { schema } = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'category', columns: [{ name: 'category_id', type: 'INT', primaryKey: true }] },
+      { op: 'createTable', name: 'product', columns: [{ name: 'product_id', type: 'BIGINT', primaryKey: true }] },
+      { op: 'addRelation', parent: 'category', child: 'product' },
+    ]);
+    const [category, product] = schema.tables;
+    expect(findSameRelation(schema, category!.id, product!.id)).toBe(schema.relations[0]);
+    expect(() => connectTables(schema, { parentTableId: category!.id, childTableId: product!.id })).toThrow('이미 있습니다');
+    expect(schema.relations).toHaveLength(1);
+    // 예전에 생긴 중복
+    schema.relations.push({ ...schema.relations[0]!, id: 'dup' });
+    const issue = lintSchema(schema, 'mysql').find((i) => i.rule === 'duplicate-relation');
+    expect(issue?.fix).toEqual({ kind: 'removeRelation', relationId: 'dup' });
   });
 });
 

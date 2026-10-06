@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, updateColumn, type LintIssue, type LintRule } from '@erd/core';
+import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, removeRelation, updateColumn, type LintIssue, type LintRule } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Icon } from './ui';
@@ -130,6 +130,18 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                         {issue.fix?.kind === 'patchColumn' && !readOnly && (
                           <button className="btn btn-ghost small" title="이 컬럼을 고칩니다 (Ctrl+Z로 되돌리기)" onClick={() => applyColumnFix(issue)}>
                             {issue.fix.label}
+                          </button>
+                        )}
+                        {issue.fix?.kind === 'removeRelation' && !readOnly && (
+                          <button
+                            className="btn btn-ghost small"
+                            title="중복된 관계 하나를 지웁니다. FK 컬럼은 남은 관계가 쓰므로 그대로 둡니다 (Ctrl+Z로 되돌리기)"
+                            onClick={() => {
+                              const { relationId } = issue.fix as Extract<LintIssue['fix'], { kind: 'removeRelation' }>;
+                              useStore.getState().edit((d) => void removeRelation(d, relationId));
+                            }}
+                          >
+                            중복 관계 지우기
                           </button>
                         )}
                       </li>

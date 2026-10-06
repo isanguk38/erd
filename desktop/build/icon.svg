@@ -1,49 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3b82f6"/>
-      <stop offset="1" stop-color="#1d4ed8"/>
-    </linearGradient>
-  </defs>
-  <!-- 바탕 -->
-  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
-
-  <!-- 관계선 (부모 → 자식) -->
-  <g fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.95">
-    <path d="M214 150 H262 V238 H300"/>
-    <path d="M214 150 H262 V346 H300"/>
+  <!-- 바탕 (단색) -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#0D9488"/>
+  <!-- 관계선: 반투명하게 두어 점(테이블)이 앞에 보이게 -->
+  <g stroke="#ffffff" stroke-width="24" stroke-linecap="round" opacity="0.55">
+    <path d="M176 180 L352 214"/>
+    <path d="M176 180 L232 348"/>
+    <path d="M352 214 L232 348"/>
   </g>
-  <!-- 까마귀발 (N쪽) -->
-  <g fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round" opacity="0.95">
-    <path d="M300 238 L278 222 M300 238 L278 254"/>
-    <path d="M300 346 L278 330 M300 346 L278 362"/>
-  </g>
-
-  <!-- 부모 테이블 -->
-  <g>
-    <rect x="76" y="92" width="138" height="140" rx="20" fill="#ffffff"/>
-    <rect x="76" y="92" width="138" height="42" rx="20" fill="#bfdbfe"/>
-    <rect x="76" y="114" width="138" height="20" fill="#bfdbfe"/>
-    <rect x="96" y="152" width="70" height="14" rx="7" fill="#1d4ed8"/>
-    <rect x="96" y="184" width="96" height="14" rx="7" fill="#93c5fd"/>
-  </g>
-
-  <!-- 자식 테이블 1 -->
-  <g>
-    <rect x="300" y="186" width="138" height="104" rx="20" fill="#ffffff"/>
-    <rect x="300" y="186" width="138" height="38" rx="20" fill="#bfdbfe"/>
-    <rect x="300" y="206" width="138" height="18" fill="#bfdbfe"/>
-    <rect x="320" y="244" width="84" height="14" rx="7" fill="#93c5fd"/>
-  </g>
-
-  <!-- 자식 테이블 2 -->
-  <g>
-    <rect x="300" y="300" width="138" height="104" rx="20" fill="#ffffff"/>
-    <rect x="300" y="300" width="138" height="38" rx="20" fill="#bfdbfe"/>
-    <rect x="300" y="320" width="138" height="18" fill="#bfdbfe"/>
-    <rect x="320" y="358" width="84" height="14" rx="7" fill="#93c5fd"/>
-  </g>
-
-  <!-- ERD 글자 -->
-  <text x="145" y="388" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="92" font-weight="800" fill="#ffffff" letter-spacing="2">ERD</text>
+  <!-- 테이블(노드) 3개: 크기를 달리해 리듬감 -->
+  <circle cx="176" cy="180" r="62" fill="#ffffff"/>
+  <circle cx="352" cy="214" r="48" fill="#ffffff"/>
+  <circle cx="232" cy="348" r="40" fill="#ffffff"/>
 </svg>
