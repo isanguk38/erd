@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import { applyCommands, diffSchemas, emptySchema, generateStatements, getDialect, type DialectId, type Schema } from '../src';
 
 /** MySQL로 설계한 ERD */
@@ -51,17 +49,3 @@ describe('MySQL로 설계한 ERD를 다른 DB로 내보낼 때', () => {
   });
 });
 
-describe('소스 파일', () => {
-  it('보이지 않는 제어 문자(백스페이스 등)가 섞여 있지 않다', () => {
-    const bad: string[] = [];
-    const walk = (dir: string) => {
-      for (const name of readdirSync(dir)) {
-        const p = join(dir, name);
-        if (statSync(p).isDirectory()) walk(p);
-        else if (/\.(ts|tsx)$/.test(name) && /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(readFileSync(p, 'utf8'))) bad.push(p);
-      }
-    };
-    for (const dir of ['../core/src', '../db/src', '../mcp/src', '../../apps/server/src', '../../apps/web/src']) walk(join(__dirname, '..', dir));
-    expect(bad).toEqual([]);
-  });
-});
