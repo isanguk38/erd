@@ -29,7 +29,7 @@ jobs:
         run: npm run build
 
   databases:
-    name: 실제 DB 왕복 테스트 (MySQL · MariaDB · Oracle · SQL Server)
+    name: 실제 DB 왕복 테스트 (MySQL · MariaDB · PostgreSQL · Oracle · SQL Server)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -48,6 +48,14 @@ jobs:
         ports: ['3308:3306']
         options: >-
           --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: erdtest
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 30
       oracle:
         image: gvenzl/oracle-free:23-slim-faststart
@@ -78,6 +86,7 @@ jobs:
         env:
           ERD_TEST_MYSQL: mysql://root@127.0.0.1:3407
           ERD_TEST_MARIADB: mysql://root:erdtest@127.0.0.1:3308
+          ERD_TEST_POSTGRES: postgres://postgres:erdtest@127.0.0.1:5433
           ERD_TEST_ORACLE: oracle://system:ErdTest_123@127.0.0.1:1521/FREEPDB1
           ERD_TEST_MSSQL: mssql://sa:ErdTest_123%21@127.0.0.1:1433
-        run: npx vitest run test/mysql.integration.test.ts test/others.integration.test.ts
+        run: npx vitest run test/mysql.integration.test.ts test/postgresql.integration.test.ts test/others.integration.test.ts
