@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   addColumn,
   addIndex,
@@ -39,7 +39,7 @@ export function Inspector() {
   const selection = useStore((s) => s.selection);
   const schema = useStore((s) => s.schema);
   const readOnly = useStore((s) => s.role === 'viewer');
-  let content = <EmptyInspector />;
+  let content: ReactNode = null;
   if (selection?.type === 'table') {
     const table = findTable(schema, selection.id);
     if (table) content = <TableEditor table={table} />;
@@ -47,23 +47,9 @@ export function Inspector() {
     const relation = schema.relations.find((r) => r.id === selection.id);
     if (relation) content = <RelationEditor relation={relation} />;
   }
+  if (!content) return null;
   // 보기 권한이면 모든 입력을 잠근다
   return readOnly ? <fieldset className="readonly-fieldset" disabled>{content}</fieldset> : content;
-}
-
-function EmptyInspector() {
-  return (
-    <aside className="inspector inspector--empty">
-      <h3>사용 방법</h3>
-      <ul>
-        <li>빈 곳을 <b>더블클릭</b>하면 테이블이 생깁니다.</li>
-        <li>테이블을 <b>더블클릭</b>하면 여기서 컬럼과 인덱스를 편집합니다. 클릭·끌기는 고르기·옮기기만 합니다.</li>
-        <li>테이블 오른쪽 점을 끌어 다른 테이블에 놓으면 <b>관계(FK)</b>가 생깁니다. 끌기 시작한 쪽이 부모입니다.</li>
-        <li>관계 종류는 상단의 관계 메뉴에서 고릅니다.</li>
-        <li><kbd>Delete</kbd> 선택 삭제, <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기</li>
-      </ul>
-    </aside>
-  );
 }
 
 /** 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해). */
@@ -434,7 +420,7 @@ function RelationEditor({ relation }: { relation: Relation }) {
   const { edit, select } = useStore.getState();
   const child = findTable(schema, relation.fromTableId);
   const parent = findTable(schema, relation.toTableId);
-  if (!child || !parent) return <EmptyInspector />;
+  if (!child || !parent) return null;
   const set = (patch: Partial<Relation>) => edit((d) => updateRelation(d, relation.id, patch));
   const pairs = relation.fromColumnIds.map((id, i) => [child.columns.find((c) => c.id === id)?.name, parent.columns.find((c) => c.id === relation.toColumnIds[i])?.name]);
 
