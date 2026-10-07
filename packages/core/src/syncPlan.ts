@@ -111,11 +111,36 @@ function relink(schema: Schema, link: RenameLink): void {
   }
 }
 
+/** 기준 시점에 없던 요소(그 뒤 DB에 생긴 것)는 DB에 코멘트가 없으면 지금 ERD의 논리명·설명을 이어받는다 */
+function inheritNamesOutside(db: Schema, erd: Schema, base: Schema): void {
+  const blank = (x: { logicalName: string; comment: string }) => !x.logicalName && !x.comment;
+  const copy = (to: { logicalName: string; comment: string }, from: { logicalName: string; comment: string }) => {
+    to.logicalName = from.logicalName;
+    to.comment = from.comment;
+  };
+  for (const table of db.tables) {
+    const erdTable = erd.tables.find((t) => t.id === table.id);
+    if (!erdTable) continue;
+    const baseTable = base.tables.find((t) => t.id === table.id);
+    if (!baseTable && blank(table)) copy(table, erdTable);
+    for (const column of table.columns) {
+      const erdColumn = erdTable.columns.find((c) => c.id === column.id);
+      if (erdColumn && !baseTable?.columns.some((c) => c.id === column.id) && blank(column)) copy(column, erdColumn);
+    }
+  }
+}
+
 /** DB 스키마를 ERD id로 맞춘다 (이름 기준 + 기준 시점 + 확정한 이름 변경) */
 export function alignDb(db: Schema, erd: Schema, baseline?: Schema | null, links: RenameLink[] = []): Schema {
-  let aligned = alignToCurrent(db, erd);
+  // DB에 코멘트가 없는 요소의 논리명·설명: 기준 시점이 있으면 기준 시점(마지막으로 맞춘 때) 값을 이어받는다.
+  // 지금 ERD에서 이어받으면 맞춘 뒤 ERD에서 단 논리명이 DB 쪽에도 생겨 차이(내보낼 COMMENT)가 사라진다.
+  let aligned = alignToCurrent(db, erd, { names: !baseline });
   // 지금 ERD에서 이름을 바꾼 요소는 기준 시점 이름으로 찾는다 (기준 시점도 ERD id로 맞춘 뒤)
-  if (baseline) aligned = alignToCurrent(aligned, alignToCurrent(baseline, erd));
+  if (baseline) {
+    const base = alignToCurrent(baseline, erd, { names: false });
+    aligned = alignToCurrent(aligned, base);
+    inheritNamesOutside(aligned, erd, base);
+  }
   aligned = cloneSchema(aligned);
 
   // 테이블 묶음: DB 테이블을 잠시 ERD 이름으로 바꿔 이름 맞추기를 다시 하면 그 안의 컬럼·인덱스까지 맞는다
@@ -246,7 +271,8 @@ function classify(diff: DiffResult, erd: Schema, dbAligned: Schema, baseline: Sc
   }
   // 기준 시점 스키마도 이름으로 ERD id에 맞춘다 (id가 어긋나 있어도 비교가 깨지지 않게)
   // 기준 시점의 식도 짝으로 ERD 식에 맞춘다 (그래야 DB가 바꿔 쓴 식을 "ERD에서 바뀜"으로 오해하지 않는다)
-  const base = applyExpressionPairs(alignToCurrent(baseline, erd), erd, (baseline as BaselineSchema).expressionPairs);
+  // 논리명은 기준 시점에 기록된 그대로 (지금 ERD에서 이어받으면 맞춘 뒤 단 논리명이 "바뀜 없음"이 된다)
+  const base = applyExpressionPairs(alignToCurrent(baseline, erd, { names: false }), erd, (baseline as BaselineSchema).expressionPairs);
   const byErd = changedKeys(base, erd, dialect);
   const byDb = changedKeys(base, dbAligned, dialect);
   for (const c of diff.changes) {

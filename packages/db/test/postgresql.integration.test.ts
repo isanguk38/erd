@@ -8,6 +8,7 @@ import { appliedChanges, applyChanges, applyCommands, emptySchema, generateState
 import type { ConnectionConfig } from '../src';
 import { postgresConnector } from '../src/postgresql';
 import { typeRuleMismatches } from './typeCases';
+import { logicalNameRoundTrip } from './logicalNameCase';
 
 const url = process.env.ERD_TEST_POSTGRES;
 const dialect = getDialect('postgresql');
@@ -126,6 +127,10 @@ describe.skipIf(!url)('PostgreSQL 실제 서버', () => {
     expect(planPush(pulled, db.schema, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
     expect(planPull(pulled, db.schema, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
   }, 120000);
+
+  it('맞춘 뒤 ERD에서 단 논리명은 "ERD에서 바뀜"으로 내보내고, 실행 후 다시 비교하면 0건', async () => {
+    await logicalNameRoundTrip(await freshDatabase(), dialect, postgresConnector);
+  }, 60000);
 
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
     const config = await freshDatabase();

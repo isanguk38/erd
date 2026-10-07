@@ -24,6 +24,7 @@ import {
 import type { ConnectionConfig } from '../src';
 import { mysqlConnector } from '../src/mysql';
 import { typeRuleMismatches } from './typeCases';
+import { logicalNameRoundTrip } from './logicalNameCase';
 
 const url = process.env.ERD_TEST_MYSQL;
 const dialect = getDialect('mysql');
@@ -119,6 +120,10 @@ describe.skipIf(!url)('MySQL 실제 서버', () => {
     expect(planPush(schema, after.schema, { dialect, baseline }).diff.changes).toEqual([]);
     expect(planPull(schema, after.schema, { dialect, baseline }).diff.changes).toEqual([]);
   });
+
+  it('맞춘 뒤 ERD에서 단 논리명은 "ERD에서 바뀜"으로 내보내고, 실행 후 다시 비교하면 0건', async () => {
+    await logicalNameRoundTrip(await freshDatabase(), dialect, mysqlConnector);
+  }, 60000);
 
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
     const config = await freshDatabase();

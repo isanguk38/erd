@@ -17,8 +17,10 @@ const key = (name: string) => name.toLowerCase();
  * - 인덱스: 이름이 같거나, 컬럼 구성과 UNIQUE 여부가 같으면 같은 것으로 본다.
  * - 관계: 자식/부모 테이블과 컬럼이 같으면 같은 것으로 본다.
  * ERD에만 있는 정보(위치, 색상, 관계 1:1/1:N, 들어온 쪽에 없는 논리명)도 가져온다.
+ * names: false면 논리명·설명은 이어받지 않는다 (기준 시점과 비교할 때 — 기준 시점 이후 ERD에서 단 논리명이 숨지 않게).
  */
-export function alignToCurrent(incomingInput: Schema, currentInput: Schema): Schema {
+export function alignToCurrent(incomingInput: Schema, currentInput: Schema, options: { names?: boolean } = {}): Schema {
+  const inheritNames = options.names !== false;
   const incoming = cloneSchema(incomingInput);
   const current = normalizeSchema(currentInput);
   const currentTables = new Map(current.tables.map((t) => [key(t.name), t]));
@@ -32,8 +34,8 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema): Sch
     table.id = match.id;
     table.position = { ...match.position };
     table.color = match.color;
-    if (!table.logicalName) table.logicalName = match.logicalName;
-    if (!table.comment && !table.logicalName) table.comment = match.comment;
+    if (inheritNames && !table.logicalName) table.logicalName = match.logicalName;
+    if (inheritNames && !table.comment && !table.logicalName) table.comment = match.comment;
 
     const currentColumns = new Map(match.columns.map((c) => [key(c.name), c]));
     for (const column of table.columns) {
@@ -41,7 +43,7 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema): Sch
       if (!m) continue;
       columnIdMap.set(column.id, m.id);
       column.id = m.id;
-      if (!column.logicalName && !column.comment) {
+      if (inheritNames && !column.logicalName && !column.comment) {
         column.logicalName = m.logicalName;
         column.comment = m.comment;
       }

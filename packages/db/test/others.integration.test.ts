@@ -12,6 +12,7 @@ import sql from 'mssql';
 import { addColumn, addIndex, applyCommands, cloneSchema, emptySchema, generateStatements, getDialect, planPush, toLink, type DialectId, type Schema } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '../src';
 import { typeRuleMismatches } from './typeCases';
+import { logicalNameRoundTrip } from './logicalNameCase';
 
 interface Target {
   id: DialectId;
@@ -278,6 +279,11 @@ for (const target of [mariadb, oracle, mssql]) {
       const second = await push(config, next);
       expect(second.result.results.filter((r) => !r.ok)).toEqual([]);
       expect(await remaining(config, next)).toEqual([]);
+    }, 120_000);
+
+    it('맞춘 뒤 ERD에서 단 논리명은 "ERD에서 바뀜"으로 내보내고, 실행 후 다시 비교하면 0건', async () => {
+      const config = await target.fresh();
+      await logicalNameRoundTrip(config, dialect, connector);
     }, 120_000);
 
     it('FK 변경(ON DELETE SET NULL)과 UNIQUE 해제, 테이블 추가도 왕복된다', async () => {
