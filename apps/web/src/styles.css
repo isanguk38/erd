@@ -452,6 +452,9 @@ label.btn { display: inline-flex; align-items: center; }
 .projects-page__head p { margin: 0 0 12px; }
 .new-project { display: flex; gap: 8px; }
 .new-project input { flex: 1; }
+.project-search { display: flex; gap: 8px; align-items: center; }
+.project-search input { flex: 1; }
+.project-list mark { background: var(--warning-soft); color: inherit; border-radius: 2px; }
 .project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .project-list li { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px 8px 4px 0; }
 .project-list li:hover { border-color: var(--accent); }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { DialectId } from '@erd/core';
 import { projectApi, type ProjectInfo } from '../lib/api';
 import { clearLegacyProject, legacyProject, useStore } from '../store';
@@ -6,6 +6,34 @@ import { UserMenu } from './Toolbar';
 import { DB_ORDER, dbLabel } from '../lib/dbInfo';
 
 import { DesktopUpdateButton } from './DesktopUpdate';
+
+type SortKey = 'recent' | 'name';
+const SORT_KEY = 'erd.projectSort';
+function readSort(): SortKey {
+  try {
+    return localStorage.getItem(SORT_KEY) === 'name' ? 'name' : 'recent';
+  } catch {
+    return 'recent';
+  }
+}
+
+/** 검색어 비교: 대소문자·띄어쓰기 무시 */
+const norm = (s: string) => s.toLowerCase().replace(/\s+/g, '');
+
+/** 이름에서 검색어와 맞는 부분을 표시 (띄어쓰기를 무시하고 찾은 경우는 표시 없이) */
+function highlight(text: string, query: string): ReactNode {
+  const q = query.trim();
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return text;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark>{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
 export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
   const [error, setError] = useState('');
@@ -13,6 +41,24 @@ export function ProjectsPage() {
   const [dialect, setDialect] = useState<DialectId>('mysql');
   const [legacy, setLegacy] = useState(legacyProject);
   const userName = useStore((s) => s.userName);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortKey>(readSort);
+  const changeSort = (next: SortKey) => {
+    setSort(next);
+    try {
+      localStorage.setItem(SORT_KEY, next);
+    } catch {
+      // 저장이 막혀 있어도 지금 화면에는 적용된다
+    }
+  };
+  // 이름·DB 종류로 거르고 정렬한다
+  const shown = useMemo(() => {
+    const q = norm(query);
+    const list = (projects ?? []).filter((p) => !q || norm(p.name).includes(q) || norm(dbLabel(p.dialect)).includes(q));
+    return sort === 'name'
+      ? [...list].sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+      : [...list].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+  }, [projects, query, sort]);
 
   const load = async () => {
     try {
@@ -73,11 +119,35 @@ export function ProjectsPage() {
 
       {error && <div className="error-box">{error}</div>}
       {projects && projects.length === 0 && <div className="empty-state">프로젝트가 없습니다. 새로 만들거나, 만든 뒤 "DB에서 가져오기"로 기존 DB를 불러오세요.</div>}
+      {projects && projects.length > 0 && (
+        <div className="project-search">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // 결과가 하나면 Enter로 바로 연다
+              if (e.key === 'Enter' && shown.length === 1) location.hash = `#/p/${shown[0].id}`;
+              if (e.key === 'Escape') setQuery('');
+            }}
+            placeholder={`프로젝트 검색 (이름·DB 종류) · ${projects.length}개`}
+            aria-label="프로젝트 검색"
+          />
+          <select value={sort} onChange={(e) => changeSort(e.target.value as SortKey)} aria-label="정렬">
+            <option value="recent">최근 수정순</option>
+            <option value="name">이름순</option>
+          </select>
+          {query.trim() && <span className="muted small">{shown.length}개</span>}
+        </div>
+      )}
+      {projects && projects.length > 0 && query.trim() && shown.length === 0 && (
+        <div className="empty-state">"{query.trim()}"에 맞는 프로젝트가 없습니다.</div>
+      )}
       <ul className="project-list">
-        {projects?.map((p) => (
+        {shown.map((p) => (
           <li key={p.id}>
             <a href={`#/p/${p.id}`}>
-              <b>{p.name}</b>
+              <b>{highlight(p.name, query)}</b>
               <span className="muted small">
                 {dbLabel(p.dialect)} · 테이블 {p.tableCount ?? 0}개 · {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ''}
                 {p.role && p.role !== 'owner' && ` · ${p.role === 'editor' ? '편집' : '보기'} 권한으로 참여`}
