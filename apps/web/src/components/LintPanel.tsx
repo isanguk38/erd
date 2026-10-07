@@ -4,6 +4,7 @@ import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, remove
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
+import { ReviewDetail } from './ReviewDetail';
 
 /** AI 검토 항목 중 지금 보여 줄 것 (열림·다시 확인 필요, 대상 테이블이 지워진 것은 뺀다) */
 function openReviewItems(items: AiReviewItem[] | undefined, schema: Schema): (AiReviewItem & { state: AiReviewState })[] {
@@ -75,6 +76,19 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const reviewResolved = useMemo(() => (review?.items ?? []).filter((i) => i.status === 'resolved'), [review]);
   const [showResolved, setShowResolved] = useState(false);
   const [aiOpen, setAiOpen] = useState(true);
+  // 펼쳐 본 AI 검토 항목 (상세 설명)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleDetail = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const askAbout = (item: AiReviewItem) =>
+    copyForAi(
+      `ERD 프로젝트 "${projectName}"의 AI 검토 항목에 대해 더 자세히 설명해줘 (아직 고치지는 마). 항목 id ${item.id} · ${SEV_LABEL[item.severity]} · ${item.table ? `${item.table}${item.column ? `.${item.column}` : ''}: ` : ''}${item.message}. erd MCP의 get_schema로 관련 테이블을 확인하고, 우리 서비스에서 실제로 문제가 되는 경우와 앱에서 처리해도 되는지 알려줘.`,
+    );
   // 마지막 AI 검토 뒤 새로 생기거나 바뀐 테이블 (검토가 밀린 것). 검토를 한 번도 안 했으면 null
   const pending = useMemo(() => (schema.tables.length ? unreviewedTables(schema, review) : []), [schema, review]);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -179,7 +193,7 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                   {review?.summary && <p className="lint-group__desc">{review.summary}</p>}
                   <ul>
                     {reviewItems.map((item) => (
-                      <li key={item.id} className="lint-ai-item">
+                      <li key={item.id} className={`lint-ai-item${expanded.has(item.id) ? ' is-open' : ''}`}>
                         <span className={`sev-dot sev-${item.severity}`} title={SEV_LABEL[item.severity]} />
                         <button className="lint-item" onClick={() => item.table && goTable(item.table, item.column)}>
                           <span className={`lint-sev-text sev-${item.severity}`}>{SEV_LABEL[item.severity]}</span>
@@ -188,11 +202,17 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                           {item.state === 'stale' && <span className="lint-stale" title="AI가 검토한 뒤 이 테이블이 바뀌었습니다. 지금도 문제인지 다시 확인하세요">다시 확인 필요</span>}
                           {item.suggestion && <span className="lint-ai-suggestion">→ {item.suggestion}</span>}
                         </button>
+                        {item.detail && (
+                          <button className="icon-btn lint-ai-expand" onClick={() => toggleDetail(item.id)} title={expanded.has(item.id) ? '접기' : '자세히 보기'} aria-expanded={expanded.has(item.id)}>
+                            {expanded.has(item.id) ? '▾' : '▸'}
+                          </button>
+                        )}
                         {!readOnly && (
                           <button className="btn btn-ghost small lint-ignore" title="동의하지 않는 항목: 목록·배지에서 숨기고, AI도 다음 작업에서 고치지 않습니다" onClick={() => setIgnored(item.id, true)}>
                             무시
                           </button>
                         )}
+                        {item.detail && expanded.has(item.id) && <ReviewDetail detail={item.detail} onAsk={() => askAbout(item)} />}
                       </li>
                     ))}
                   </ul>

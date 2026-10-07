@@ -67,6 +67,23 @@ describe('AI 설계 검토', () => {
     expect(unreviewedTables(s, null)).toBeNull();
   });
 
+  it('상세 설명: 빈 칸은 빼고 저장, 방법은 이름이 있는 것만, 다시 저장해도 같은 id', () => {
+    const s = design();
+    const review = buildReview(s, { items: [{ severity: 'warning', table: 'orders', message: '상태 없음', detail: {
+      situation: ' 주문 상태가 없습니다 ', example: '', impact: undefined,
+      options: [{ name: 'status 추가', pros: '간단' }, { name: ' ' }],
+      appLevel: '앱에서 처리 가능',
+    } }] });
+    const item = review.items[0]!;
+    expect(item.detail).toEqual({ situation: '주문 상태가 없습니다', options: [{ name: 'status 추가', pros: '간단' }], appLevel: '앱에서 처리 가능' });
+    // 상세가 비면 detail 없음
+    const empty = buildReview(s, { items: [{ severity: 'info', message: 'x', detail: { situation: ' ' } }] });
+    expect(empty.items[0]!.detail).toBeUndefined();
+    // 상세만 바꿔 다시 저장해도 id가 같다 (무시 기록 유지)
+    const again = buildReview(s, { items: [{ severity: 'warning', table: 'orders', message: '상태 없음' }] }, review);
+    expect(again.items.filter((i) => i.status === 'open').map((i) => i.id)).toEqual([item.id]);
+  });
+
   it('해결 표시, 다음 검토에서 해결 기록은 남고 다시 나오면 다시 열림', () => {
     const s = design();
     const first = buildReview(s, { items: [{ severity: 'error', table: 'orders', message: 'A' }, { severity: 'warning', table: 'orders', message: 'B' }] });
