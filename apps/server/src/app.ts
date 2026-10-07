@@ -246,19 +246,6 @@ export function buildApp(options: AppOptions): ErdApp {
     };
   });
 
-  /**
-   * 설치형 앱이 이 PC의 Claude Code(claude 명령)로 설계 검토를 바로 실행할 때 쓰는 MCP 주소·토큰.
-   * 화면 로그인(쿠키)으로만 받을 수 있다 — MCP 토큰으로 토큰을 더 만들지 못하게. 토큰은 2시간 뒤 만료.
-   */
-  app.post('/api/ai-run-token', async (req) => {
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 4000;
-    if (!auth.enabled) return { url: `http://127.0.0.1:${port}/mcp`, token: mcpToken, expiresIn: null };
-    if (req.headers.authorization) throw Object.assign(new Error('화면 로그인으로만 받을 수 있습니다'), { statusCode: 403 });
-    const { token, expiresIn } = auth.oauth.issueAppToken(req.user.id, 'ERD 앱 · 이 PC의 AI', 2 * 60 * 60);
-    return { url: `${publicUrl}/mcp`, token, expiresIn };
-  });
-
   // ── 배포: 빌드한 화면을 같은 서버에서 제공 ─────────────────────────────
   if (options.staticDir && existsSync(options.staticDir)) {
     // 시작 뒤에 새로 빌드한 파일도 제공하도록 요청마다 디스크에서 찾는다

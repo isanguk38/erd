@@ -12,7 +12,6 @@ import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync,
 import { basename, join } from 'node:path';
 import { getConnector, type ConnectionConfig } from '@erd/db';
 import { dialects, type DialectId } from '@erd/core';
-import { aiStatus, cancelAi, runAi, type AiRunRequest } from './ai';
 
 // 마지막 안전망: DB 드라이버 등에서 처리되지 않은 예외가 나도 오류 창으로 앱을 멈추지 않고 기록만 한다.
 // (DB 연결이 중간에 끊기는 것은 각 연결에서 처리하지만, 혹시 빠진 곳이 있어도 사용자가 작업을 잃지 않게)
@@ -207,11 +206,6 @@ async function installUpdate(url: string): Promise<{ ok: true }> {
 
 function registerHandlers() {
   handle('erd:update:install', (url: string) => installUpdate(url));
-
-  // 이 PC의 Claude Code로 설계 검토 바로 실행 (ai.ts)
-  handle('erd:ai:status', () => aiStatus());
-  handle('erd:ai:run', (req: AiRunRequest) => runAi(req, serverOrigin(), (e) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('erd:ai:event', e))));
-  handle('erd:ai:cancel', () => cancelAi());
   handle('erd:connections:list', () => readConnections().map(toPublic));
 
   handle('erd:connections:create', (input: ConnectionInput) => {

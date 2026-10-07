@@ -182,8 +182,6 @@ export interface ProjectMeta {
   lintIgnored?: string[];
   /** MCP로 연결한 AI의 설계 검토 결과 (aiReview.ts) */
   aiReview?: AiReview | null;
-  /** 설치형 앱이 이 PC의 AI로 실행 중인 작업 (다른 사람·다른 AI에게 "AI 작업 중"을 알림) */
-  aiRun?: { by: string; mode: 'review' | 'fix'; startedAt: string } | null;
 }
 
 export function readMeta(doc: Y.Doc): ProjectMeta {
@@ -198,7 +196,6 @@ export function readMeta(doc: Y.Doc): ProjectMeta {
     dbConnectionId: (meta.get('dbConnectionId') as string) ?? null,
     lintIgnored: Array.isArray(meta.get('lintIgnored')) ? [...(meta.get('lintIgnored') as string[])] : [],
     aiReview: (meta.get('aiReview') as AiReview | undefined) ?? null,
-    aiRun: (meta.get('aiRun') as ProjectMeta['aiRun'] | undefined) ?? null,
   };
 }
 

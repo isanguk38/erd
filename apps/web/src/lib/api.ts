@@ -38,7 +38,7 @@ export interface ExecuteResult {
   appliedCount: number;
 }
 
-export async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, {

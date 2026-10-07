@@ -187,21 +187,6 @@ export class OAuthStore {
     return { access_token: access, token_type: 'Bearer', expires_in: ACCESS_TTL, refresh_token: refresh, ...(scope ? { scope } : {}) };
   }
 
-  /**
-   * 설치형 앱이 이 PC의 AI(claude 명령)에게 넘겨줄 짧은 액세스 토큰. refresh 토큰은 주지 않는다.
-   * "연결된 앱" 목록에 clientName으로 하나만 보이고, 거기서 끊으면 바로 쓸 수 없다.
-   */
-  issueAppToken(userId: string, clientName: string, ttlSeconds: number): { token: string; expiresIn: number } {
-    let grant = this.listGrants(userId).find((g) => g.clientName === clientName);
-    if (!grant) {
-      grant = { id: randomUUID(), userId, clientId: `app:${clientName}`, clientName, createdAt: new Date().toISOString() };
-      putJson(this.storage, `oauth/grants/${grant.id}.json`, grant);
-    }
-    const token = `erdo_${base64url(randomBytes(32))}`;
-    putJson(this.storage, `oauth/access/${sha256(token)}.json`, { grantId: grant.id, userId, clientId: grant.clientId, expiresAt: Date.now() + ttlSeconds * 1000 } satisfies TokenRecord);
-    return { token, expiresIn: ttlSeconds };
-  }
-
   /** MCP·API 요청의 Bearer 토큰(erdo_...) → 사용자 id */
   userFromAccessToken(token: string): string | null {
     if (!token.startsWith('erdo_')) return null;

@@ -694,12 +694,6 @@ label.btn { display: inline-flex; align-items: center; }
 .lint-ai-bar > svg { color: var(--accent); flex: none; }
 .lint-ai-bar__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lint-ai-bar .dropdown > .btn { height: 26px; padding: 0 8px; font-size: 12px; }
-.lint-ai-run { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
-.lint-ai-run__spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: lint-spin 0.8s linear infinite; flex: none; }
-@keyframes lint-spin { to { transform: rotate(360deg); } }
-.lint-ai-result { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px 8px 12px; font-size: 12px; line-height: 1.55; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--create) 8%, var(--panel)); }
-.lint-ai-result--error { background: var(--danger-soft); }
-.lint-ai-result__text { flex: 1; white-space: pre-wrap; max-height: 160px; overflow: auto; }
 /* AI 검토 항목 */
 .lint-group--ai .lint-group__head { color: var(--accent); }
 .lint-ai-item .lint-item { line-height: 1.5; }
