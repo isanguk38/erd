@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { createColumn, dialectList, getDialect, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
+import { addToArea, areaSchema, createColumn, dialectList, getDialect, setAreaPosition, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
@@ -137,10 +137,21 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     document.title = `${projectName} · ERD`;
   }, [projectName]);
 
+  // 지금 탭의 주제영역 (전체면 null)
+  const currentArea = () => {
+    const { activeArea, schema } = useStore.getState();
+    return activeArea ? schema.areas?.find((a) => a.id === activeArea) ?? null : null;
+  };
   const arrange = async () => {
     const { autoLayout } = await loadModule(() => import('@erd/core/layout'));
-    const positions = await autoLayout(useStore.getState().schema);
+    const area = currentArea();
+    // 영역 탭이면 그 영역 테이블만 정렬하고 영역 위치로 저장한다 (전체 배치는 그대로)
+    const positions = await autoLayout(area ? areaSchema(useStore.getState().schema, area.id).schema : useStore.getState().schema);
     edit((d) => {
+      if (area) {
+        for (const [id, p] of positions) setAreaPosition(d, area.id, id, p);
+        return;
+      }
       for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
     });
     setTimeout(() => fitView({ padding: 0.15, duration: 300, maxZoom: FIT_MAX_ZOOM }), 50);
@@ -156,12 +167,20 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     const height = pane?.height ?? window.innerHeight;
     const c = screenToFlowPosition({ x: left + width / 2, y: top + height / 2 });
     // 테이블 왼쪽 위 기준이라 반 폭·반 높이만큼 당기고, 같은 자리에 이미 테이블이 있으면 비켜 놓는다
-    return freeSpot(useStore.getState().schema, { x: Math.round(c.x - 120), y: Math.round(c.y - 60) });
+    // 영역 탭이면 그 영역에 보이는 위치 기준으로 빈 곳을 찾는다
+    const { schema } = useStore.getState();
+    const area = currentArea();
+    const visible = area ? areaSchema(schema, area.id).schema : schema;
+    return freeSpot(visible, { x: Math.round(c.x - 120), y: Math.round(c.y - 60) });
   };
   // 템플릿을 고르지 않으면 "새 테이블 기본" 템플릿이 들어간다
   const addTableAtCenter = (template?: ColumnTemplate | null) => {
     edit((d) => {
-      const t = addTableWithTemplate(d, { position: viewCenter() }, template);
+      const position = viewCenter();
+      const t = addTableWithTemplate(d, { position }, template);
+      // 영역 탭에서 만들면 그 영역에 넣는다
+      const area = currentArea();
+      if (area) addToArea(d, area.id, [t.id], { [t.id]: position });
       requestFocus(`table:${t.id}`);
       select({ type: 'table', id: t.id }, true);
     });

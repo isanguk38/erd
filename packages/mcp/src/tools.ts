@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { describeSchema, dialects, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { areaSchema, describeSchema, dialects, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -40,7 +40,14 @@ const columnSpec = z.object({
 });
 
 const command = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('createTable'), name: z.string(), logicalName: z.string().optional(), comment: z.string().optional(), columns: z.array(columnSpec).optional() }),
+  z.object({
+    op: z.literal('createTable'),
+    name: z.string(),
+    logicalName: z.string().optional(),
+    comment: z.string().optional(),
+    columns: z.array(columnSpec).optional(),
+    area: z.string().optional().describe('넣을 주제영역 이름 (그 영역 탭에 함께 놓인다)'),
+  }),
   z.object({ op: z.literal('updateTable'), table: z.string(), name: z.string().optional(), logicalName: z.string().optional(), comment: z.string().optional() }),
   z.object({ op: z.literal('dropTable'), table: z.string() }),
   z.object({ op: z.literal('addColumn'), table: z.string(), column: columnSpec, after: z.string().optional().describe('이 컬럼 뒤에 추가') }),
@@ -77,6 +84,18 @@ const command = z.discriminatedUnion('op', [
     onUpdate: referentialAction.optional(),
   }),
   z.object({ op: z.literal('dropRelation'), parent: z.string(), child: z.string(), dropColumns: z.boolean().optional() }),
+  // 주제영역: 큰 ERD를 기능별로 나눠 보는 탭 (화면 구분일 뿐 SQL·DB에는 영향 없음). 같은 테이블을 여러 영역에 넣을 수 있다
+  z.object({ op: z.literal('createArea'), name: z.string().describe('영역 이름 (예: 주문, 회원, 정산)'), tables: z.array(z.string()).optional().describe('처음 넣을 테이블') }),
+  z.object({ op: z.literal('updateArea'), area: z.string(), name: z.string().optional().describe('새 이름') }),
+  z.object({ op: z.literal('dropArea'), area: z.string().describe('지울 영역 (테이블은 남는다)') }),
+  z.object({ op: z.literal('addToArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('넣을 테이블 (다른 영역에도 그대로 남는다)') }),
+  z.object({ op: z.literal('removeFromArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('영역에서 뺄 테이블 (테이블은 남는다)') }),
+  z.object({
+    op: z.literal('moveToArea'),
+    area: z.string().describe('옮겨 갈 영역'),
+    tables: z.array(z.string()).min(1),
+    from: z.string().optional().describe('이 영역에서만 뺀다. 생략하면 다른 모든 영역에서 빼고 이 영역에만 둔다'),
+  }),
 ]);
 
 const mode = z.enum(['apply', 'propose']).optional().describe('apply: 바로 반영(되돌리기 가능), propose: 제안으로 모아 사람이 승인. 생략하면 프로젝트 설정을 따른다');
@@ -143,14 +162,27 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     'get_schema',
     {
       title: 'ERD 스키마 읽기',
-      description: '프로젝트의 테이블·컬럼·인덱스·관계를 읽는다. 편집하기 전에 먼저 호출해 지금 구조를 확인한다.',
-      inputSchema: { project: projectArg },
+      description: [
+        '프로젝트의 테이블·컬럼·인덱스·관계·주제영역을 읽는다. 편집하기 전에 먼저 호출해 지금 구조를 확인한다.',
+        'area를 주면 그 영역의 테이블만 읽고, 영역 밖 테이블과의 관계는 outsideRelations로 알려 준다 (큰 ERD를 영역 단위로 볼 때).',
+      ].join(' '),
+      inputSchema: { project: projectArg, area: z.string().optional().describe('주제영역 이름 (생략하면 전체)') },
       annotations: { readOnlyHint: true },
     },
-    safe(async ({ project }: { project: string }) => {
+    safe(async ({ project, area }: { project: string; area?: string }) => {
       const p = await resolveProject(project);
       const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
-      return text({ project: { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id) }, ...describeSchema(schema) });
+      const info = { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id) };
+      if (!area) return text({ project: info, ...describeSchema(schema) });
+      const part = areaSchema(schema, area);
+      const { areas: _all, ...described } = describeSchema(part.schema);
+      return text({
+        project: info,
+        area: requireArea(schema, area).name,
+        ...described,
+        outsideRelations: part.outside.length ? part.outside.map((o) => `${o.table} ↔ ${o.outsideTable} (영역 밖)`) : undefined,
+        otherAreas: (schema.areas ?? []).filter((a) => a.name !== requireArea(schema, area).name).map((a) => a.name),
+      });
     }),
   );
 
@@ -163,25 +195,31 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         '② 지난 AI 검토에서 남은 항목(save_design_review로 저장한 것, id 포함). 사람이 "무시"한 항목은 빠진다 — 무시한 항목은 고치지 않는다.',
         '"다시 확인 필요"(stale)는 검토 뒤 사람이 그 테이블을 고친 것이라 지금도 문제인지 다시 본다.',
         '고칠 때는 edit_schema를 쓰고, AI 검토 항목을 고쳤으면 resolve_design_review로 해결 표시한다.',
+        'area를 주면 그 주제영역 테이블에 대한 항목만 본다 (영역 단위 검토: save_design_review의 tables에 areaTables를 넣는다).',
       ].join(' '),
-      inputSchema: { project: projectArg },
+      inputSchema: { project: projectArg, area: z.string().optional().describe('주제영역 이름 (생략하면 전체)') },
       annotations: { readOnlyHint: true },
     },
-    safe(async ({ project }: { project: string }) => {
+    safe(async ({ project, area }: { project: string; area?: string }) => {
       const p = await resolveProject(project);
       const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
       // 사람이 화면에서 "무시"한 항목은 빼고 알려준다
       const ignored = new Set(Array.isArray(meta.lintIgnored) ? (meta.lintIgnored as string[]) : []);
-      const all = lintSchema(schema, String(meta.dialect ?? 'mysql'));
+      // 영역을 주면 그 영역 테이블에 대한 것만
+      const scope = area ? requireArea(schema, area) : null;
+      const scopeNames = scope ? new Set(scope.tableIds.map((id) => schema.tables.find((t) => t.id === id)?.name.toLowerCase())) : null;
+      const inScope = (table?: string) => !scopeNames || (table ? scopeNames.has(table.toLowerCase()) : false);
+      const all = lintSchema(schema, String(meta.dialect ?? 'mysql')).filter((i) => inScope(i.tableName));
       const issues = all.filter((i) => !ignored.has(i.id));
       const review = (meta.aiReview as AiReview | null | undefined) ?? null;
-      const reviewOpen = (review?.items ?? []).filter((i) => i.status === 'open');
+      const reviewOpen = (review?.items ?? []).filter((i) => i.status === 'open' && (!scope || inScope(i.table)));
       const reviewItems = reviewOpen.filter((i) => !ignored.has(i.id)).map((i) => ({ ...i, state: reviewItemState(i, schema) })).filter((i) => i.state !== 'missing');
       const skipped = all.length - issues.length + (reviewOpen.length - reviewOpen.filter((i) => !ignored.has(i.id)).length);
       const counts = { error: 0, warning: 0, info: 0 };
       for (const i of [...issues, ...reviewItems]) counts[i.severity]++;
       return text({
-        summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외 — 고치지 말 것)` : ''}`,
+        summary: `${scope ? `영역 ${scope.name}: ` : ''}오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외 — 고치지 말 것)` : ''}`,
+        areaTables: scope ? scope.tableIds.map((id) => schema.tables.find((t) => t.id === id)?.name).filter(Boolean) : undefined,
         reviewNeeded: reviewNeeded(schema, review),
         basicChecks: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
         aiReview: review
@@ -465,20 +503,22 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         project: projectArg,
         output_path: z.string().optional(),
         layout: z.enum(['sheetPerTable', 'singleSheet']).optional(),
+        area: z.string().optional().describe('주제영역 이름: 그 영역 테이블만 정의서로'),
         author: z.string().optional(),
         since_version: z.string().optional().describe('넣으면 이 버전 이후 변경 이력 시트를 추가'),
       },
     },
-    safe(async (a: { project: string; output_path?: string; layout?: string; author?: string; since_version?: string }) => {
+    safe(async (a: { project: string; output_path?: string; layout?: string; author?: string; since_version?: string; area?: string }) => {
       const p = await resolveProject(a.project);
       const q = new URLSearchParams();
       if (a.layout) q.set('layout', a.layout);
       if (a.author) q.set('author', a.author);
       if (a.since_version) q.set('since', a.since_version);
+      if (a.area) q.set('area', a.area);
       const path = `/api/projects/${p.id}/definition.xlsx?${q}`;
       if (!options.canWriteFiles) return text({ download: `${api.webUrl ?? ''}${path}` });
       const buffer = await api.download(path);
-      const file = resolve(a.output_path ?? `${p.name.replace(/[\\/:*?"<>|]+/g, '_')}_테이블정의서.xlsx`);
+      const file = resolve(a.output_path ?? `${`${p.name}${a.area ? `_${a.area}` : ''}`.replace(/[\\/:*?"<>|]+/g, '_')}_테이블정의서.xlsx`);
       writeFileSync(file, Buffer.from(buffer));
       return text({ saved: file, bytes: buffer.byteLength });
     }),

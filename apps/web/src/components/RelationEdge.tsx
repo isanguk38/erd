@@ -1,7 +1,7 @@
 import { BaseEdge, getSmoothStepPath, Position, useInternalNode, type Edge, type EdgeProps, type InternalNode } from '@xyflow/react';
 import type { Cardinality } from '@erd/core';
 
-export type RelationEdgeData = { cardinality: Cardinality; highlight?: 'added' | 'changed' | 'removed' };
+export type RelationEdgeData = { cardinality: Cardinality; highlight?: 'added' | 'changed' | 'removed'; /** 주제영역 탭: 영역 밖 테이블(참조 카드)과의 관계 — 점선 */ ghost?: boolean };
 export type RelationEdgeType = Edge<RelationEdgeData, 'relation'>;
 
 export interface Anchor {
@@ -74,7 +74,7 @@ export function RelationEdge({ id, source, target, data, selected }: EdgeProps<R
     offset: 24,
     borderRadius: 6,
   });
-  const className = `relation-edge${selected ? ' selected' : ''}${data?.highlight ? ` hl-${data.highlight}` : ''}`;
+  const className = `relation-edge${selected ? ' selected' : ''}${data?.highlight ? ` hl-${data.highlight}` : ''}${data?.ghost ? ' ghost' : ''}`;
   const childKind = data?.cardinality === '1:1' ? 'one' : 'many';
 
   return (

@@ -5,15 +5,17 @@
 // erd (Y.Map)
 //  ├ meta (Y.Map): name, dialect, aiMode ...
 //  ├ tables (Y.Map<tableId, Y.Map>): 테이블 필드 + columns(Y.Array<Y.Map>) + indexes(Y.Array<Index>)
-//  └ relations (Y.Map<relationId, Y.Map>)
+//  ├ relations (Y.Map<relationId, Y.Map>)
+//  └ areas (Y.Map<areaId, Y.Map>): 주제영역. name, color, tableIds, positions, order
 
 import * as Y from 'yjs';
 import type { AiReview } from './aiReview';
-import type { CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
+import type { Area, CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
 const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'onUpdate', 'generated', 'comment'] as const;
 const RELATION_FIELDS = ['name', 'fromTableId', 'fromColumnIds', 'toTableId', 'toColumnIds', 'cardinality', 'onDelete', 'onUpdate'] as const;
+const AREA_FIELDS = ['name', 'color', 'tableIds', 'positions'] as const;
 
 export function rootMap(doc: Y.Doc): Y.Map<unknown> {
   return doc.getMap('erd');
@@ -39,6 +41,10 @@ function tablesMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 
 function relationsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return child(rootMap(doc), 'relations', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
+}
+
+function areasMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return child(rootMap(doc), 'areas', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
 }
 
 function same(a: unknown, b: unknown): boolean {
@@ -120,6 +126,23 @@ export function writeSchema(doc: Y.Doc, schema: Schema): void {
     setIfChanged(map, 'id', relation.id);
     for (const f of RELATION_FIELDS) setIfChanged(map, f, relation[f]);
   }
+
+  // 영역: areas를 넘긴 경우에만 맞춘다 (영역을 모르는 쪽 — DB 가져오기·SQL 붙여넣기 등 — 이 저장해도 영역은 남는다)
+  if (schema.areas) {
+    const areas = areasMap(doc);
+    const wantedAreas = new Set(schema.areas.map((a) => a.id));
+    for (const id of [...areas.keys()]) if (!wantedAreas.has(id)) areas.delete(id);
+    schema.areas.forEach((area, order) => {
+      let map = areas.get(area.id);
+      if (!map) {
+        map = new Y.Map();
+        areas.set(area.id, map);
+      }
+      setIfChanged(map, 'id', area.id);
+      for (const f of AREA_FIELDS) setIfChanged(map, f, f === 'positions' && area.positions && !Object.keys(area.positions).length ? undefined : area[f]);
+      setIfChanged(map, 'order', order);
+    });
+  }
 }
 
 export function readSchema(doc: Y.Doc): Schema {
@@ -162,7 +185,29 @@ export function readSchema(doc: Y.Doc): Schema {
   });
   relations.sort((a, b) => a.id.localeCompare(b.id));
 
-  return { tables: tables.map(({ order: _order, ...t }) => t), relations };
+  // 영역: 지워진 테이블은 빼고 읽는다 (다른 사람이 테이블을 지운 경우 등)
+  const areasY = root.get('areas') as Y.Map<Y.Map<unknown>> | undefined;
+  const tableIds = new Set(tables.map((t) => t.id));
+  const areas: (Area & { order: number })[] = [];
+  areasY?.forEach((map, id) => {
+    const positions = structuredClone((map.get('positions') as Area['positions']) ?? {});
+    for (const k of Object.keys(positions)) if (!tableIds.has(k)) delete positions[k];
+    const area: Area & { order: number } = {
+      id,
+      name: (map.get('name') as string) ?? '',
+      tableIds: ((map.get('tableIds') as string[]) ?? []).filter((t) => tableIds.has(t)),
+      ...(Object.keys(positions).length ? { positions } : {}),
+      order: (map.get('order') as number) ?? 0,
+    };
+    const color = map.get('color') as string | undefined;
+    if (color) area.color = color;
+    areas.push(area);
+  });
+  areas.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
+  const schema: Schema = { tables: tables.map(({ order: _order, ...t }) => t), relations };
+  if (areas.length) schema.areas = areas.map(({ order: _order, ...a }) => a);
+  return schema;
 }
 
 export interface ProjectMeta {

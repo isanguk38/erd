@@ -2,6 +2,9 @@ import { useCallback, useState, type ReactNode } from 'react';
 import { requestFocus, takeFocus } from '../lib/focus';
 import {
   addColumn,
+  addToArea,
+  moveToArea,
+  removeFromArea,
   addIndex,
   autoFixColumnPatch,
   canAutoIncrement,
@@ -28,7 +31,8 @@ import {
   type TableTypeIssue,
   type TypeIssueField,
 } from '@erd/core';
-import { useStore } from '../store';
+import { selectAreas, useStore } from '../store';
+import { Dropdown } from './ui';
 import { TemplateApplyMenu } from './TemplatePanels';
 import { TableComments } from './Comments';
 import { useDialect } from '../lib/hooks';
@@ -152,6 +156,8 @@ function TableEditor({ table }: { table: Table }) {
         <TextInput value={table.logicalName} onCommit={(logicalName) => setTable({ logicalName })} placeholder="예: 회원" />
         <label>설명</label>
         <TextInput value={table.comment} onCommit={(comment) => setTable({ comment })} placeholder="비우면 논리명이 SQL 코멘트가 됩니다" />
+        <label>영역</label>
+        <TableAreas tableId={table.id} />
         <label>색상</label>
         <div className="colors">
           {TABLE_COLORS.map((c) => (
@@ -485,5 +491,51 @@ function RelationEditor({ relation }: { relation: Relation }) {
         </select>
       </div>
     </aside>
+  );
+}
+
+/**
+ * 테이블이 들어 있는 주제영역: 칩(× 누르면 그 영역에서 빼기) + 영역에 넣기 + (영역 탭이면) 다른 영역으로 옮기기.
+ * 테이블을 지우는 게 아니라 영역 구분만 바꾼다.
+ */
+function TableAreas({ tableId }: { tableId: string }) {
+  const areas = useStore(selectAreas);
+  const activeArea = useStore((s) => s.activeArea);
+  const { edit } = useStore.getState();
+  const mine = areas.filter((a) => a.tableIds.includes(tableId));
+  const others = areas.filter((a) => !a.tableIds.includes(tableId));
+  const current = mine.find((a) => a.id === activeArea);
+  if (!areas.length) return <span className="muted small">영역이 없습니다. 캔버스 위 "+ 영역"으로 만들 수 있습니다.</span>;
+  return (
+    <div className="table-areas">
+      {mine.map((a) => (
+        <span key={a.id} className="area-chip" style={{ ['--area-color' as string]: a.color || 'var(--accent)' }}>
+          <span className="area-tab__dot" />
+          {a.name}
+          <button
+            className="icon-btn"
+            title={`${a.name} 영역에서 빼기 (테이블은 남음)`}
+            onClick={() => edit((d) => removeFromArea(d, a.id, [tableId]))}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {mine.length === 0 && <span className="muted small">어느 영역에도 없음</span>}
+      {others.length > 0 && (
+        <Dropdown
+          label="영역에 넣기"
+          title="이 테이블을 다른 영역에도 보이게 (지금 영역에도 그대로 남음)"
+          items={others.map((a) => ({ label: a.name, onClick: () => edit((d) => void addToArea(d, a.id, [tableId])) }))}
+        />
+      )}
+      {current && others.length > 0 && (
+        <Dropdown
+          label="옮기기"
+          title={`${current.name} 영역에서 빼고 다른 영역으로`}
+          items={others.map((a) => ({ label: `${current.name} → ${a.name}`, onClick: () => edit((d) => moveToArea(d, a.id, [tableId], current.id)) }))}
+        />
+      )}
+    </div>
   );
 }

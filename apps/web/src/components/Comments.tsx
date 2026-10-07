@@ -139,7 +139,9 @@ export function CommentsPanel({ onClose }: { onClose: () => void }) {
     const { select, setSearchFocus } = useStore.getState();
     select({ type: 'table', id: c.tableId }, true);
     setSearchFocus({ tableId: c.tableId, columnId: c.columnId });
-    fitView({ nodes: [{ id: c.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
+    // 지금 주제영역 탭에 없는 테이블이면 그 테이블이 있는 영역(없으면 전체)으로 바꾼 뒤 보여 준다
+    const switched = useStore.getState().revealTable(c.tableId);
+    setTimeout(() => fitView({ nodes: [{ id: c.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 }), switched ? 120 : 0);
   };
   const count = (f: typeof filter) => comments.filter((c) => (f === 'all' ? true : f === 'review' ? c.kind === 'review' && c.status === 'open' : c.status === 'open')).length;
 

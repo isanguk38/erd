@@ -26,6 +26,7 @@ import { CommentsPanel } from './components/Comments';
 import { copySelection, pasteClipboard, selectAllTables } from './lib/tableClipboard';
 import { ImageExportDialog } from './components/ImageExportDialog';
 import { ResizableSide } from './components/ResizableSide';
+import { AreaTabs } from './components/AreaTabs';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -209,6 +210,9 @@ function Editor({ projectId }: { projectId: string }) {
       <div className="app">
         <Toolbar onOpen={openDialog} />
         <main className="workspace">
+          {/* 주제영역 탭은 캔버스 위 한 줄 (캔버스 위에 떠 있는 패널·안내와 겹치지 않게) */}
+          <div className="canvas-col">
+          {synced && !isEmpty && !comparing && <AreaTabs />}
           <div className="canvas">
             {comparing ? <CompareBanner /> : <AiBanner onOpenProposals={() => setDialog('proposals')} />}
             {(!synced || openError) && (
@@ -235,6 +239,7 @@ function Editor({ projectId }: { projectId: string }) {
               </div>
             )}
             <Canvas fitRequest={fitRequest} />
+          </div>
           </div>
           {comparing ? (
             <ResizableSide><ComparePanel /></ResizableSide>

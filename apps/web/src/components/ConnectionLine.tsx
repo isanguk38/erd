@@ -11,9 +11,10 @@ const TOOL_LABEL: Record<string, string> = { '1:N': '1:N', '1:N-identifying': '1
  * - 아직 빈 곳이면: 커서 쪽 면에서 나가는 부드러운 곡선 + 끝점.
  * 커서 옆에 "부모 → 자식" 안내를 띄운다 (끌기 시작한 테이블이 부모).
  */
-export function ConnectionLine({ fromNode, toNode, toX, toY, connectionStatus }: ConnectionLineComponentProps<TableNodeType>) {
+// 주제영역의 참조 카드(ghost)는 연결할 수 없어 시작 노드는 항상 테이블이다
+export function ConnectionLine({ fromNode, toNode, toX, toY, connectionStatus }: ConnectionLineComponentProps) {
   const tool = useStore((s) => s.relationTool);
-  const parentName = fromNode.data.table.name;
+  const parentName = (fromNode.data as TableNodeType['data']).table?.name ?? '';
   const target = toNode && toNode.id !== fromNode.id ? toNode : null;
 
   let path: string;

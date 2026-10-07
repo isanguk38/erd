@@ -17,6 +17,10 @@ export interface DefinitionOptions {
   /** 넣으면 "변경 이력" 시트를 만든다 */
   changes?: { title: string; items: Change[] };
   date?: Date;
+  /** 이 테이블만 정의서에 넣는다 (주제영역별 정의서). 외래키의 부모 테이블 이름은 전체에서 찾는다 */
+  tableIds?: string[];
+  /** 표지에 적을 범위 (예: "주문 영역") */
+  scopeLabel?: string;
 }
 
 const HEADER_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F1' } };
@@ -160,12 +164,15 @@ export async function buildDefinitionWorkbook(schema: Schema, options: Definitio
   const date = options.date ?? new Date();
   wb.creator = options.author || 'ERD';
   wb.created = date;
-  const tables = [...schema.tables];
+  const only = options.tableIds ? new Set(options.tableIds) : null;
+  const tables = only ? schema.tables.filter((t) => only.has(t.id)) : [...schema.tables];
   const layout = options.layout ?? 'sheetPerTable';
   const names = sheetNames(tables);
 
   // 변경 이력이 있으면 테이블별로 생성/수정 표시
-  const changes = options.changes;
+  // 범위를 정했으면 그 테이블의 변경만
+  const tableNames = new Set(tables.map((t) => t.name));
+  const changes = options.changes && only ? { ...options.changes, items: options.changes.items.filter((c) => tableNames.has(c.tableName)) } : options.changes;
   const tableChange = new Map<string, '신규' | '수정'>();
   for (const c of changes?.items ?? []) {
     if (c.kind === 'createTable') tableChange.set(c.tableName, '신규');
@@ -183,6 +190,7 @@ export async function buildDefinitionWorkbook(schema: Schema, options: Definitio
   const coverInfo: [string, string][] = [
     ['프로젝트', options.projectName],
     ['DB', getDialect(options.dialect).label],
+    ...(options.scopeLabel ? [['범위', options.scopeLabel] as [string, string]] : []),
     ['버전', options.version ?? ''],
     ['작성자', options.author ?? ''],
     ['작성일', date.toISOString().slice(0, 10)],

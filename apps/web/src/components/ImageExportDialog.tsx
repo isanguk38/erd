@@ -19,12 +19,15 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
   const dialect = useDialect();
   const { getNodes, getEdges, getNodesBounds, screenToFlowPosition } = useReactFlow();
   const [range, setRange] = useState<Range>('all');
+  // 주제영역 탭에서 열면 그 영역(과 영역 밖 참조 카드)이 '전체'다
+  const area = useStore((s) => (s.activeArea ? s.schema.areas?.find((a) => a.id === s.activeArea) : undefined));
+  const rangeLabel = (r: Range) => (r === 'all' && area ? `${area.name} 영역 전체` : RANGE_LABEL[r]);
   const [format, setFormat] = useState<Format>('html');
   const [busy, setBusy] = useState(false);
 
   // 범위마다 들어갈 테이블과 관계선
   const targets = useMemo(() => {
-    // 접힌 영역 안의 테이블은 화면에 없으므로 빼고, 영역 상자는 도면에 함께 그린다
+    // 지금 캔버스에 그려진 것 그대로 (주제영역 탭이면 그 영역 테이블과 영역 밖 참조 카드)
     const nodes = getNodes().filter((n) => !n.hidden);
     const edges = getEdges();
     const withEdges = (picked: Node[]): ExportTarget => {
@@ -62,7 +65,7 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
         format === 'html'
           ? diagramToHtml(target, getNodesBounds, useStore.getState().schema, { projectName, dialect: getDialect(dialect).label })
           : await exportDiagram(target, getNodesBounds, format);
-      const suffix = range === 'all' ? '' : '_화면';
+      const suffix = `${area ? `_${area.name}` : ''}${range === 'all' ? '' : '_화면'}`;
       downloadBlob(blob, `${safeFileName(projectName + suffix)}.${format}`);
       onClose();
     } catch (e) {
@@ -89,7 +92,7 @@ export function ImageExportDialog({ onClose }: { onClose: () => void }) {
           {(['all', 'visible'] as Range[]).map((r) => (
             <label key={r}>
               <input type="radio" name="range" checked={range === r} onChange={() => setRange(r)} />
-              {RANGE_LABEL[r]}
+              {rangeLabel(r)}
               <span className="muted small"> · 테이블 {tableCount(r)}개</span>
             </label>
           ))}

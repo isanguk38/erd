@@ -99,7 +99,9 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
     const { select, setSearchFocus } = useStore.getState();
     select({ type: 'table', id: issue.tableId }, true);
     setSearchFocus({ tableId: issue.tableId, columnId: issue.columnId });
-    fitView({ nodes: [{ id: issue.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
+    // 지금 주제영역 탭에 없는 테이블이면 그 테이블이 있는 영역(없으면 전체)으로 바꾼 뒤 보여 준다
+    const switched = useStore.getState().revealTable(issue.tableId);
+    setTimeout(() => fitView({ nodes: [{ id: issue.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 }), switched ? 120 : 0);
   };
 
   const goTable = (tableName: string, columnName?: string) => {
@@ -114,6 +116,14 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
     const scope = pending?.length ? pending : null;
     const target = scope ? `바뀐 테이블(${scope.join(', ')})과 그 관계 상대` : 'ERD 전체';
     const text = `ERD 프로젝트 "${projectName}"의 설계를 검토만 해줘. 아직 고치지는 마. erd MCP의 check_design으로 기본 검사와 지난 검토를 먼저 확인하고, ${target}를 검토해서 오류·경고·참고로 나눠 save_design_review로 저장해줘${scope ? ' (tables에 검토한 테이블 이름)' : ''}. 기본 검사에 이미 나온 내용은 넣지 말고 고치는 방법도 같이 적어줘. 저장한 뒤 등급별로 요약해서 알려줘.`;
+    await copyForAi(text);
+  };
+
+  // 지금 주제영역 탭이면 그 영역만 검토 요청
+  const area = useStore((s) => (s.activeArea ? s.schema.areas?.find((a) => a.id === s.activeArea) : undefined));
+  const askAreaReview = async () => {
+    if (!area) return;
+    const text = `ERD 프로젝트 "${projectName}"의 "${area.name}" 영역 설계를 검토만 해줘. 아직 고치지는 마. erd MCP의 get_schema와 check_design에 area="${area.name}"를 줘서 그 영역 테이블과 영역 밖 관계를 확인하고, 오류·경고·참고로 나눠 save_design_review로 저장해줘 (tables에 영역 테이블 이름). 기본 검사에 이미 나온 내용은 넣지 말고 고치는 방법도 같이 적어줘. 저장한 뒤 등급별로 요약해서 알려줘.`;
     await copyForAi(text);
   };
 
@@ -153,6 +163,7 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
           title="AI(MCP)에게 보낼 요청 문장을 복사합니다"
           items={[
             { label: pending?.length ? '바뀐 테이블 검토' : '설계 검토', hint: pending?.length ? `${pending.length}개만` : '고치지 않음', onClick: askReview },
+            ...(area ? [{ label: `${area.name} 영역 검토`, hint: `테이블 ${area.tableIds.length}개`, onClick: askAreaReview }] : []),
             { label: '검토하고 고치기', hint: '무시한 항목 제외', onClick: askAi },
             { label: 'AI 연결 방법', onClick: onOpenAi },
           ]}

@@ -20,6 +20,7 @@ import {
   type CommentThread,
   type DialectId,
   type ProjectMeta,
+  type Area,
   type Schema,
 } from '@erd/core';
 import { authApi, type Me, type Role } from './lib/api';
@@ -104,6 +105,11 @@ interface State extends LocalPrefs {
   compare: { name: string; createdAt: string; schema: Schema } | null;
 
   setCompare: (compare: State['compare']) => void;
+  /** 지금 보고 있는 주제영역 탭 (null이면 전체). 프로젝트마다 마지막 탭을 기억한다 */
+  activeArea: string | null;
+  setActiveArea: (areaId: string | null) => void;
+  /** 이 테이블이 지금 탭에 없으면 그 테이블이 있는 영역(없으면 전체)으로 바꾼다. 바꿨으면 true */
+  revealTable: (tableId: string) => boolean;
   open: (projectId: string) => void;
   close: () => void;
   /** 스키마를 바꾼다. 바뀐 부분만 문서에 기록되어 다른 사람에게 바로 보인다. */
@@ -122,6 +128,19 @@ interface State extends LocalPrefs {
   setDialect: (dialect: DialectId) => void;
   setProjectName: (name: string) => void;
 }
+
+function readActiveArea(projectId: string): string | null {
+  try {
+    return localStorage.getItem(`erd.area.${projectId}`) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 영역이 없을 때 쓰는 빈 목록. 셀렉터가 매번 새 []를 돌려주면 무한히 다시 그린다 */
+const NO_AREAS: Area[] = [];
+/** 주제영역 목록 (없으면 늘 같은 빈 배열) */
+export const selectAreas = (s: { schema: Schema }): Area[] => s.schema.areas ?? NO_AREAS;
 
 // Yjs 객체는 직렬화하지 않도록 스토어 밖에 둔다
 let doc: Y.Doc | null = null;
@@ -180,6 +199,7 @@ export const useStore = create<State>()(
         canUndo: false,
         canRedo: false,
         compare: null,
+        activeArea: null,
         me: null,
         comments: [],
         remoteChanges: {},
@@ -255,7 +275,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '' });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
           publishPresence();
           authApi
             .project(projectId)
@@ -294,6 +314,7 @@ export const useStore = create<State>()(
             const copy = cloneSchema(schema);
             draft.tables = copy.tables;
             draft.relations = copy.relations;
+            if (copy.areas) draft.areas = copy.areas;
           });
           set({ selection: null, selectedTables: [], inspectorOpen: false });
         },
@@ -324,6 +345,23 @@ export const useStore = create<State>()(
         },
         redo() {
           undoManager?.redo();
+        },
+
+        setActiveArea(areaId) {
+          const { projectId } = get();
+          set({ activeArea: areaId });
+          try {
+            if (projectId) localStorage.setItem(`erd.area.${projectId}`, areaId ?? '');
+          } catch {
+            // 저장이 막혀 있어도 지금 화면에는 적용된다
+          }
+        },
+        revealTable(tableId) {
+          const { activeArea, schema } = get();
+          const area = activeArea ? schema.areas?.find((a) => a.id === activeArea) : undefined;
+          if (!area || area.tableIds.includes(tableId)) return false;
+          get().setActiveArea(schema.areas?.find((a) => a.tableIds.includes(tableId))?.id ?? null);
+          return true;
         },
 
         select(selection, open) {

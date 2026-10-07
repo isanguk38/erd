@@ -19,6 +19,11 @@ export function DefinitionDialog({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState('1.0');
   const [layout, setLayout] = useState<'sheetPerTable' | 'singleSheet'>('sheetPerTable');
   const [historyBase, setHistoryBase] = useState('');
+  // 범위: 전체 또는 주제영역 (지금 영역 탭이면 그 영역이 기본)
+  const areas = schema.areas ?? [];
+  const [scope, setScope] = useState(() => useStore.getState().activeArea ?? '');
+  const scopeArea = areas.find((a) => a.id === scope);
+  const tableCount = scopeArea ? scopeArea.tableIds.length : schema.tables.length;
   const [busy, setBusy] = useState(false);
   // 고른 버전 이후 무엇이 바뀌었는지 미리 보여준다
   const baseSchema = useVersionSchema(historyBase || null);
@@ -34,8 +39,16 @@ export function DefinitionDialog({ onClose }: { onClose: () => void }) {
       const changes = base
         ? { title: `변경 이력 ("${base.name}" 이후)`, items: diffSchemas(base.schema, schema, getDialect(dialect)).changes }
         : undefined;
-      const buffer = await buildDefinitionXlsx(schema, { projectName, dialect, author, version, layout, changes });
-      downloadBlob(new Blob([buffer], { type: XLSX }), `${safeFileName(projectName)}_테이블정의서.xlsx`);
+      const buffer = await buildDefinitionXlsx(schema, {
+        projectName,
+        dialect,
+        author,
+        version,
+        layout,
+        changes,
+        ...(scopeArea ? { tableIds: scopeArea.tableIds, scopeLabel: `${scopeArea.name} 영역` } : {}),
+      });
+      downloadBlob(new Blob([buffer], { type: XLSX }), `${safeFileName(projectName + (scopeArea ? `_${scopeArea.name}` : ''))}_테이블정의서.xlsx`);
       onClose();
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
@@ -51,11 +64,22 @@ export function DefinitionDialog({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <button className="btn" onClick={onClose}>취소</button>
-          <button className="btn btn-primary" disabled={busy || !schema.tables.length} onClick={build}>{busy ? '만드는 중…' : '다운로드'}</button>
+          <button className="btn btn-primary" disabled={busy || !tableCount} onClick={build}>{busy ? '만드는 중…' : '다운로드'}</button>
         </>
       }
     >
       <div className="form-grid wide-label">
+        {areas.length > 0 && (
+          <>
+            <label>범위</label>
+            <select value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="">전체 ({schema.tables.length}개)</option>
+              {areas.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} 영역 ({a.tableIds.length}개)</option>
+              ))}
+            </select>
+          </>
+        )}
         <label>작성자</label>
         <input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="표지에 들어갑니다" />
         <label>문서 버전</label>
@@ -89,7 +113,7 @@ export function DefinitionDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
       <p className="muted small">
-        표지 · 테이블 목록(시트 링크){historyBase ? ' · 변경 이력' : ''} · 테이블별 컬럼(논리명/물리명/타입/길이/PK/FK/NULL/기본값/설명) · 인덱스 · 외래키가 들어갑니다. 테이블 {schema.tables.length}개.
+        표지 · 테이블 목록(시트 링크){historyBase ? ' · 변경 이력' : ''} · 테이블별 컬럼(논리명/물리명/타입/길이/PK/FK/NULL/기본값/설명) · 인덱스 · 외래키가 들어갑니다. 테이블 {tableCount}개{scopeArea ? ` (${scopeArea.name} 영역)` : ''}.
       </p>
     </Modal>
   );

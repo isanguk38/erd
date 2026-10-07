@@ -22,6 +22,7 @@ import {
   summarizePlan,
   syncedBaseline,
   toLink,
+  requireArea,
   toScript,
   type Change,
   type ChangeCategory,
@@ -44,6 +45,7 @@ const DIALECTS = Object.keys(dialects) as DialectId[];
 const AI_SESSION_IDLE_MS = 30 * 60 * 1000;
 
 type Mode = 'apply' | 'propose';
+const AREA_OPS = new Set(['createArea', 'updateArea', 'dropArea', 'addToArea', 'removeFromArea', 'moveToArea']);
 type Source = 'user' | 'ai' | 'api';
 
 const badRequest = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
@@ -191,7 +193,17 @@ export function registerProjectRoutes(
       const { id } = req.params;
       const { commands, source = 'api', title = 'AI 제안' } = req.body ?? ({} as never);
       if (!Array.isArray(commands) || !commands.length) throw badRequest('commands가 필요합니다');
-      const mode = modeOf(id, req.body.mode, source);
+      let mode = modeOf(id, req.body.mode, source);
+      // 영역 명령만 있으면 제안 없이 바로 반영한다 (화면에서 나눠 보는 구분일 뿐 설계·DB는 바뀌지 않음).
+      // 아직 제안에만 있는 테이블을 가리키면 제안에 이어서 넣는다
+      if (mode === 'propose' && commands.every((c) => AREA_OPS.has(c?.op))) {
+        try {
+          const direct = applyCommands(store.schema(id), commands);
+          return change(id, direct.schema, { mode: 'apply', source, title, messages: [...direct.messages, '영역은 화면에서 나눠 보는 구분이라 제안 없이 바로 반영했습니다'] });
+        } catch (e) {
+          if (!(e instanceof CommandError)) throw e;
+        }
+      }
       // 제안 모드에서는 지금까지 모은 제안 위에 이어서 적용한다
       const base = mode === 'propose' ? (store.proposals(id).find((p) => p.status === 'pending' && p.source === (source === 'ai' ? 'ai' : 'api'))?.target ?? store.schema(id)) : store.schema(id);
       let result;
@@ -335,14 +347,22 @@ export function registerProjectRoutes(
     return { ok: true };
   });
 
-  app.get<{ Params: { id: string }; Querystring: { layout?: 'sheetPerTable' | 'singleSheet'; author?: string; since?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { layout?: 'sheetPerTable' | 'singleSheet'; author?: string; since?: string; area?: string } }>(
     '/api/projects/:id/definition.xlsx',
     async (req, reply) => {
       const { id } = req.params;
       const meta = store.meta(id);
       const schema = store.schema(id);
       const since = req.query.since ? store.version(id, req.query.since) : undefined;
+      // area: 그 주제영역 테이블만 (이름 또는 id)
+      let area;
+      try {
+        area = req.query.area ? requireArea(schema, req.query.area) : undefined;
+      } catch (e) {
+        throw badRequest(e instanceof Error ? e.message : String(e));
+      }
       const buffer = await buildDefinitionXlsx(schema, {
+        ...(area ? { tableIds: area.tableIds, scopeLabel: `${area.name} 영역` } : {}),
         projectName: meta.name,
         dialect: meta.dialect as DialectId,
         author: req.query.author,
@@ -351,7 +371,7 @@ export function registerProjectRoutes(
       });
       reply
         .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${meta.name}_테이블정의서.xlsx`)}`);
+        .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${meta.name}${area ? `_${area.name}` : ''}_테이블정의서.xlsx`)}`);
       return reply.send(Buffer.from(buffer));
     },
   );

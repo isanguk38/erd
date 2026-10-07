@@ -53,14 +53,14 @@ export function buildNodes(
   }));
 }
 
-export function buildEdges(schema: Schema, selectedId: string | null): RelationEdgeType[] {
+export function buildEdges(schema: Schema, selectedId: string | null, ghostRelationIds?: ReadonlySet<string>): RelationEdgeType[] {
   return schema.relations.map((r) => ({
     id: r.id,
     type: 'relation',
     source: r.toTableId, // 부모
     target: r.fromTableId, // 자식
     selected: r.id === selectedId,
-    data: { cardinality: r.cardinality },
+    data: { cardinality: r.cardinality, ...(ghostRelationIds?.has(r.id) ? { ghost: true } : {}) },
   }));
 }
 
@@ -158,4 +158,69 @@ export function freeSpot(schema: Schema, p: { x: number; y: number }): { x: numb
     }
   }
   return p;
+}
+
+// ── 주제영역 탭 ─────────────────────────────
+
+/** 영역 밖 테이블을 가리키는 흐린 참조 카드 */
+export interface GhostTable {
+  id: string;
+  name: string;
+  logicalName: string;
+  /** 그 테이블이 들어 있는 영역 이름들 (없으면 빈 배열) */
+  areaNames: string[];
+  position: { x: number; y: number };
+}
+
+/**
+ * 영역 탭에서 그릴 것: 영역 테이블(영역 위치) + 영역 밖과 관계가 있으면 그 테이블을 참조 카드로.
+ * 참조 카드는 이어진 영역 테이블 옆 빈 곳에 놓는다.
+ */
+export function buildAreaView(schema: Schema, areaId: string): { schema: Schema; ghosts: GhostTable[]; ghostRelationIds: Set<string> } | null {
+  const area = schema.areas?.find((a) => a.id === areaId);
+  if (!area) return null;
+  const inside = new Set(area.tableIds);
+  const tables = schema.tables.filter((t) => inside.has(t.id)).map((t) => ({ ...t, position: area.positions?.[t.id] ?? t.position }));
+  const byId = new Map(tables.map((t) => [t.id, t]));
+  const size = (t: Table) => ({ w: 260, h: 56 + 22 * t.columns.length });
+  const boxes = tables.map((t) => ({ x: t.position.x, y: t.position.y, ...size(t) }));
+  const overlaps = (x: number, y: number, w: number, h: number) => boxes.some((b) => x < b.x + b.w + 30 && b.x < x + w + 30 && y < b.y + b.h + 20 && b.y < y + h + 20);
+
+  const ghosts = new Map<string, GhostTable>();
+  const ghostRelationIds = new Set<string>();
+  for (const r of schema.relations) {
+    const fromIn = inside.has(r.fromTableId);
+    const toIn = inside.has(r.toTableId);
+    if (fromIn === toIn) continue;
+    const [inId, outId] = fromIn ? [r.fromTableId, r.toTableId] : [r.toTableId, r.fromTableId];
+    ghostRelationIds.add(r.id);
+    if (ghosts.has(outId)) continue;
+    const out = schema.tables.find((t) => t.id === outId);
+    const anchor = byId.get(inId);
+    if (!out || !anchor) continue;
+    // 이어진 테이블의 왼쪽 → 오른쪽 → 위 → 아래 순으로 빈 곳
+    const a = { ...anchor.position, ...size(anchor) };
+    const W = 200;
+    const H = 64;
+    const candidates = [
+      { x: a.x - W - 90, y: a.y },
+      { x: a.x + a.w + 90, y: a.y },
+      { x: a.x, y: a.y - H - 70 },
+      { x: a.x, y: a.y + a.h + 70 },
+    ];
+    let spot = candidates.find((c) => !overlaps(c.x, c.y, W, H));
+    for (let k = 1; !spot && k < 12; k++) spot = candidates.map((c) => ({ x: c.x, y: c.y + k * (H + 24) })).find((c) => !overlaps(c.x, c.y, W, H));
+    const position = spot ?? candidates[0];
+    boxes.push({ ...position, w: W, h: H });
+    ghosts.set(outId, {
+      id: outId,
+      name: out.name,
+      logicalName: out.logicalName,
+      areaNames: (schema.areas ?? []).filter((x) => x.tableIds.includes(outId)).map((x) => x.name),
+      position,
+    });
+  }
+  // 영역 안끼리 + 영역 안 ↔ 참조 카드 (참조 카드끼리는 그리지 않는다)
+  const relations = schema.relations.filter((r) => (inside.has(r.fromTableId) && inside.has(r.toTableId)) || ghostRelationIds.has(r.id));
+  return { schema: { tables, relations }, ghosts: [...ghosts.values()], ghostRelationIds };
 }

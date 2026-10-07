@@ -173,6 +173,35 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 /* 작업 영역 */
 .workspace { flex: 1; display: flex; min-height: 0; }
 .canvas { flex: 1; position: relative; background: var(--canvas-bg); }
+.canvas-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* 주제영역 탭 */
+.area-tabs { display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--panel); min-height: 36px; overflow-x: auto; overflow-y: hidden; flex: none; scrollbar-width: none; }
+.area-tabs::-webkit-scrollbar { display: none; }
+.area-tab { position: relative; display: flex; align-items: center; gap: 4px; height: 35px; padding: 0 10px; border: none; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; border-radius: 0; flex: none; }
+.area-tab .area-tab__label { display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 0; height: 100%; }
+.area-tab:hover { color: var(--text); }
+.area-tab.active { color: var(--text); border-bottom-color: var(--area-color, var(--accent)); font-weight: 600; }
+.area-tab.drop-target { background: color-mix(in srgb, var(--area-color, var(--accent)) 14%, transparent); color: var(--text); border-bottom-color: var(--area-color, var(--accent)); }
+.area-tab__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--area-color, var(--accent)); flex: none; }
+.area-tab__count { font-size: 11px; color: var(--muted); font-weight: 400; }
+.area-tab__more { border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 2px; border-radius: 4px; display: flex; }
+.area-tab__more:hover { background: var(--accent-soft); color: var(--text); }
+.area-tab__rename { width: 120px; height: 26px; padding: 2px 6px; font-size: 13px; }
+.area-tab--add { color: var(--accent); }
+/* 안내는 자리가 남을 때만 (좁으면 말줄임) */
+.area-tabs__hint { margin-left: auto; padding-left: 12px; white-space: nowrap; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.area-menu { position: fixed; z-index: 60; margin-top: 4px; min-width: 200px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15); padding: 4px; display: flex; flex-direction: column; }
+.area-menu > button { text-align: left; border: none; background: transparent; color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.area-menu > button:hover { background: var(--accent-soft); }
+.area-menu > button.danger { color: var(--danger); }
+.area-menu__colors { display: flex; gap: 6px; padding: 6px 10px; flex-wrap: wrap; }
+/* 영역 밖 테이블 참조 카드 */
+.ghost-node { width: 200px; padding: 8px 12px; border: 1.5px dashed var(--muted); border-radius: 8px; background: color-mix(in srgb, var(--panel) 70%, transparent); color: var(--muted); cursor: pointer; font-size: 12px; }
+.ghost-node:hover { border-color: var(--accent); color: var(--text); }
+.ghost-node__title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--text); opacity: 0.85; }
+.ghost-node__where { margin-top: 2px; font-size: 11px; }
+.ghost-node__handle { opacity: 0; pointer-events: none; }
+.relation-edge.ghost path { stroke-dasharray: 6 5; opacity: 0.75; }
 .react-flow { --xy-background-color: var(--canvas-bg); --xy-minimap-background-color: var(--panel); --xy-controls-button-background-color: var(--panel); --xy-controls-button-color: var(--text); --xy-controls-button-border-color: var(--border); }
 
 /* 테이블 노드 */
@@ -760,3 +789,9 @@ body.resizing-side { cursor: col-resize; user-select: none; }
   .side-resizable { position: static; }
   .side-resizer { display: none; }
 }
+/* 편집 창: 테이블이 들어 있는 주제영역 */
+.table-areas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.area-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--area-color) 10%, transparent); }
+.area-chip .icon-btn { padding: 0 4px; font-size: 13px; }
+.table-areas .dropdown .btn-tool { height: 26px; font-size: 12px; padding: 0 8px; }
+.multi-panel__section h4 { margin: 4px 0 6px; font-size: 13px; }

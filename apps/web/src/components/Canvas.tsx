@@ -12,12 +12,13 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { connectManyToMany, connectTables, findSameRelation, removeRelation, removeTable } from '@erd/core';
+import { addToArea, connectManyToMany, connectTables, findSameRelation, moveToArea, removeRelation, removeTable, setAreaPosition } from '@erd/core';
 import { useStore } from '../store';
 import { TableNode } from './TableNode';
 import { RelationEdge } from './RelationEdge';
 import { ConnectionLine } from './ConnectionLine';
-import { buildCompareGraph, buildEdges, buildNodes, FIT_MAX_ZOOM } from '../lib/graph';
+import { buildAreaView, buildCompareGraph, buildEdges, buildNodes, FIT_MAX_ZOOM } from '../lib/graph';
+import { GhostNode, type GhostNodeType } from './GhostNode';
 import type { TableNodeType } from './TableNode';
 import { matchIds } from '../lib/search';
 import { addTableWithTemplate } from '../lib/templates';
@@ -25,7 +26,20 @@ import { requestFocus } from '../lib/focus';
 import { getDialect, type DialectId } from '@erd/core';
 import { useTheme } from '../lib/theme';
 
-const nodeTypes = { table: TableNode };
+const nodeTypes = { table: TableNode, ghost: GhostNode };
+type CanvasNode = TableNodeType | GhostNodeType;
+
+/** 마우스·터치 이벤트의 화면 좌표 */
+function pointOf(e: MouseEvent | TouchEvent): [number, number] {
+  const t = 'changedTouches' in e ? e.changedTouches[0] : e;
+  return [t?.clientX ?? 0, t?.clientY ?? 0];
+}
+
+/** 마우스 아래의 주제영역 탭 (테이블을 끌어 탭에 놓을 때). 전체 탭이면 '' */
+function areaTabAt(x: number, y: number): { el: HTMLElement; areaId: string } | null {
+  const el = document.elementsFromPoint(x, y).map((e) => (e as HTMLElement).closest?.('[data-area-tab]') as HTMLElement | null).find(Boolean);
+  return el ? { el, areaId: el.dataset.areaTab ?? '' } : null;
+}
 const edgeTypes = { relation: RelationEdge };
 
 const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id) => b.includes(id));
@@ -94,7 +108,10 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       const shift = (start: number, end: number, min: number, max: number) =>
         end - start > max - min - 2 * M ? start - (min + M) : end > max - M ? end - (max - M) : start < min + M ? start - (min + M) : 0;
       const dx = shift(el.left, el.right, pane.left, pane.right);
-      const dy = shift(el.top, el.bottom, pane.top, pane.bottom);
+      // 오른쪽 아래 미니맵과 겹치면 미니맵 위까지만 쓴다
+      const mini = document.querySelector('.react-flow__minimap')?.getBoundingClientRect();
+      const bottom = mini && el.right - dx > mini.left ? mini.top : pane.bottom;
+      const dy = shift(el.top, el.bottom, pane.top, bottom);
       if (!dx && !dy) return;
       const vp = getViewport();
       setViewport({ x: vp.x - dx, y: vp.y - dy, zoom: vp.zoom }, { duration: 250 });
@@ -136,7 +153,14 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const selectedRelation = selection?.type === 'relation' ? selection.id : null;
   const selectedIds = useMemo(() => new Set(selectedTables), [selectedTables]);
 
-  const [nodes, setNodes] = useState<TableNodeType[]>(() => buildNodes(schema, viewMode, selectedIds));
+  // 주제영역 탭: 그 영역 테이블(영역 위치) + 영역 밖과 이어진 테이블은 흐린 참조 카드 (버전 비교 중에는 전체)
+  const activeArea = useStore((s) => s.activeArea);
+  const areaView = useMemo(() => (activeArea && !compare ? buildAreaView(schema, activeArea) : null), [activeArea, compare, schema]);
+  const viewSchema = areaView?.schema ?? schema;
+  // 탭에 놓았을 때처럼 저장하지 않고 원래 자리로 되돌릴 때 다시 그린다
+  const [redraw, setRedraw] = useState(0);
+
+  const [nodes, setNodes] = useState<CanvasNode[]>(() => buildNodes(schema, viewMode, selectedIds));
   const compareGraph = useMemo(
     () => (compare ? buildCompareGraph(compare.schema, schema, getDialect((dialectId || 'mysql') as DialectId), viewMode) : null),
     [compare, schema, dialectId, viewMode],
@@ -147,10 +171,43 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const measured = new Map(prev.map((n) => [n.id, n.measured]));
         return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
       }
-      return buildNodes(schema, viewMode, pendingIds.current ? new Set(pendingIds.current) : selectedIds, prev, peers, searchMarks, { remote: remoteChanges, comments: commentMarks });
+      const tables = prev.filter((n): n is TableNodeType => n.type === 'table');
+      const built: CanvasNode[] = buildNodes(viewSchema, viewMode, pendingIds.current ? new Set(pendingIds.current) : selectedIds, tables, peers, searchMarks, { remote: remoteChanges, comments: commentMarks });
+      const ghostMeasured = new Map(prev.filter((n) => n.type === 'ghost').map((n) => [n.id, n.measured]));
+      for (const g of areaView?.ghosts ?? []) {
+        built.push({
+          id: g.id,
+          type: 'ghost',
+          position: g.position,
+          draggable: false,
+          selectable: false,
+          deletable: false,
+          connectable: false,
+          measured: ghostMeasured.get(g.id),
+          data: { name: g.name, logicalName: g.logicalName, areaNames: g.areaNames, viewMode },
+        });
+      }
+      return built;
     });
-  }, [schema, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks]);
-  const edges = useMemo(() => compareGraph?.edges ?? buildEdges(schema, selectedRelation), [compareGraph, schema, selectedRelation]);
+  }, [viewSchema, areaView, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks, redraw]);
+  const edges = useMemo(
+    () => compareGraph?.edges ?? buildEdges(viewSchema, selectedRelation, areaView?.ghostRelationIds),
+    [compareGraph, viewSchema, selectedRelation, areaView],
+  );
+  // 탭을 바꾸면 그 영역이 보이게 맞춘다 (처음 그릴 때는 위의 한 번 맞추기가 한다)
+  const prevArea = useRef(activeArea);
+  useEffect(() => {
+    if (prevArea.current === activeArea) return;
+    prevArea.current = activeArea;
+    const t = setTimeout(() => fitView({ padding: 0.15, duration: 250, maxZoom: FIT_MAX_ZOOM }), 60);
+    return () => clearTimeout(t);
+  }, [activeArea, fitView]);
+  /** 참조 카드를 누르면: 그 테이블이 있는 영역(없으면 전체)으로 가서 그 테이블을 보여 준다 */
+  const goToTable = (tableId: string) => {
+    useStore.getState().revealTable(tableId);
+    select({ type: 'table', id: tableId });
+    setTimeout(() => fitView({ nodes: [{ id: tableId }], padding: 0.8, duration: 300, maxZoom: 1.2 }), 120);
+  };
   const role = useStore((s) => s.role);
   const readOnly = Boolean(compare) || role === 'viewer';
   const { effective: theme } = useTheme();
@@ -185,7 +242,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       window.removeEventListener('blur', up);
     };
   }, [commitSelection]);
-  const onNodesChange = useCallback((changes: NodeChange<TableNodeType>[]) => {
+  const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
     const picked = changes.some((c) => c.type === 'select');
     setNodes((prev) => {
       const next = applyNodeChanges(changes, prev);
@@ -241,12 +298,13 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       connectionMode={ConnectionMode.Loose}
       connectionLineComponent={ConnectionLine}
       onNodeClick={(e, node) => {
+        if (node.type === 'ghost') return goToTable(node.id);
         // Ctrl/Shift를 누르고 클릭하면 여러 개 고르기 (캔버스가 처리)
         if (e.ctrlKey || e.metaKey || e.shiftKey) return;
         select({ type: 'table', id: node.id });
       }}
       // 클릭·끌기는 고르기만 하고, 오른쪽 편집 창은 더블클릭할 때 연다 (옮기기만 했는데 창이 열리면 불편하다)
-      onNodeDoubleClick={(_, node) => select({ type: 'table', id: node.id }, true)}
+      onNodeDoubleClick={(_, node) => node.type !== 'ghost' && select({ type: 'table', id: node.id }, true)}
       onEdgeClick={(_, edge) => select({ type: 'relation', id: edge.id })}
       onEdgeDoubleClick={(_, edge) => select({ type: 'relation', id: edge.id }, true)}
       onPaneClick={() => select(null)}
@@ -259,9 +317,34 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         setCursor({ x: Math.round(p.x), y: Math.round(p.y) });
       }}
       onMouseLeave={() => setCursor(null)}
-      onNodeDragStop={(_, __, dragged) => {
+      // 끄는 동안 마우스가 주제영역 탭 위에 있으면 그 탭을 표시한다 (놓으면 그 영역으로 옮김)
+      onNodeDrag={(e) => {
+        const hit = areaTabAt(...pointOf(e));
+        document.querySelectorAll('.area-tab.drop-target').forEach((el) => el !== hit?.el && el.classList.remove('drop-target'));
+        if (hit && hit.areaId !== (activeArea ?? '')) hit.el.classList.add('drop-target');
+      }}
+      onNodeDragStop={(e, __, dragged) => {
+        document.querySelectorAll('.area-tab.drop-target').forEach((el) => el.classList.remove('drop-target'));
+        const ids = dragged.filter((n) => n.type === 'table').map((n) => n.id);
+        // 탭에 놓았으면: 지금 영역에서 그 영역으로 옮기고(전체 탭에서 끌었으면 그 영역에 넣고), 위치는 저장하지 않는다
+        const hit = areaTabAt(...pointOf(e));
+        if (hit) {
+          const target = useStore.getState().schema.areas?.find((a) => a.id === hit.areaId);
+          if (target && hit.areaId !== activeArea && ids.length) {
+            edit((draft) => (activeArea ? moveToArea(draft, target.id, ids, activeArea) : void addToArea(draft, target.id, ids)));
+            const names = ids.map((id) => useStore.getState().schema.tables.find((t) => t.id === id)?.name).join(', ');
+            useStore.getState().showNotice({ text: `${names}을(를) ${activeArea ? '' : '전체에 둔 채 '}${target.name} 영역${activeArea ? '으로 옮겼습니다' : '에 넣었습니다'} (Ctrl+Z로 되돌리기)` });
+          }
+          setRedraw((n) => n + 1);
+          return;
+        }
         const moved = new Map(dragged.map((n) => [n.id, n.position]));
         edit((draft) => {
+          // 영역 탭에서 옮기면 그 영역에서의 위치만 바뀐다 (전체 ERD 배치는 그대로)
+          if (activeArea && draft.areas?.some((a) => a.id === activeArea)) {
+            for (const id of ids) setAreaPosition(draft, activeArea, id, moved.get(id)!);
+            return;
+          }
           for (const t of draft.tables) {
             const p = moved.get(t.id);
             if (p) t.position = { x: Math.round(p.x), y: Math.round(p.y) };
@@ -273,6 +356,8 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
         edit((draft) => {
           const table = addTableWithTemplate(draft, { position });
+          // 영역 탭에서 만들면 그 영역에 (그 자리에) 넣는다
+          if (activeArea && draft.areas?.some((a) => a.id === activeArea)) addToArea(draft, activeArea, [table.id], { [table.id]: position });
           requestFocus(`table:${table.id}`);
           select({ type: 'table', id: table.id }, true);
         });

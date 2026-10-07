@@ -98,9 +98,24 @@ export interface Relation {
   onUpdate: ReferentialAction;
 }
 
+/**
+ * 주제영역: 큰 ERD를 나눠 보는 탭 (예: 주문, 회원, 정산). 화면에서 보는 방법일 뿐 SQL·DB 동기화·비교에는 영향이 없다.
+ * 같은 테이블이 여러 영역에 들어갈 수 있고, 영역마다 테이블 위치를 따로 둔다 (없으면 전체 ERD 위치).
+ */
+export interface Area {
+  id: string;
+  name: string;
+  color?: string;
+  tableIds: string[];
+  /** 이 영역 탭에서의 테이블 위치 */
+  positions?: Record<string, { x: number; y: number }>;
+}
+
 export interface Schema {
   tables: Table[];
   relations: Relation[];
+  /** 주제영역 (없으면 영역을 쓰지 않음). areas를 빼고 저장하면 기존 영역은 그대로 둔다 */
+  areas?: Area[];
 }
 
 export function emptySchema(): Schema {

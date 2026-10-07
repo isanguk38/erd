@@ -4,6 +4,7 @@ export * from './migration';
 export * from './dialects';
 export { sqlComment } from './dialects/common';
 export * from './operations';
+export * from './areas';
 export * from './sync';
 export { parseDdl, detectDialect, type DdlImportOptions, type DdlImportResult } from './import/ddl';
 export * from './placement';

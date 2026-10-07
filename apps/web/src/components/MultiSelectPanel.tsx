@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { removeTable, updateTable, type CommentKind } from '@erd/core';
-import { useStore } from '../store';
+import { addToArea, createArea, moveToArea, removeFromArea, removeTable, updateTable, type CommentKind } from '@erd/core';
+import { selectAreas, useStore } from '../store';
 import { copySelection } from '../lib/tableClipboard';
 import { TemplateApplyMenu } from './TemplatePanels';
 import { TABLE_COLORS } from './Inspector';
+import { Dropdown } from './ui';
 
 /** 테이블을 여러 개 골랐을 때 오른쪽 패널: 색상 일괄 변경, 템플릿, 복사, 삭제 */
 export function MultiSelectPanel() {
@@ -72,6 +73,7 @@ export function MultiSelectPanel() {
           </li>
         ))}
       </ul>
+      <MultiAreaActions ids={ids} readOnly={readOnly} />
       <div className="multi-panel__actions">
         <button className="btn" onClick={() => copySelection()}>복사 (Ctrl+C)</button>
         <TemplateApplyMenu tableIds={ids} disabled={readOnly} />
@@ -91,5 +93,77 @@ export function MultiSelectPanel() {
         Shift+끌기로 상자를 그려 여러 개, Ctrl+클릭으로 하나씩 더하거나 뺍니다. 고른 테이블은 함께 끌어 옮길 수 있고, Ctrl+C / Ctrl+V로 복사·붙여넣기합니다.
       </p>
     </aside>
+  );
+}
+
+/** 고른 테이블들을 주제영역에 넣기·옮기기·빼기, 새 영역으로 묶기 */
+function MultiAreaActions({ ids, readOnly }: { ids: string[]; readOnly: boolean }) {
+  const areas = useStore(selectAreas);
+  const activeArea = useStore((s) => s.activeArea);
+  const { edit, setActiveArea, showNotice } = useStore.getState();
+  const current = areas.find((a) => a.id === activeArea);
+  const others = areas.filter((a) => a.id !== activeArea);
+  const done = (text: string) => showNotice({ text: `${text} (Ctrl+Z로 되돌리기)` });
+  return (
+    <div className="multi-panel__section">
+      <h4>주제영역</h4>
+      <div className="multi-panel__actions">
+        <button
+          className="btn"
+          disabled={readOnly}
+          onClick={() => {
+            const name = prompt(`고른 테이블 ${ids.length}개로 새 영역을 만듭니다. 영역 이름`, '새 영역');
+            if (!name?.trim()) return;
+            let id = '';
+            edit((d) => {
+              id = createArea(d, { name, tableIds: ids }).id;
+            });
+            setActiveArea(id);
+          }}
+        >
+          새 영역으로 묶기
+        </button>
+        {others.length > 0 && (
+          <Dropdown
+            label="영역에 넣기"
+            title="지금 영역에도 그대로 두고 다른 영역에도 보이게"
+            items={others.map((a) => ({
+              label: a.name,
+              disabled: readOnly,
+              onClick: () => {
+                edit((d) => void addToArea(d, a.id, ids));
+                done(`${ids.length}개를 ${a.name} 영역에 넣었습니다`);
+              },
+            }))}
+          />
+        )}
+        {current && others.length > 0 && (
+          <Dropdown
+            label="다른 영역으로 옮기기"
+            title={`${current.name} 영역에서 빼고 다른 영역으로`}
+            items={others.map((a) => ({
+              label: `${current.name} → ${a.name}`,
+              disabled: readOnly,
+              onClick: () => {
+                edit((d) => moveToArea(d, a.id, ids, current.id));
+                done(`${ids.length}개를 ${a.name} 영역으로 옮겼습니다`);
+              },
+            }))}
+          />
+        )}
+        {current && (
+          <button
+            className="btn"
+            disabled={readOnly}
+            onClick={() => {
+              edit((d) => removeFromArea(d, current.id, ids));
+              done(`${ids.length}개를 ${current.name} 영역에서 뺐습니다 (테이블은 전체에 남음)`);
+            }}
+          >
+            이 영역에서 빼기
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

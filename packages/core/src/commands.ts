@@ -28,6 +28,7 @@ import {
   updateColumn,
   updateTable,
 } from './operations';
+import { addToArea, createArea, moveToArea, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
 
 export interface ColumnSpec {
@@ -52,7 +53,7 @@ export interface ColumnSpec {
 }
 
 export type Command =
-  | { op: 'createTable'; name: string; logicalName?: string; comment?: string; color?: string; columns?: ColumnSpec[] }
+  | { op: 'createTable'; name: string; logicalName?: string; comment?: string; color?: string; columns?: ColumnSpec[]; /** 넣을 주제영역 이름 */ area?: string }
   | { op: 'updateTable'; table: string; name?: string; logicalName?: string; comment?: string; color?: string }
   | { op: 'dropTable'; table: string }
   | { op: 'addColumn'; table: string; column: ColumnSpec; after?: string }
@@ -71,7 +72,14 @@ export type Command =
       onDelete?: ReferentialAction;
       onUpdate?: ReferentialAction;
     }
-  | { op: 'dropRelation'; parent: string; child: string; dropColumns?: boolean };
+  | { op: 'dropRelation'; parent: string; child: string; dropColumns?: boolean }
+  // 주제영역 (화면에서 나눠 보는 탭. SQL·DB에는 영향 없음)
+  | { op: 'createArea'; name: string; tables?: string[]; color?: string }
+  | { op: 'updateArea'; area: string; name?: string; color?: string }
+  | { op: 'dropArea'; area: string }
+  | { op: 'addToArea'; area: string; tables: string[] }
+  | { op: 'removeFromArea'; area: string; tables: string[] }
+  | { op: 'moveToArea'; area: string; tables: string[]; from?: string };
 
 export class CommandError extends Error {
   constructor(public readonly index: number, message: string) {
@@ -121,13 +129,14 @@ export function columnPatch(spec: Partial<ColumnSpec>): Partial<Column> {
   return patch;
 }
 
-function applyOne(schema: Schema, command: Command, created: string[]): string {
+function applyOne(schema: Schema, command: Command, created: string[], areaOf: Map<string, string>): string {
   switch (command.op) {
     case 'createTable': {
       if (schema.tables.some((t) => eq(t.name, command.name))) throw new Error(`테이블 "${command.name}"이 이미 있습니다`);
       const table = addTable(schema, { name: command.name, logicalName: command.logicalName ?? '', comment: command.comment ?? '', color: command.color });
       for (const spec of command.columns ?? []) addColumn(schema, table.id, columnPatch(spec));
       created.push(table.id);
+      if (command.area) areaOf.set(table.id, requireArea(schema, command.area).id);
       return `${table.name} 테이블 생성 (컬럼 ${table.columns.length}개)`;
     }
     case 'updateTable': {
@@ -236,6 +245,39 @@ function applyOne(schema: Schema, command: Command, created: string[]): string {
       removeRelation(schema, relation.id, command.dropColumns);
       return `${parent.name} → ${child.name} 관계 삭제`;
     }
+    case 'createArea': {
+      const area = createArea(schema, { name: command.name, color: command.color, tableIds: (command.tables ?? []).map((n) => tableByName(schema, n).id) });
+      return `영역 ${area.name} 생성 (테이블 ${area.tableIds.length}개)`;
+    }
+    case 'updateArea': {
+      const before = requireArea(schema, command.area).name;
+      const area = updateArea(schema, command.area, { name: command.name, color: command.color });
+      return `영역 ${before}${area.name !== before ? ` → ${area.name}` : ''} 수정`;
+    }
+    case 'dropArea': {
+      const area = requireArea(schema, command.area);
+      removeArea(schema, area.id);
+      return `영역 ${area.name} 삭제 (테이블은 남음)`;
+    }
+    case 'addToArea': {
+      const area = requireArea(schema, command.area);
+      const tables = command.tables.map((n) => tableByName(schema, n));
+      addToArea(schema, area.id, tables.map((t) => t.id));
+      return `영역 ${area.name}에 ${tables.map((t) => t.name).join(', ')} 추가`;
+    }
+    case 'removeFromArea': {
+      const area = requireArea(schema, command.area);
+      const tables = command.tables.map((n) => tableByName(schema, n));
+      removeFromArea(schema, area.id, tables.map((t) => t.id));
+      return `영역 ${area.name}에서 ${tables.map((t) => t.name).join(', ')} 빼기 (테이블은 남음)`;
+    }
+    case 'moveToArea': {
+      const area = requireArea(schema, command.area);
+      const from = command.from ? requireArea(schema, command.from) : undefined;
+      const tables = command.tables.map((n) => tableByName(schema, n));
+      moveToArea(schema, area.id, tables.map((t) => t.id), from?.id);
+      return `${tables.map((t) => t.name).join(', ')}을(를) ${from ? `${from.name}에서 ` : ''}영역 ${area.name}(으)로 옮김`;
+    }
   }
 }
 
@@ -248,14 +290,19 @@ export interface CommandResult {
 export function applyCommands(input: Schema, commands: Command[]): CommandResult {
   const schema = cloneSchema(input);
   const created: string[] = [];
+  const areaOf = new Map<string, string>();
   const messages = commands.map((command, i) => {
     try {
-      return applyOne(schema, command, created);
+      return applyOne(schema, command, created, areaOf);
     } catch (e) {
       throw new CommandError(i, e instanceof Error ? e.message : String(e));
     }
   });
   placeNewTables(schema, created.filter((id) => findTable(schema, id)));
+  // 영역을 지정해 만든 새 테이블: 영역에 넣고 영역 안 테이블 아래에 놓는다
+  const byArea = new Map<string, string[]>();
+  for (const [tableId, areaId] of areaOf) if (findTable(schema, tableId) && schema.areas?.some((a) => a.id === areaId)) byArea.set(areaId, [...(byArea.get(areaId) ?? []), tableId]);
+  for (const [areaId, ids] of byArea) addToArea(schema, areaId, ids);
   return { schema, messages };
 }
 
@@ -304,5 +351,9 @@ export function describeSchema(schema: Schema) {
         onUpdate: r.onUpdate !== 'NO ACTION' ? r.onUpdate : undefined,
       };
     }),
+    // 주제영역: 이름과 들어 있는 테이블 (화면에서 나눠 보는 탭)
+    areas: schema.areas?.length
+      ? schema.areas.map((a) => ({ name: a.name, tables: a.tableIds.map((id) => findTable(schema, id)?.name).filter(Boolean) }))
+      : undefined,
   };
 }

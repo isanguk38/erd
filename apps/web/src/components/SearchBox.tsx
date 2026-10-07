@@ -44,7 +44,9 @@ export function SearchBox() {
     if (!r) return;
     select({ type: 'table', id: r.tableId }, true);
     setSearchFocus({ tableId: r.tableId, columnId: r.columnId });
-    fitView({ nodes: [{ id: r.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 });
+    // 지금 주제영역 탭에 없는 테이블이면 그 테이블이 있는 영역(없으면 전체)으로 바꾼 뒤 보여 준다
+    const switched = useStore.getState().revealTable(r.tableId);
+    setTimeout(() => fitView({ nodes: [{ id: r.tableId }], padding: 0.8, duration: 350, maxZoom: 1.3 }), switched ? 120 : 0);
     // 고르면 창만 닫는다. 검색어는 남겨 두어 다시 열면 이어서 찾는다 (열 때 검색어 전체가 선택돼 바로 새로 입력할 수도 있다)
     setSearchOpen(false, true);
   };

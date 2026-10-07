@@ -57,6 +57,11 @@ export function updateTable(schema: Schema, tableId: string, patch: Partial<Omit
 export function removeTable(schema: Schema, tableId: string): void {
   schema.tables = schema.tables.filter((t) => t.id !== tableId);
   schema.relations = schema.relations.filter((r) => r.fromTableId !== tableId && r.toTableId !== tableId);
+  // 영역에서도 뺀다
+  for (const area of schema.areas ?? []) {
+    area.tableIds = area.tableIds.filter((id) => id !== tableId);
+    if (area.positions) delete area.positions[tableId];
+  }
 }
 
 export function addColumn(schema: Schema, tableId: string, partial: Partial<Column> = {}, position?: number): Column {

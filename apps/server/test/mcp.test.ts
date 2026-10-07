@@ -25,6 +25,76 @@ type ToolResult = { content: { type: string; text: string }[]; isError?: boolean
 const textOf = (r: unknown) => (r as ToolResult).content[0].text;
 
 describe('MCP', () => {
+  it('주제영역: AI가 영역을 만들고 묶고 옮기고, 영역 단위로 읽고 검사한다 (제안 모드 포함)', async () => {
+    const { erd, url } = await start();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await client.callTool({ name, arguments: args });
+      if ((r as ToolResult).isError) throw new Error(textOf(r));
+      return JSON.parse(textOf(r));
+    };
+    const created = await call('create_project', { name: '영역', dialect: 'postgresql' });
+    const pending = async () => (await erd.app.inject({ method: 'GET', url: `/api/projects/${created.id}/proposals` })).json() as { id: string; status: string }[];
+    const approve = async () => {
+      for (const p of (await pending()).filter((x) => x.status === 'pending')) await erd.app.inject({ method: 'POST', url: `/api/projects/${created.id}/proposals/${p.id}/apply`, payload: {} });
+    };
+
+    // 새 프로젝트는 제안 모드: 테이블은 제안으로 모이고, 사람이 승인한다
+    const first = await call('edit_schema', {
+      project: '영역',
+      commands: [
+        { op: 'createTable', name: 'member', logicalName: '회원', columns: [{ name: 'member_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'createTable', name: 'settlement', logicalName: '정산', columns: [{ name: 'settlement_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'addRelation', parent: 'member', child: 'orders' },
+        { op: 'createArea', name: '회원', tables: ['member'] },
+        { op: 'createArea', name: '주문', tables: ['orders', 'settlement'] },
+      ],
+    });
+    expect(first.mode).toBe('propose');
+    await approve();
+    let schema = await call('get_schema', { project: '영역' });
+    // 제안을 승인하면 영역도 함께 반영된다
+    expect(schema.areas).toEqual([{ name: '회원', tables: ['member'] }, { name: '주문', tables: ['orders', 'settlement'] }]);
+
+    // 영역 명령만 있으면 제안 모드라도 바로 반영 (화면 구분일 뿐)
+    const moved = await call('edit_schema', {
+      project: '영역',
+      commands: [{ op: 'createArea', name: '정산' }, { op: 'moveToArea', area: '정산', tables: ['settlement'], from: '주문' }, { op: 'addToArea', area: '주문', tables: ['member'] }],
+    });
+    expect(moved.mode).toBe('apply');
+    schema = await call('get_schema', { project: '영역' });
+    expect(schema.areas).toEqual([{ name: '회원', tables: ['member'] }, { name: '주문', tables: ['orders', 'member'] }, { name: '정산', tables: ['settlement'] }]);
+
+    // 새 테이블을 영역에 바로 (제안 → 승인 후에도 그 영역에)
+    await call('edit_schema', { project: '영역', commands: [{ op: 'createTable', name: 'payment', area: '주문', columns: [{ name: 'payment_id', type: 'BIGINT', primaryKey: true }] }] });
+    await approve();
+
+    // 영역 단위로 읽기: 영역 테이블만, 영역 밖 관계는 따로
+    const part = await call('get_schema', { project: '영역', area: '회원' });
+    expect(part.area).toBe('회원');
+    expect(part.tables.map((t: { name: string }) => t.name)).toEqual(['member']);
+    expect(part.outsideRelations).toEqual(['member ↔ orders (영역 밖)']);
+    const ordersArea = await call('get_schema', { project: '영역', area: '주문' });
+    expect(ordersArea.tables.map((t: { name: string }) => t.name).sort()).toEqual(['member', 'orders', 'payment']);
+
+    // 영역 단위 검사: 그 영역 테이블 항목만
+    const lint = await call('check_design', { project: '영역', area: '정산' });
+    expect(lint.areaTables).toEqual(['settlement']);
+    expect(lint.summary).toMatch(/^영역 정산:/);
+    expect(lint.basicChecks.every((i: { table: string }) => i.table === 'settlement')).toBe(true);
+
+    // 없는 영역은 알려 준다
+    const bad = await client.callTool({ name: 'get_schema', arguments: { project: '영역', area: '없음' } });
+    expect((bad as ToolResult).isError).toBe(true);
+    expect(textOf(bad)).toContain('영역 "없음"이 없습니다');
+  });
+
+
   it('로컬(stdio와 같은 경로): AI가 테이블을 만들고 관계를 잇고 SQL을 뽑는다', async () => {
     const { erd, url } = await start();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

@@ -9,6 +9,7 @@ import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import {
   applyChanges,
+  mergeAreaChanges,
   diffSchemas,
   emptySchema,
   getDialect,
@@ -325,7 +326,8 @@ export class ProjectStore {
     const diff = diffSchemas(proposal.base, proposal.target, getDialect(this.dialect(id)));
     const chosen = selected ? new Set(selected) : undefined;
     this.saveVersion(id, `제안 반영 전 · ${proposal.title}`, 'auto');
-    this.setSchema(id, applyChanges(this.schema(id), diff, chosen), 'proposal');
+    // 영역은 비교(diff)에 안 나오므로 제안에서 바뀐 영역을 따로 맞춰 넣는다
+    this.setSchema(id, mergeAreaChanges(applyChanges(this.schema(id), diff, chosen), proposal.base, proposal.target), 'proposal');
     proposal.status = 'applied';
     proposal.updatedAt = new Date().toISOString();
     this.saveProposals(id, list);
