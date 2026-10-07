@@ -135,6 +135,12 @@ export function registerProjectRoutes(
       if (auth.role(req.params.id, req.user.id) !== 'owner') throw Object.assign(new Error('AI의 DB 실행 허용은 프로젝트 소유자만 바꿀 수 있습니다'), { statusCode: 403 });
       patch.aiAllowDbExecute = b.aiAllowDbExecute;
     }
+    // 설치형 앱의 AI 실행 표시 (시작할 때 넣고 끝나면 null)
+    if (b.aiRun === null) patch.aiRun = null;
+    else if (b.aiRun && typeof b.aiRun === 'object') {
+      const run = b.aiRun as { mode?: unknown };
+      patch.aiRun = { by: req.user.name || req.user.login, mode: run.mode === 'fix' ? 'fix' : 'review', startedAt: new Date().toISOString() };
+    }
     if (b.dbConnectionId === null || typeof b.dbConnectionId === 'string') {
       // 연결 id는 '이 프로젝트에서 고른 연결'을 기억하는 것뿐이라 서버 연결 목록에서 확인하지 않는다.
       // 설치형 앱의 연결은 그 PC에만 있어 서버(로컬·자체 설치)에 없을 수 있다. 실제 DB 작업은 할 때마다 연결 주인을 다시 확인한다.

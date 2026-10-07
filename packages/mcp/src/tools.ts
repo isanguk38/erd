@@ -183,6 +183,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       return text({
         summary: `오류 ${counts.error} · 경고 ${counts.warning} · 참고 ${counts.info}${skipped ? ` (사람이 무시한 항목 ${skipped}개 제외 — 고치지 말 것)` : ''}`,
         reviewNeeded: reviewNeeded(schema, review),
+        otherAiRunning: runningNotice(meta.aiRun),
         basicChecks: issues.map((i) => ({ severity: i.severity, rule: LINT_RULES[i.rule].label, table: i.tableName, column: i.columnName, message: i.message })),
         aiReview: review
           ? {
@@ -524,4 +525,11 @@ function reviewNeeded(schema: Schema, review: AiReview | null): string | undefin
   if (!pending.length) return undefined;
   const names = pending.length > 30 ? `${pending.slice(0, 30).join(', ')} 외 ${pending.length - 30}개` : pending.join(', ');
   return `AI 검토 이후 바뀐 테이블 ${pending.length}개: ${names}. 이번 설계 작업을 마치면 이 테이블들(과 관계 상대)을 검토해 save_design_review(tables에 이 이름들)로 저장하세요.`;
+}
+
+/** 설치형 앱에서 다른 AI 작업이 진행 중이면 안내 (30분이 지나면 끝난 것으로 본다) */
+function runningNotice(run: unknown): string | undefined {
+  const r = run as { by?: string; mode?: string; startedAt?: string } | null | undefined;
+  if (!r?.startedAt || Date.now() - Date.parse(r.startedAt) > 30 * 60_000) return undefined;
+  return `${r.by ?? '다른 사람'}의 앱에서 AI ${r.mode === 'fix' ? '검토·수정' : '검토'}가 진행 중입니다 (${new Date(r.startedAt).toLocaleTimeString('ko-KR')} 시작). 같은 테이블을 동시에 검토·수정하지 않게 사용자에게 알리세요.`;
 }

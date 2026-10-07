@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
+import { cancelAiHere, checkAiAvailable, runAiHere, useAiRun, type AiMode } from '../lib/aiRunner';
 
 /** AI 검토 항목 중 지금 보여 줄 것 (열림·다시 확인 필요, 대상 테이블이 지워진 것은 뺀다) */
 function openReviewItems(items: AiReviewItem[] | undefined, schema: Schema): (AiReviewItem & { state: AiReviewState })[] {
@@ -77,6 +78,18 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const [aiOpen, setAiOpen] = useState(true);
   // 마지막 AI 검토 뒤 새로 생기거나 바뀐 테이블 (검토가 밀린 것). 검토를 한 번도 안 했으면 null
   const pending = useMemo(() => (schema.tables.length ? unreviewedTables(schema, review) : []), [schema, review]);
+  // 설치형 앱 + 이 PC에 Claude Code가 있으면 바로 실행, 아니면 문장 복사
+  const projectId = useStore((s) => s.projectId);
+  const otherRun = useStore((s) => s.meta.aiRun);
+  const ai = useAiRun();
+  useEffect(() => checkAiAvailable(), []);
+  const runningHere = ai.running?.projectId === projectId ? ai.running : null;
+  const result = ai.result?.projectId === projectId ? ai.result : null;
+  const othersRunning = !runningHere && otherRun && Date.now() - Date.parse(otherRun.startedAt) < 30 * 60_000 ? otherRun : null;
+  const runHere = (mode: AiMode) => {
+    if (!projectId) return;
+    void runAiHere({ projectId, projectName, mode, tables: pending?.length ? pending : undefined });
+  };
   const [showIgnored, setShowIgnored] = useState(false);
   const setIgnored = (id: string, on: boolean) => {
     const next = new Set(ignoredIds ?? []);
@@ -151,13 +164,43 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
         <Dropdown
           label="AI에게 요청"
           title="AI(MCP)에게 보낼 요청 문장을 복사합니다"
-          items={[
-            { label: pending?.length ? '바뀐 테이블 검토' : '설계 검토', hint: pending?.length ? `${pending.length}개만` : '고치지 않음', onClick: askReview },
-            { label: '검토하고 고치기', hint: '무시한 항목 제외', onClick: askAi },
-            { label: 'AI 연결 방법', onClick: onOpenAi },
-          ]}
+          items={
+            ai.available
+              ? [
+                  { label: pending?.length ? '바뀐 테이블 검토' : '설계 검토', hint: `Claude로 바로 실행${pending?.length ? ` · ${pending.length}개` : ''}`, disabled: Boolean(ai.running) || readOnly, onClick: () => runHere('review') },
+                  { label: '검토하고 고치기', hint: 'Claude로 바로 실행', disabled: Boolean(ai.running) || readOnly, onClick: () => runHere('fix') },
+                  { label: '요청 문장만 복사', hint: '다른 AI에 붙여넣기', onClick: askReview },
+                  { label: 'AI 연결 방법', onClick: onOpenAi },
+                ]
+              : [
+                  { label: pending?.length ? '바뀐 테이블 검토' : '설계 검토', hint: pending?.length ? `문장 복사 · ${pending.length}개만` : '문장 복사', onClick: askReview },
+                  { label: '검토하고 고치기', hint: '문장 복사', onClick: askAi },
+                  { label: 'AI 연결 방법', onClick: onOpenAi },
+                ]
+          }
         />
       </div>
+      {runningHere && (
+        <div className="lint-ai-run">
+          <span className="lint-ai-run__spinner" />
+          <span className="grow">
+            Claude가 {runningHere.mode === 'fix' ? '검토하고 고치는' : '검토하는'} 중 · <span className="muted">{runningHere.step}</span>
+          </span>
+          <button className="btn btn-ghost small" onClick={cancelAiHere}>취소</button>
+        </div>
+      )}
+      {othersRunning && (
+        <div className="lint-ai-run">
+          <span className="lint-ai-run__spinner" />
+          <span className="grow muted">{othersRunning.by}의 앱에서 AI {othersRunning.mode === 'fix' ? '검토·수정' : '검토'} 중</span>
+        </div>
+      )}
+      {result && !runningHere && (
+        <div className={`lint-ai-result${result.ok ? '' : ' lint-ai-result--error'}`}>
+          <span className="lint-ai-result__text">{result.ok ? '✓ ' : '⚠ '}{result.summary || (result.ok ? '완료했습니다' : '실패했습니다')}</span>
+          <button className="icon-btn" onClick={ai.clearResult} title="닫기"><Icon name="close" size={12} /></button>
+        </div>
+      )}
       {issues.length === 0 && reviewItems.length === 0 ? (
         <div className="lint-empty">
           <Icon name="check" size={20} />
