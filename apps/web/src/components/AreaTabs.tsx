@@ -80,7 +80,7 @@ export function AreaTabs() {
               className="area-tab__label"
               onClick={() => setActiveArea(a.id)}
               onDoubleClick={() => !readOnly && setRenaming(a.id)}
-              title={`${a.name} 영역 · 테이블 ${a.tableIds.length}개${readOnly ? '' : ' · 더블클릭: 이름 바꾸기 · 테이블을 끌어 놓으면 이 영역으로 옮김'}`}
+              title={`${a.name} 영역 · 테이블 ${a.tableIds.length}개${readOnly ? '' : ' · 더블클릭: 이름 바꾸기 · 테이블을 꾹 누른 채 끌어 놓으면 이 영역으로 옮김'}`}
             >
               <span className="area-tab__dot" />
               {a.name} <span className="area-tab__count">{a.tableIds.length}</span>
@@ -123,7 +123,7 @@ export function AreaTabs() {
           <Icon name="plus" size={14} /> 영역
         </button>
       )}
-      {active && <span className="area-tabs__hint muted small">점선 카드는 다른 영역 테이블 · 테이블을 탭으로 끌어 놓으면 그 영역으로 옮겨집니다</span>}
+      {active && <span className="area-tabs__hint muted small">점선 카드는 다른 영역 테이블 · 테이블을 꾹 누른 채 탭으로 끌어 놓으면 그 영역으로 옮겨집니다</span>}
     </div>
   );
 }

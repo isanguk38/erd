@@ -108,6 +108,8 @@ function TableEditor({ table }: { table: Table }) {
   const { edit, select } = useStore.getState();
   const fkIds = foreignKeyColumnIds(schema, table.id);
   const setTable = (patch: Parameters<typeof updateTable>[2]) => edit((d) => updateTable(d, table.id, patch));
+  // 지금 영역 탭이고 이 테이블이 그 영역에 있으면 (삭제 버튼 대신 영역에서 빼기)
+  const currentArea = useStore((s) => (s.activeArea ? s.schema.areas?.find((a) => a.id === s.activeArea && a.tableIds.includes(table.id)) : undefined));
   const setColumn = (column: Column, patch: Partial<Column>) => edit((d) => updateColumn(d, table.id, column.id, patch));
   // 타입·길이·자동 증가·ON UPDATE를 바꿀 때 함께 바로잡는다 (예: VARCHAR(255)를 DATETIME으로 바꾸면 길이 255를 지움)
   const setColumnFixed = (column: Column, patch: Partial<Column>) => {
@@ -137,16 +139,32 @@ function TableEditor({ table }: { table: Table }) {
         <h3>테이블</h3>
         <div className="btn-row">
           <TemplateApplyMenu tableIds={[table.id]} />
-          <button
-            className="btn btn-danger btn-sm"
-            onClick={() => {
-              if (!confirm(`${table.name} 테이블을 삭제할까요?`)) return;
-              edit((d) => removeTable(d, table.id));
-              select(null);
-            }}
-          >
-            삭제
-          </button>
+          {/* 영역 탭에서는 그 영역에서만 빼고, 테이블 삭제는 전체 탭에서 (Delete 키와 같은 규칙) */}
+          {currentArea ? (
+            <button
+              className="btn btn-sm"
+              title="테이블은 전체에 남고 이 영역에서만 빠집니다. 테이블 삭제는 전체 탭에서 합니다"
+              onClick={() => {
+                edit((d) => removeFromArea(d, currentArea.id, [table.id]));
+                select(null);
+                useStore.getState().showNotice({ text: `${table.name}을(를) ${currentArea.name} 영역에서 뺐습니다. 테이블은 전체에 남아 있습니다 (Ctrl+Z로 되돌리기)` });
+              }}
+            >
+              {currentArea.name} 영역에서 빼기
+            </button>
+          ) : (
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() => {
+                const inAreas = (useStore.getState().schema.areas ?? []).some((a) => a.tableIds.includes(table.id));
+                if (!confirm(`${table.name} 테이블을 삭제할까요?${inAreas ? ' 모든 영역에서도 사라집니다.' : ''}`)) return;
+                edit((d) => removeTable(d, table.id));
+                select(null);
+              }}
+            >
+              삭제
+            </button>
+          )}
         </div>
       </div>
       <div className="form-grid">

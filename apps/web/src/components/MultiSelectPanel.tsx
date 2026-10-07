@@ -11,6 +11,8 @@ export function MultiSelectPanel() {
   const ids = useStore((s) => s.selectedTables);
   const schema = useStore((s) => s.schema);
   const readOnly = useStore((s) => s.role === 'viewer' || Boolean(s.compare));
+  // 영역 탭에서는 삭제 대신 '이 영역에서 빼기' (테이블 삭제는 전체 탭에서)
+  const inAreaTab = useStore((s) => Boolean(s.activeArea && s.schema.areas?.some((a) => a.id === s.activeArea)));
   const { edit, select, addComments } = useStore.getState();
   const [text, setText] = useState('');
   const [kind, setKind] = useState<CommentKind>('comment');
@@ -77,7 +79,7 @@ export function MultiSelectPanel() {
       <div className="multi-panel__actions">
         <button className="btn" onClick={() => copySelection()}>복사 (Ctrl+C)</button>
         <TemplateApplyMenu tableIds={ids} disabled={readOnly} />
-        <button
+        {!inAreaTab && <button
           className="btn btn-danger"
           disabled={readOnly}
           onClick={() => {
@@ -87,7 +89,7 @@ export function MultiSelectPanel() {
           }}
         >
           삭제
-        </button>
+        </button>}
       </div>
       <p className="muted small">
         Shift+끌기로 상자를 그려 여러 개, Ctrl+클릭으로 하나씩 더하거나 뺍니다. 고른 테이블은 함께 끌어 옮길 수 있고, Ctrl+C / Ctrl+V로 복사·붙여넣기합니다.

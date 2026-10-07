@@ -795,3 +795,9 @@ body.resizing-side { cursor: col-resize; user-select: none; }
 .area-chip .icon-btn { padding: 0 4px; font-size: 13px; }
 .table-areas .dropdown .btn-tool { height: 26px; font-size: 12px; padding: 0 8px; }
 .multi-panel__section h4 { margin: 4px 0 6px; font-size: 13px; }
+/* 영역으로 옮기기 모드 (테이블을 꾹 누름): 고른 테이블만 또렷하게, 영역 탭은 놓을 곳으로 표시 */
+.react-flow.picking .react-flow__node:not(.selected) { opacity: 0.18; transition: opacity 0.15s; }
+.react-flow.picking .react-flow__edge { opacity: 0.12; }
+.react-flow.picking .react-flow__node.selected .table-node { box-shadow: 0 0 0 3px var(--accent), 0 12px 30px rgb(0 0 0 / 0.2); }
+body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed var(--area-color, var(--accent)); outline-offset: -5px; border-radius: 6px; }
+.pick-chip { position: fixed; z-index: 80; pointer-events: none; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 5px 10px; font-size: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); white-space: nowrap; }

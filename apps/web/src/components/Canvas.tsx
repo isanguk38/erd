@@ -12,7 +12,10 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { addToArea, connectManyToMany, connectTables, findSameRelation, moveToArea, removeRelation, removeTable, setAreaPosition } from '@erd/core';
+import { addToArea, connectManyToMany, connectTables, findSameRelation, moveToArea, removeFromArea, removeRelation, removeTable, setAreaPosition } from '@erd/core';
+
+/** 이만큼 움직이지 않고 누르고 있으면 영역으로 옮기기 모드 */
+const LONG_PRESS_MS = 450;
 import { useStore } from '../store';
 import { TableNode } from './TableNode';
 import { RelationEdge } from './RelationEdge';
@@ -285,8 +288,92 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
     [edit, select],
   );
 
+  // ── 영역으로 옮기기 모드: 테이블을 움직이지 않고 꾹 누르고 있으면(0.45초) 켜진다 ──────────
+  // 고른 테이블만 또렷하고 나머지는 흐려지며, 끄는 동안 화면이 따라 움직이지 않는다(가장자리 자동 이동 끔).
+  // 영역 탭에 놓으면 그 영역으로 옮기고, 다른 곳에 놓거나 Esc면 원래 자리로. 그냥 클릭해 끌면 평소처럼 위치만 옮긴다.
+  const hasAreas = useStore((s) => Boolean(s.schema.areas?.length));
+  const [picking, setPicking] = useState<{ ids: string[]; x: number; y: number } | null>(null);
+  const pickingRef = useRef<{ ids: string[]; cancelled: boolean } | null>(null);
+  useEffect(() => {
+    if (readOnly || !hasAreas) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let start = { x: 0, y: 0 };
+    const stop = () => {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+    };
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest('.react-flow__handle')) return; // 관계 잇기 점
+      const id = (target.closest('.react-flow__node-table') as HTMLElement | null)?.dataset.id;
+      if (!id) return;
+      start = { x: e.clientX, y: e.clientY };
+      stop();
+      timer = setTimeout(() => {
+        timer = undefined;
+        const state = useStore.getState();
+        // 여러 개를 골라 둔 상태에서 그중 하나를 누르면 고른 것 전부
+        const ids = state.selectedTables.length > 1 && state.selectedTables.includes(id) ? state.selectedTables : [id];
+        if (!state.selectedTables.includes(id) || ids.length === 1) state.selectTables(ids);
+        pickingRef.current = { ids, cancelled: false };
+        setPicking({ ids, x: start.x, y: start.y });
+      }, LONG_PRESS_MS);
+    };
+    const move = (e: PointerEvent) => {
+      // 누른 채 움직이면 평소 끌기 (꾹 누르기 아님)
+      if (timer && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) stop();
+      if (pickingRef.current && !pickingRef.current.cancelled) setPicking((p) => (p ? { ...p, x: e.clientX, y: e.clientY } : p));
+    };
+    const up = () => {
+      stop();
+      // 끌기를 마치는 처리(onNodeDragStop)가 모드를 먼저 보도록 한 박자 뒤에 끈다
+      setTimeout(() => {
+        pickingRef.current = null;
+        setPicking(null);
+      }, 0);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !pickingRef.current) return;
+      pickingRef.current.cancelled = true;
+      setPicking(null);
+    };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    window.addEventListener('keydown', key);
+    return () => {
+      stop();
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      window.removeEventListener('keydown', key);
+    };
+  }, [readOnly, hasAreas]);
+  // 영역 탭들을 놓을 곳으로 표시
+  useEffect(() => {
+    document.body.classList.toggle('area-picking', Boolean(picking));
+    return () => document.body.classList.remove('area-picking');
+  }, [picking]);
+  const clearDropMarks = () => document.querySelectorAll('.area-tab.drop-target').forEach((el) => el.classList.remove('drop-target'));
+
   return (
+    <>
     <ReactFlow
+      className={picking ? 'picking' : undefined}
+      autoPanOnNodeDrag={!picking}
+      // 영역 탭에서 Delete: 테이블은 지우지 않고 그 영역에서만 뺀다 (테이블 삭제는 전체 탭에서)
+      onBeforeDelete={async ({ nodes: toDelete }) => {
+        const tables = toDelete.filter((n) => n.type === 'table');
+        const area = activeArea ? useStore.getState().schema.areas?.find((a) => a.id === activeArea) : undefined;
+        if (!area || !tables.length) return true;
+        const names = tables.map((n) => useStore.getState().schema.tables.find((t) => t.id === n.id)?.name ?? n.id);
+        edit((d) => removeFromArea(d, area.id, tables.map((n) => n.id)));
+        useStore.getState().showNotice({ text: `${names.join(', ')}을(를) ${area.name} 영역에서 뺐습니다. 테이블은 전체에 남아 있고, 삭제는 전체 탭에서 합니다 (Ctrl+Z로 되돌리기)` });
+        return false;
+      }}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -317,18 +404,26 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         setCursor({ x: Math.round(p.x), y: Math.round(p.y) });
       }}
       onMouseLeave={() => setCursor(null)}
-      // 끄는 동안 마우스가 주제영역 탭 위에 있으면 그 탭을 표시한다 (놓으면 그 영역으로 옮김)
+      // 옮기기 모드에서 끄는 동안 마우스가 주제영역 탭 위에 있으면 그 탭을 표시한다 (놓으면 그 영역으로 옮김)
       onNodeDrag={(e) => {
+        if (!pickingRef.current || pickingRef.current.cancelled) return;
         const hit = areaTabAt(...pointOf(e));
         document.querySelectorAll('.area-tab.drop-target').forEach((el) => el !== hit?.el && el.classList.remove('drop-target'));
         if (hit && hit.areaId !== (activeArea ?? '')) hit.el.classList.add('drop-target');
       }}
       onNodeDragStop={(e, __, dragged) => {
-        document.querySelectorAll('.area-tab.drop-target').forEach((el) => el.classList.remove('drop-target'));
+        clearDropMarks();
         const ids = dragged.filter((n) => n.type === 'table').map((n) => n.id);
-        // 탭에 놓았으면: 지금 영역에서 그 영역으로 옮기고(전체 탭에서 끌었으면 그 영역에 넣고), 위치는 저장하지 않는다
-        const hit = areaTabAt(...pointOf(e));
-        if (hit) {
+        // 옮기기 모드(꾹 누르기): 탭에 놓으면 지금 영역에서 그 영역으로 옮기고(전체 탭에서 끌었으면 그 영역에 넣고),
+        // 위치는 저장하지 않는다. 탭이 아닌 곳에 놓거나 Esc면 원래 자리로
+        const pick = pickingRef.current;
+        if (pick) {
+          const hit = pick.cancelled ? null : areaTabAt(...pointOf(e));
+          if (!hit && !pick.cancelled) useStore.getState().showNotice({ text: '영역 탭에 놓으면 그 영역으로 옮겨집니다. 위치만 옮기려면 누르자마자 끌어 주세요' });
+          if (!hit) {
+            setRedraw((n) => n + 1);
+            return;
+          }
           const target = useStore.getState().schema.areas?.find((a) => a.id === hit.areaId);
           if (target && hit.areaId !== activeArea && ids.length) {
             edit((draft) => (activeArea ? moveToArea(draft, target.id, ids, activeArea) : void addToArea(draft, target.id, ids)));
@@ -399,5 +494,11 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         ))}
       </ViewportPortal>
     </ReactFlow>
+    {picking && (
+      <div className="pick-chip" style={{ left: picking.x + 14, top: picking.y + 14 }}>
+        <b>{picking.ids.map((id) => schema.tables.find((t) => t.id === id)?.name).join(', ')}</b> → 영역 탭에 놓으면 옮겨집니다 · Esc 취소
+      </div>
+    )}
+    </>
   );
 }
