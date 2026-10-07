@@ -23,6 +23,8 @@ import {
   syncedBaseline,
   toLink,
   requireArea,
+  areaSchema,
+  setAreaPosition,
   toScript,
   type Change,
   type ChangeCategory,
@@ -338,9 +340,22 @@ export function registerProjectRoutes(
     return { dialect: dialect.id, changes: summarize(diff.changes), statements, script: toScript(statements) };
   });
 
-  app.post<{ Params: { id: string } }>('/api/projects/:id/layout', async (req) => {
+  /** 자동 배치. area(이름 또는 id)를 주면 그 주제영역 탭의 배치만 정리한다 (전체 ERD 배치는 그대로) */
+  app.post<{ Params: { id: string }; Body: { area?: string } }>('/api/projects/:id/layout', async (req) => {
     const { id } = req.params;
     const schema = store.schema(id);
+    if (req.body?.area) {
+      let area;
+      try {
+        area = requireArea(schema, req.body.area);
+      } catch (e) {
+        throw badRequest(e instanceof Error ? e.message : String(e));
+      }
+      const positions = await autoLayout(areaSchema(schema, area.id).schema);
+      for (const [tableId, p] of positions) setAreaPosition(schema, area.id, tableId, p);
+      store.setSchema(id, schema, 'api');
+      return { ok: true, area: area.name, tables: area.tableIds.length };
+    }
     const positions = await autoLayout(schema);
     for (const t of schema.tables) t.position = positions.get(t.id) ?? t.position;
     store.setSchema(id, schema, 'api');

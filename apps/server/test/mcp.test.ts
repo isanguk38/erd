@@ -88,6 +88,17 @@ describe('MCP', () => {
     expect(lint.summary).toMatch(/^영역 정산:/);
     expect(lint.basicChecks.every((i: { table: string }) => i.table === 'settlement')).toBe(true);
 
+    // 영역만 바꾸면 설계 검토 안내를 붙이지 않는다
+    const renamed = await call('edit_schema', { project: '영역', commands: [{ op: 'updateArea', area: '정산', name: '정산·지급' }] });
+    expect(renamed.designReview).toBeUndefined();
+    // 영역 자동 배치: 그 영역 탭 위치만 정리하고 전체 배치는 그대로
+    const before = ((await erd.app.inject({ method: 'GET', url: `/api/projects/${created.id}` })).json() as { schema: { tables: { name: string; position: unknown }[] } }).schema.tables;
+    const laid = await call('auto_layout', { project: '영역', area: '주문' });
+    expect(laid).toMatchObject({ ok: true, area: '주문', tables: 3 });
+    const after = ((await erd.app.inject({ method: 'GET', url: `/api/projects/${created.id}` })).json() as { schema: { tables: { name: string; position: unknown }[]; areas: { name: string; positions?: Record<string, unknown> }[] } }).schema;
+    expect(after.tables.map((t) => t.position)).toEqual(before.map((t) => t.position));
+    expect(Object.keys(after.areas.find((a) => a.name === '주문')!.positions ?? {})).toHaveLength(3);
+
     // 없는 영역은 알려 준다
     const bad = await client.callTool({ name: 'get_schema', arguments: { project: '영역', area: '없음' } });
     expect((bad as ToolResult).isError).toBe(true);

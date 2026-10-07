@@ -308,7 +308,9 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     safe(async ({ project, commands, mode: m }: { project: string; commands: unknown[]; mode?: string }) => {
       const p = await resolveProject(project);
       const result = await api.request<Record<string, unknown>>('POST', `/api/projects/${p.id}/commands`, { commands, mode: m, source: 'ai', title: 'AI 제안' });
-      return text({ ...result, designReview: await reviewReminder(p.id) });
+      // 영역(화면 구분)만 바꿨으면 설계가 바뀐 게 아니라 검토 안내를 붙이지 않는다
+      const areaOnly = commands.every((c) => /Area$/.test(String((c as { op?: string }).op)));
+      return text(areaOnly ? result : { ...result, designReview: await reviewReminder(p.id) });
     }),
   );
 
@@ -346,10 +348,14 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
 
   server.registerTool(
     'auto_layout',
-    { title: '자동 배치', description: '관계를 보고 테이블 위치를 자동으로 정리한다.', inputSchema: { project: projectArg } },
-    safe(async ({ project }: { project: string }) => {
+    {
+      title: '자동 배치',
+      description: '관계를 보고 테이블 위치를 자동으로 정리한다. area를 주면 그 주제영역 탭의 배치만 정리한다 (영역을 새로 묶은 뒤 영역마다 한 번씩).',
+      inputSchema: { project: projectArg, area: z.string().optional().describe('주제영역 이름 (생략하면 전체 ERD)') },
+    },
+    safe(async ({ project, area }: { project: string; area?: string }) => {
       const p = await resolveProject(project);
-      return text(await api.request('POST', `/api/projects/${p.id}/layout`));
+      return text(await api.request('POST', `/api/projects/${p.id}/layout`, area ? { area } : undefined));
     }),
   );
 
