@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getDialect, planPull, summarizePlan, type DialectId } from '@erd/core';
+import { getDialect, planPull, summarizePlan, syncedBaseline, type DialectId, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { api, projectApi, type VersionInfo } from './api';
 import { desktop } from './desktop';
@@ -83,8 +83,29 @@ async function readDesktopSnapshot(projectId: string, connectionId: string): Pro
   const connection = connections.find((c) => c.id === connectionId);
   // 이 프로젝트에 연결된 DB가 다른 PC(다른 사람)의 연결이면 이 PC에서는 확인할 수 없다
   if (!connection) return null;
-  const [db, baseline] = await Promise.all([api.introspect(connection.id), projectApi.baseline(projectId, connection.id)]);
+  const [db, saved] = await Promise.all([api.introspect(connection.id), projectApi.baseline(projectId, connection.id)]);
+  const baseline = await rememberIfInSync(projectId, connection.id, db, saved);
   return { connection, db, baseline, checkedAt: new Date().toISOString() };
+}
+
+type Baseline = Awaited<ReturnType<typeof projectApi.baseline>>;
+
+/**
+ * 기준 시점이 없는데 지금 ERD와 DB가 똑같으면 지금을 기준 시점으로 저장한다 (이미 맞춰진 상태 = 처음 맞추기).
+ * 같으면 가져오기·내보내기에서 반영할 것이 없어 기준 시점이 영영 안 생기고, 그 뒤 ERD를 고쳐도 누가 바꿨는지 몰라 배지가 안 뜬다.
+ */
+export async function rememberIfInSync(projectId: string, connectionId: string, db: { schema: Schema; dialect: DialectId }, baseline: Baseline): Promise<Baseline> {
+  if (baseline) return baseline;
+  const erd = useStore.getState().schema;
+  if (planPull(erd, db.schema, { dialect: getDialect(db.dialect) }).diff.changes.length) return baseline;
+  const schema = syncedBaseline(db.schema, erd);
+  try {
+    const { at } = await projectApi.saveBaseline(projectId, connectionId, schema);
+    return { at, schema };
+  } catch (e) {
+    console.warn('기준 시점 저장 실패', e);
+    return baseline;
+  }
 }
 
 /** 지금 ERD와 읽어 둔 DB 구조를 비교한다 */

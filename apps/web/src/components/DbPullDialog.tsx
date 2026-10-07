@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { applyChanges, getDialect, placeNewTables, planPull, syncedBaseline, type RenameLink, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type IntrospectResult } from '../lib/api';
 import { useStore } from '../store';
-import { saveVersion } from '../lib/hooks';
+import { rememberIfInSync, saveVersion } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ChangeList, type GroupLabel } from './ChangeList';
 import { ConnectionPicker } from './ConnectionPicker';
@@ -46,7 +46,8 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
     try {
       const [r, b] = await Promise.all([api.introspect(connection.id, commentAs), projectApi.baseline(projectId, connection.id)]);
       setLinks([]);
-      setBaseline(b);
+      // ERD와 DB가 이미 같으면 지금을 기준 시점으로 (반영할 게 없어 가져오기를 못 눌러도 다음부터 배지가 뜨게)
+      setBaseline(isEmpty ? b : await rememberIfInSync(projectId, connection.id, r, b));
       setResult(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

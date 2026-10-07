@@ -3,7 +3,7 @@ import { appliedChanges, generateStatements, getDialect, planPush, syncedBaselin
 import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
-import { saveVersion, useDialect, useProjectName } from '../lib/hooks';
+import { rememberIfInSync, saveVersion, useDialect, useProjectName } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ConnectionPicker } from './ConnectionPicker';
 import { MigrationPreview } from './MigrationPreview';
@@ -53,7 +53,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
     try {
       const [r, b] = await Promise.all([api.introspect(connection.id), projectApi.baseline(projectId, connection.id)]);
       setLinks([]);
-      setBaseline(b);
+      setBaseline(await rememberIfInSync(projectId, connection.id, r, b));
       setDb(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
