@@ -24,6 +24,13 @@ export function useLintCount(): number {
   }, [schema, dialect, ignored, review]);
 }
 
+/** AI 검토 이후 바뀐 테이블 수 (검토를 한 번도 안 한 프로젝트는 0 — AI를 안 쓰는 프로젝트에 계속 뜨지 않게) */
+export function useReviewPending(): number {
+  const schema = useStore((s) => s.schema);
+  const review = useStore((s) => s.meta.aiReview);
+  return useMemo(() => unreviewedTables(schema, review)?.length ?? 0, [schema, review]);
+}
+
 const SEV_LABEL: Record<AiReviewItem['severity'], string> = { error: '오류', warning: '경고', info: '참고' };
 
 /** 타입 검사의 고치기: 그 고침 때문에 생기는 문제(예: BIGINT로 바꾸면 남는 길이)도 함께 바로잡는다 */

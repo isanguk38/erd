@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { dialectList, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
-import { useLintCount } from './LintPanel';
+import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
 import { setThemeSetting, useTheme, type ThemeSetting } from '../lib/theme';
 import { useStore, type RelationTool, type ViewMode } from '../store';
@@ -152,6 +152,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     });
   };
   const lintCount = useLintCount();
+  const reviewPending = useReviewPending();
   const { setting: themeSetting, effective: theme } = useTheme();
   const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { light: 'dark', dark: 'light' };
   const THEME_LABEL: Record<ThemeSetting, string> = { light: '라이트', dark: '다크' };
@@ -182,10 +183,16 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <span className="hide-narrow">검색</span>
           <kbd className="hide-narrow">Ctrl F</kbd>
         </button>
-        <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('lint')} title="설계 검사: 기본키·FK·인덱스·이름 규칙·논리명 등">
+        <button
+          className="btn btn-ghost btn-with-badge"
+          onClick={() => onOpen('lint')}
+          title={`설계 검사: 오류·경고 ${lintCount}개 (기본 검사 + AI 검토)${reviewPending ? ` · AI 검토 이후 바뀐 테이블 ${reviewPending}개 — 다시 검토가 필요합니다` : ''}`}
+        >
           <Icon name="check" />
           <span className="hide-narrow">설계 검사</span>
           {lintCount > 0 && <span className="db-badge lint">{lintCount}</span>}
+          {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
+          {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
         </button>
         <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
           <Icon name="comment" />
