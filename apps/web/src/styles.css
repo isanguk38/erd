@@ -276,7 +276,8 @@ kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px
 .column-grid { display: flex; flex-direction: column; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
 .column-grid > * { min-width: 600px; }
 .column-grid__head, .column-grid__row {
-  display: grid; grid-template-columns: 1.2fr 1fr 1fr 44px 22px 22px 22px 22px 1.7fr 1fr 64px; gap: 4px; align-items: center;
+  /* 타입 칸은 VARCHAR·TIMESTAMP 같은 이름이 잘리지 않을 만큼은 둔다 */
+  display: grid; grid-template-columns: 1.2fr 1fr minmax(88px, 1.2fr) 44px 22px 22px 22px 22px 1.4fr 0.9fr 64px; gap: 4px; align-items: center;
 }
 .column-grid__head { color: var(--muted); font-size: 11px; padding: 0 2px; }
 .column-grid__row input:not([type='checkbox']) { width: 100%; padding: 3px 5px; font-size: 12px; min-width: 0; }

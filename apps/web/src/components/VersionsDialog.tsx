@@ -51,7 +51,7 @@ export function VersionsDialog({ onClose }: { onClose: () => void }) {
               : changedSinceLatest === null
                 ? '최근 버전과 비교하는 중…'
                 : latestIsCurrent
-                  ? `가장 최근 버전 "${latest.name}"과 같습니다.`
+                  ? `가장 최근 버전("${latest.name}")과 같습니다.`
                   : `가장 최근 버전 "${latest.name}" 이후 ${changedSinceLatest}건 바뀌었습니다. 이 상태를 남기려면 위에서 버전으로 저장하세요.`}
           </div>
         </div>

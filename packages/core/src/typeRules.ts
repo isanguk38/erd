@@ -86,6 +86,35 @@ const DECIMAL_LIMITS: Partial<Record<DialectId, { types: Set<string>; p: number;
   oracle: { types: new Set(['NUMBER']), p: 38, s: 127, sWithinP: false, minS: -84 },
 };
 
+/**
+ * DB별로 아는 타입 이름 (첫 단어 기준: DOUBLE PRECISION → DOUBLE, TIMESTAMP WITH TIME ZONE → TIMESTAMP).
+ * 여기 없는 타입은 오타이거나 다른 DB 전용 타입일 수 있어 경고한다 (직접 만든 타입·확장 타입일 수도 있어 오류는 아님).
+ * 다른 DB의 흔한 타입 대부분은 SQL을 만들 때 이 DB 타입으로 바뀐다 (renderType) — 바뀐 뒤 이름으로 본다.
+ */
+const words = (s: string) => new Set(s.trim().split(/\s+/));
+const MYSQL_KNOWN =
+  'TINYINT SMALLINT MEDIUMINT MIDDLEINT INT INTEGER BIGINT INT1 INT2 INT3 INT4 INT8 DECIMAL DEC NUMERIC FIXED FLOAT DOUBLE REAL BIT BOOL BOOLEAN SERIAL ' +
+  'DATE DATETIME TIMESTAMP TIME YEAR CHAR CHARACTER VARCHAR NCHAR NVARCHAR NATIONAL BINARY VARBINARY TINYBLOB BLOB MEDIUMBLOB LONGBLOB ' +
+  'TINYTEXT TEXT MEDIUMTEXT LONGTEXT LONG ENUM SET JSON GEOMETRY POINT LINESTRING POLYGON MULTIPOINT MULTILINESTRING MULTIPOLYGON GEOMETRYCOLLECTION GEOMCOLLECTION';
+const KNOWN_TYPES: Record<DialectId, Set<string>> = {
+  mysql: words(MYSQL_KNOWN),
+  mariadb: words(`${MYSQL_KNOWN} UUID INET4 INET6 VECTOR`),
+  postgresql: words(
+    'SMALLINT INTEGER INT INT2 INT4 INT8 BIGINT DECIMAL NUMERIC REAL DOUBLE FLOAT FLOAT4 FLOAT8 SMALLSERIAL SERIAL BIGSERIAL SERIAL2 SERIAL4 SERIAL8 MONEY ' +
+      'CHARACTER CHAR VARCHAR BPCHAR TEXT NAME CITEXT BYTEA TIMESTAMP TIMESTAMPTZ DATE TIME TIMETZ INTERVAL BOOLEAN BOOL ' +
+      'POINT LINE LSEG BOX PATH POLYGON CIRCLE CIDR INET MACADDR MACADDR8 BIT VARBIT TSVECTOR TSQUERY UUID XML JSON JSONB HSTORE LTREE ' +
+      'INT4RANGE INT8RANGE NUMRANGE TSRANGE TSTZRANGE DATERANGE OID GEOMETRY GEOGRAPHY VECTOR',
+  ),
+  oracle: words(
+    'VARCHAR2 NVARCHAR2 VARCHAR CHAR NCHAR CHARACTER NATIONAL NUMBER FLOAT BINARY_FLOAT BINARY_DOUBLE INTEGER INT SMALLINT DECIMAL NUMERIC REAL DOUBLE ' +
+      'DATE TIMESTAMP INTERVAL RAW LONG CLOB NCLOB BLOB BFILE ROWID UROWID JSON BOOLEAN XMLTYPE SDO_GEOMETRY VECTOR',
+  ),
+  mssql: words(
+    'BIGINT INT INTEGER SMALLINT TINYINT BIT DECIMAL DEC NUMERIC MONEY SMALLMONEY FLOAT REAL DOUBLE DATE DATETIME DATETIME2 SMALLDATETIME DATETIMEOFFSET TIME ' +
+      'CHAR CHARACTER VARCHAR TEXT NCHAR NVARCHAR NTEXT NATIONAL BINARY VARBINARY IMAGE UNIQUEIDENTIFIER XML SQL_VARIANT ROWVERSION TIMESTAMP HIERARCHYID GEOMETRY GEOGRAPHY JSON SYSNAME VECTOR',
+  ),
+};
+
 const isInt = (v: string) => /^\d+$/.test(v.trim());
 const CURRENT_TIME = /^(CURRENT_TIMESTAMP|NOW|LOCALTIMESTAMP)\s*(\(\s*(\d*)\s*\))?$/i;
 /** CURRENT_TIMESTAMP(3) → 3, CURRENT_TIMESTAMP → 0, 시각 함수가 아니면 null */
@@ -109,6 +138,33 @@ function canAutoIncrementType(ctx: Ctx): boolean {
 }
 
 const RULES: Rule[] = [
+  // ── 이 DB에 없는 타입 ────────────────────────────────────
+  {
+    code: 'enum-unsupported',
+    dialects: ['postgresql', 'oracle', 'mssql'],
+    check({ base }) {
+      if (!ENUM_LIKE.has(base)) return undefined;
+      return {
+        severity: 'error',
+        field: 'type',
+        message: `${base}(...) 타입은 이 DB에 없습니다 (MySQL·MariaDB 전용). VARCHAR로 바꾸고 허용 값은 CHECK 제약으로 거세요`,
+        fix: { label: 'VARCHAR(50)으로', patch: { type: 'VARCHAR', length: '50' } },
+      };
+    },
+  },
+  {
+    code: 'unknown-type',
+    dialects: 'all',
+    check({ dialect, base }) {
+      const first = base.replace(/\[\]$/, '').split(/\s+/)[0] ?? '';
+      if (!first || KNOWN_TYPES[dialect].has(first) || ENUM_LIKE.has(first)) return undefined;
+      return {
+        severity: 'warning',
+        field: 'type',
+        message: `${first}는 ${getDialect(dialect).label}에서 모르는 타입입니다. 오타이거나 다른 DB 전용 타입이면 실행할 때 실패합니다 (직접 만든 타입이면 무시하세요)`,
+      };
+    },
+  },
   // ── 자동 증가 ────────────────────────────────────────────
   {
     code: 'auto-increment-type',
@@ -388,7 +444,12 @@ function runRules(dialect: Dialect, column: Column, only?: (rule: Rule) => boole
   // SQL Server 계산 컬럼은 타입을 DB가 정한다
   if (column.generated?.expression.trim() && dialect.generatedSupport?.typed === false) return [];
   const ctx = contextOf(dialect, column);
-  if (ENUM_LIKE.has(ctx.base)) return [];
+  // ENUM·SET은 괄호 안이 값 목록이라 길이 규칙은 보지 않는다. ENUM이 없는 DB인지만 본다
+  if (ENUM_LIKE.has(ctx.base)) {
+    const found = RULES.find((r) => r.code === 'enum-unsupported')!;
+    const issue = (found.dialects as DialectId[]).includes(dialect.id) && (!only || only(found)) ? found.check(ctx) : undefined;
+    return issue ? [{ code: found.code, ...issue }] : [];
+  }
   const issues: (TypeIssue & { autoFix?: boolean })[] = [];
   for (const rule of RULES) {
     if (rule.dialects !== 'all' && !rule.dialects.includes(dialect.id)) continue;

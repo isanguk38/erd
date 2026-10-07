@@ -3,6 +3,9 @@ import type { Peer, ViewMode } from '../store';
 import type { TableNodeType } from '../components/TableNode';
 import type { RelationEdgeType } from '../components/RelationEdge';
 
+/** 화면 맞추기 최대 배율: 테이블이 하나뿐일 때 2배로 커져 편집 창에 가리지 않게 */
+export const FIT_MAX_ZOOM = 1;
+
 /** 테이블에 붙는 표시: 다른 사람이 방금 바꾼 곳, 열린 댓글 수 */
 export interface NodeMarks {
   remote?: Record<string, { added: boolean; columnIds: string[] }>;
@@ -136,4 +139,23 @@ export function buildCompareGraph(base: Schema, target: Schema, dialect: Dialect
     },
   }));
   return { nodes, edges, diff };
+}
+
+/** 새 테이블 자리: 원하는 곳(p)이 다른 테이블과 겹치면 가까운 빈 곳을 찾는다 (테이블 크기는 컬럼 수로 어림) */
+export function freeSpot(schema: Schema, p: { x: number; y: number }): { x: number; y: number } {
+  const W = 260;
+  const box = (t: Table) => ({ x: t.position.x, y: t.position.y, w: W, h: 56 + 22 * t.columns.length });
+  const boxes = schema.tables.map(box);
+  const fits = (x: number, y: number) => boxes.every((b) => x + W + 20 <= b.x || b.x + b.w + 20 <= x || y + 140 <= b.y || b.y + b.h + 20 <= y);
+  // 가까운 곳부터: 아래 → 위 → 오른쪽 → 왼쪽 → 대각선 순으로 한 칸씩 넓혀 간다 (화면 가운데에서 덜 벗어나게)
+  const DIRS = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+  if (fits(p.x, p.y)) return p;
+  for (let ring = 1; ring <= 6; ring++) {
+    for (const [dx, dy] of DIRS) {
+      const x = p.x + dx * ring * (W + 40);
+      const y = p.y + dy * ring * 180;
+      if (fits(x, y)) return { x, y };
+    }
+  }
+  return p;
 }

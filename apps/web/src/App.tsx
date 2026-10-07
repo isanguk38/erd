@@ -170,6 +170,8 @@ function Editor({ projectId }: { projectId: string }) {
       }
       if (isTyping(e.target) || !(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
+      // 버전 비교 중에는 화면이 비교 결과라 되돌리기도 막는다 (보이지 않는 지금 ERD가 바뀜)
+      if ((key === 'z' || key === 'y') && useStore.getState().compare) return;
       if (key === 'z' && !e.shiftKey) {
         e.preventDefault();
         useStore.getState().undo();

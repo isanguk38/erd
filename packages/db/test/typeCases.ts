@@ -34,6 +34,8 @@ const CASES: TypeCase[] = [
   { label: 'DECIMAL(39,2)', columns: [id, { name: 'd', type: 'DECIMAL', length: '39,2', nullable: true }] },
   { label: 'DECIMAL(5,6)', columns: [id, { name: 'd', type: 'DECIMAL', length: '5,6', nullable: true }] },
   { label: 'INT(300)', columns: [id, { name: 'd', type: 'INT', length: '300', nullable: true }] },
+  // MySQL·MariaDB 전용 ENUM: 다른 DB는 실패해야 한다 (enum-unsupported)
+  { label: "ENUM('A','B')", columns: [id, { name: 'd', type: 'ENUM', length: "'A','B'", nullable: true }] },
   { label: 'TEXT 기본값', columns: [id, { name: 'd', type: 'TEXT', nullable: true, default: "'x'" }], only: ['mysql', 'mariadb'] },
   { label: 'ON UPDATE 자릿수 다름', columns: [id, { name: 'd', type: 'DATETIME', length: '3', nullable: true, onUpdate: 'CURRENT_TIMESTAMP' }], only: ['mysql', 'mariadb'] },
   { label: 'ON UPDATE VARCHAR', columns: [id, { name: 'd', type: 'VARCHAR', length: '10', nullable: true, onUpdate: 'CURRENT_TIMESTAMP' }], only: ['mysql', 'mariadb'] },

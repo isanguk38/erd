@@ -4,6 +4,11 @@ const KEY = 'erd.sideWidth';
 const DEFAULT_WIDTH = 640;
 const MIN_WIDTH = 360;
 
+/** 오른쪽 편집 창 폭 (열리기 전에 자리 계산용) */
+export function sideWidth(): number {
+  return readWidth();
+}
+
 function readWidth(): number {
   try {
     const v = Number(localStorage.getItem(KEY));

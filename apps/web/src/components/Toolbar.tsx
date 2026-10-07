@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { dialectList, type ColumnTemplate, type DialectId } from '@erd/core';
+import { createColumn, dialectList, getDialect, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
@@ -15,6 +15,9 @@ import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
 import { loadModule } from '../lib/appVersion';
 import { DesktopUpdateButton } from './DesktopUpdate';
+import { FIT_MAX_ZOOM, freeSpot } from '../lib/graph';
+import { sideWidth } from './ResizableSide';
+import { requestFocus } from '../lib/focus';
 
 export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments';
 
@@ -110,7 +113,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const isEmpty = useStore((s) => s.schema.tables.length === 0);
   const pendingProposals = useStore((s) => s.meta.pendingProposals ?? 0);
   const role = useStore((s) => s.role);
-  const readOnly = role === 'viewer';
+  // 버전 비교 중에는 화면이 비교 결과라 편집 버튼을 막는다 (눌러도 보이지 않는 지금 ERD가 바뀌어 헷갈림)
+  const comparing = useStore((s) => Boolean(s.compare));
+  const readOnly = role === 'viewer' || comparing;
+  const readOnlyTitle = comparing ? '버전 비교 중에는 편집할 수 없습니다 (비교 끝내기 후 편집)' : '보기 권한에서는 ERD를 바꿀 수 없습니다';
   const dbAvailable = useDbAvailable();
   const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -137,19 +143,47 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     edit((d) => {
       for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
     });
-    setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 50);
+    setTimeout(() => fitView({ padding: 0.15, duration: 300, maxZoom: FIT_MAX_ZOOM }), 50);
   };
 
+  // 새 테이블은 보이는 캔버스 가운데에. 편집 창이 아직 닫혀 있으면 새 테이블을 고르며 열리므로 그 폭을 빼고 계산한다
   const viewCenter = () => {
-    const c = screenToFlowPosition({ x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 });
-    return { x: Math.round(c.x), y: Math.round(c.y) };
+    const pane = document.querySelector('.react-flow')?.getBoundingClientRect();
+    const side = document.querySelector('.side-resizable') ? 0 : sideWidth();
+    const left = pane?.left ?? 0;
+    const width = Math.max(240, (pane?.width ?? window.innerWidth) - side);
+    const top = pane?.top ?? 0;
+    const height = pane?.height ?? window.innerHeight;
+    const c = screenToFlowPosition({ x: left + width / 2, y: top + height / 2 });
+    // 테이블 왼쪽 위 기준이라 반 폭·반 높이만큼 당기고, 같은 자리에 이미 테이블이 있으면 비켜 놓는다
+    return freeSpot(useStore.getState().schema, { x: Math.round(c.x - 120), y: Math.round(c.y - 60) });
   };
   // 템플릿을 고르지 않으면 "새 테이블 기본" 템플릿이 들어간다
   const addTableAtCenter = (template?: ColumnTemplate | null) => {
     edit((d) => {
       const t = addTableWithTemplate(d, { position: viewCenter() }, template);
+      requestFocus(`table:${t.id}`);
       select({ type: 'table', id: t.id }, true);
     });
+  };
+  // DB 종류 바꾸기: 테이블이 있으면 무엇이 달라지는지 알리고 확인한다 (타입은 SQL을 만들 때 그 DB에 맞게 바뀌고,
+  // 그 DB에 없는 타입은 설계 검사에 나온다)
+  const changeDialect = (next: DialectId) => {
+    const { schema, meta } = useStore.getState();
+    const target = getDialect(next);
+    const problems = schema.tables.reduce((n, t) => n + tableTypeIssues(target, t).filter((i) => i.severity !== 'info').length, 0);
+    if (schema.tables.length) {
+      const lines = [
+        `DB 종류를 ${target.label}로 바꿀까요?`,
+        '',
+        `컬럼 타입은 SQL을 만들 때 ${target.label}에 맞게 바뀝니다 (예: DATETIME → ${target.renderType(createColumn({ name: 'x', type: 'DATETIME', length: '' }))}).`,
+        problems ? `${target.label}에서 실패하거나 확인이 필요한 컬럼이 ${problems}개 있습니다. 바꾼 뒤 설계 검사에서 확인하세요.` : '',
+        meta.dbConnectionId ? '연결해 둔 DB와 종류가 다르면 가져오기·내보내기 비교가 맞지 않습니다.' : '',
+      ];
+      if (!confirm(lines.filter((l, i) => l || i === 1).join('\n'))) return;
+    }
+    setDialect(next);
+    if (problems) useStore.getState().showNotice({ text: `${target.label}에서 확인이 필요한 컬럼 ${problems}개 — 설계 검사에서 보세요` });
   };
   const lintCount = useLintCount();
   const reviewPending = useReviewPending();
@@ -171,7 +205,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </a>
         <img className="app-logo" src="/favicon.svg" alt="" />
         <ProjectNameInput />
-        <select className="chip-select" value={dialect} disabled={!synced || readOnly} onChange={(e) => setDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
+        <select className="chip-select" value={dialect} disabled={!synced || readOnly} onChange={(e) => changeDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
           {dialectList.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
         </select>
         {role === 'viewer' && <span className="role-tag" title="이 프로젝트는 보기 권한입니다">보기 전용</span>}
@@ -262,10 +296,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
             <Icon name="layout" />
             <span className="hide-narrow">자동 정렬</span>
           </button>
-          <button className="btn btn-tool icon-only" title="되돌리기 (Ctrl+Z) · 내가 한 변경만" disabled={!canUndo} onClick={undo}>
+          <button className="btn btn-tool icon-only" title="되돌리기 (Ctrl+Z) · 내가 한 변경만" disabled={!canUndo || readOnly} onClick={undo}>
             <Icon name="undo" />
           </button>
-          <button className="btn btn-tool icon-only" title="다시 실행 (Ctrl+Y)" disabled={!canRedo} onClick={redo}>
+          <button className="btn btn-tool icon-only" title="다시 실행 (Ctrl+Y)" disabled={!canRedo || readOnly} onClick={redo}>
             <Icon name="redo" />
           </button>
           {isEmpty && synced && !readOnly && (
@@ -273,7 +307,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               className="btn btn-tool"
               onClick={() => {
                 replaceSchema(sampleSchema());
-                setTimeout(() => fitView({ padding: 0.2 }), 50);
+                setTimeout(() => fitView({ padding: 0.2, maxZoom: FIT_MAX_ZOOM }), 50);
               }}
             >
               예제 불러오기
@@ -286,7 +320,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         <div className="tool-group">
           {dbAvailable ? (
             <>
-              <button className="btn btn-tool btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? '보기 권한에서는 ERD를 바꿀 수 없습니다' : dbTitle}>
+              <button className="btn btn-tool btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? readOnlyTitle : dbTitle}>
                 <Icon name="dbIn" />
                 <span><span className="hide-narrow">DB에서 </span>가져오기</span>
                 {/* DB와 처음 맞추기 전(기준 시점 없음)에는 누가 바꿨는지 몰라 배지를 띄우지 않는다. 차이는 버튼 설명에만 */}

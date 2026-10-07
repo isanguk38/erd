@@ -7,6 +7,7 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  useNodesInitialized,
   useReactFlow,
   type Connection,
   type NodeChange,
@@ -16,10 +17,11 @@ import { useStore } from '../store';
 import { TableNode } from './TableNode';
 import { RelationEdge } from './RelationEdge';
 import { ConnectionLine } from './ConnectionLine';
-import { buildCompareGraph, buildEdges, buildNodes } from '../lib/graph';
+import { buildCompareGraph, buildEdges, buildNodes, FIT_MAX_ZOOM } from '../lib/graph';
 import type { TableNodeType } from './TableNode';
 import { matchIds } from '../lib/search';
 import { addTableWithTemplate } from '../lib/templates';
+import { requestFocus } from '../lib/focus';
 import { getDialect, type DialectId } from '@erd/core';
 import { useTheme } from '../lib/theme';
 
@@ -71,14 +73,62 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const dialectId = useStore((s) => s.meta.dialect);
   const synced = useStore((s) => s.synced);
   const { edit, select, selectTables, setCursor } = useStore.getState();
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setViewport } = useReactFlow();
+  // 편집 창이 열리며 캔버스가 좁아질 때, 고른 테이블·관계가 편집 창 뒤로 가려지면 보일 만큼만 화면을 옮긴다
+  const inspectorOpen = useStore((s) => s.inspectorOpen);
+  const selectedKey = selection ? `${selection.type}:${selection.id}` : '';
   useEffect(() => {
-    if (fitRequest) setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 80);
+    if (!inspectorOpen || !selection) return;
+    const timer = setTimeout(() => {
+      const pane = document.querySelector('.react-flow')?.getBoundingClientRect();
+      // 관계는 양쪽 테이블까지 함께 보이게
+      const relation = selection.type === 'relation' ? useStore.getState().schema.relations.find((r) => r.id === selection.id) : null;
+      const ids = relation ? [relation.fromTableId, relation.toTableId] : [selection.id];
+      const rects = ids.flatMap((id) => {
+        const r = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+        return r ? [r] : [];
+      });
+      if (!pane || !rects.length) return;
+      const el = { left: Math.min(...rects.map((r) => r.left)), right: Math.max(...rects.map((r) => r.right)), top: Math.min(...rects.map((r) => r.top)), bottom: Math.max(...rects.map((r) => r.bottom)) };
+      const M = 24;
+      const shift = (start: number, end: number, min: number, max: number) =>
+        end - start > max - min - 2 * M ? start - (min + M) : end > max - M ? end - (max - M) : start < min + M ? start - (min + M) : 0;
+      const dx = shift(el.left, el.right, pane.left, pane.right);
+      const dy = shift(el.top, el.bottom, pane.top, pane.bottom);
+      if (!dx && !dy) return;
+      const vp = getViewport();
+      setViewport({ x: vp.x - dx, y: vp.y - dy, zoom: vp.zoom }, { duration: 250 });
+    }, 80);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectorOpen, selectedKey]);
+  // 버전 비교를 시작·끝내면 오른쪽 패널이 열리고 닫히므로, 남은 캔버스에 전체가 보이게 맞춘다
+  const comparing = Boolean(compare);
+  // 값이 실제로 바뀔 때만 (처음 그릴 때 맞추면 빈 캔버스에서는 첫 테이블이 생길 때까지 미뤄졌다가 그때 화면이 튄다)
+  const prevComparing = useRef(comparing);
+  useEffect(() => {
+    if (prevComparing.current === comparing) return;
+    prevComparing.current = comparing;
+    const t = setTimeout(() => fitView({ padding: 0.15, duration: 300, maxZoom: FIT_MAX_ZOOM }), 120);
+    return () => clearTimeout(t);
+  }, [comparing, fitView]);
+  useEffect(() => {
+    if (fitRequest) setTimeout(() => fitView({ padding: 0.15, duration: 300, maxZoom: FIT_MAX_ZOOM }), 80);
   }, [fitRequest, fitView]);
-  // 서버 문서를 처음 받으면 전체가 보이게 맞춘다
+  // 서버 문서를 처음 받으면 (테이블 크기를 잰 뒤) 전체가 보이게 한 번만 맞춘다.
+  // 빈 ERD로 열었으면 맞추지 않는다 — 첫 테이블을 추가할 때 화면이 그 테이블로 옮겨 가 편집 창에 가리지 않게
+  const nodesInitialized = useNodesInitialized();
+  const fitted = useRef(false);
   useEffect(() => {
-    if (synced) setTimeout(() => fitView({ padding: 0.15 }), 60);
-  }, [synced, fitView]);
+    if (!synced || fitted.current) return;
+    if (!useStore.getState().schema.tables.length) {
+      fitted.current = true;
+      return;
+    }
+    if (!nodesInitialized) return;
+    fitted.current = true;
+    fitView({ padding: 0.15, maxZoom: FIT_MAX_ZOOM });
+  }, [synced, nodesInitialized, fitView]);
   const lastCursor = useRef(0);
   const pointerDown = useRef(false);
   const pendingIds = useRef<string[] | null>(null); // 마우스를 놓을 때 스토어에 알릴 선택
@@ -223,14 +273,21 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
         const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
         edit((draft) => {
           const table = addTableWithTemplate(draft, { position });
+          requestFocus(`table:${table.id}`);
           select({ type: 'table', id: table.id }, true);
         });
       }}
-      onNodesDelete={(deleted) => edit((draft) => deleted.forEach((n) => removeTable(draft, n.id)))}
-      onEdgesDelete={(deleted) => {
-        // 관계를 지우면 그 FK 컬럼도 지운다 (다른 관계가 같이 쓰는 컬럼은 남김). Ctrl+Z로 함께 되돌린다
+      // Delete 키: 테이블과 관계를 한 번에 지운다 (Ctrl+Z 한 번으로 함께 되돌림).
+      // 테이블을 지우면 거기 붙은 관계도 같이 넘어오는데, 그 관계는 테이블 삭제로만 처리한다 —
+      // 편집 창의 삭제 버튼처럼 상대 테이블의 FK 컬럼은 남긴다. 관계만 골라 지울 때는 그 FK 컬럼도 지운다.
+      onDelete={({ nodes: deletedNodes, edges: deletedEdges }) => {
+        const tableIds = new Set(deletedNodes.map((n) => n.id));
+        const relations = deletedEdges.filter((e) => !tableIds.has(e.source) && !tableIds.has(e.target));
         const dropped: string[] = [];
-        edit((draft) => deleted.forEach((e) => dropped.push(...removeRelation(draft, e.id, true))));
+        edit((draft) => {
+          relations.forEach((e) => dropped.push(...removeRelation(draft, e.id, true)));
+          tableIds.forEach((id) => removeTable(draft, id));
+        });
         if (dropped.length) useStore.getState().showNotice({ text: `관계와 FK 컬럼 ${dropped.join(', ')}을(를) 지웠습니다. (Ctrl+Z로 되돌리기)` });
       }}
       // 관계 연결 점을 클릭만 해서는 연결되지 않고, 10px 이상 끌어야 연결이 시작된다 (붙어 있는 테이블에서 실수로 관계가 생기지 않게)
@@ -242,7 +299,6 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
       zoomOnDoubleClick={false}
       minZoom={0.1}
       maxZoom={2}
-      fitView
       proOptions={{ hideAttribution: true }}
       colorMode={theme}
     >

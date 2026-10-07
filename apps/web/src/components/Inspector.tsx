@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
+import { requestFocus, takeFocus } from '../lib/focus';
 import {
   addColumn,
   addIndex,
@@ -53,14 +54,19 @@ export function Inspector() {
 }
 
 /** 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해). */
-function TextInput({ value, onCommit, placeholder, className, list, issue }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string; issue?: Mark }) {
+function TextInput({ value, onCommit, placeholder, className, list, issue, focusKey, onEnter }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string; issue?: Mark; focusKey?: string; onEnter?: () => void }) {
   const [draft, setDraft] = useState<string | null>(null);
+  // 방금 만든 테이블·컬럼이면 이름 칸에 커서를 두고 전체 선택 (바로 타이핑해 이름을 바꾸게)
+  const ref = useCallback((el: HTMLInputElement | null) => {
+    if (el && takeFocus(focusKey)) requestAnimationFrame(() => { el.focus(); el.select(); });
+  }, [focusKey]);
   const commit = () => {
     if (draft !== null && draft !== value) onCommit(draft);
     setDraft(null);
   };
   return (
     <input
+      ref={ref}
       className={[className, issue?.className].filter(Boolean).join(' ') || undefined}
       value={draft ?? value}
       // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다. 타입 문제가 있으면 그 이유도
@@ -70,7 +76,10 @@ function TextInput({ value, onCommit, placeholder, className, list, issue }: { v
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Enter') {
+          (e.target as HTMLInputElement).blur();
+          onEnter?.();
+        }
         if (e.key === 'Escape') setDraft(null);
       }}
     />
@@ -111,6 +120,10 @@ function TableEditor({ table }: { table: Table }) {
     }
     setColumnFixed(column, { autoIncrement: on });
   };
+  const addColumnAndFocus = () =>
+    edit((d) => {
+      requestFocus(`column:${addColumn(d, table.id).id}`);
+    });
   const typeIssues = tableTypeIssues(dialect, table);
   const mark = (column: Column, field: TypeIssueField) => markOf(typeIssues, column.id, field);
 
@@ -134,7 +147,7 @@ function TableEditor({ table }: { table: Table }) {
       </div>
       <div className="form-grid">
         <label>물리명</label>
-        <TextInput value={table.name} onCommit={(name) => setTable({ name })} />
+        <TextInput value={table.name} onCommit={(name) => setTable({ name })} focusKey={`table:${table.id}`} />
         <label>논리명</label>
         <TextInput value={table.logicalName} onCommit={(logicalName) => setTable({ logicalName })} placeholder="예: 회원" />
         <label>설명</label>
@@ -156,7 +169,7 @@ function TableEditor({ table }: { table: Table }) {
       <div className="inspector__section">
         <div className="inspector__section-head">
           <h4>컬럼 ({table.columns.length})</h4>
-          <button className="btn btn-sm" onClick={() => edit((d) => addColumn(d, table.id))}>+ 컬럼</button>
+          <button className="btn btn-sm" onClick={addColumnAndFocus} title="컬럼 추가 (마지막 컬럼 이름에서 Enter로도 추가)">+ 컬럼</button>
         </div>
         <datalist id="type-suggestions">
           {dialect.typeSuggestions.map((t) => <option key={t} value={t} />)}
@@ -169,8 +182,9 @@ function TableEditor({ table }: { table: Table }) {
           </div>
           {table.columns.map((c, i) => (
             <div key={c.id} className="column-grid__row">
-              <TextInput value={c.name} onCommit={(name) => setColumn(c, { name })} className={fkIds.has(c.id) ? 'is-fk' : ''} />
-              <TextInput value={c.logicalName} onCommit={(logicalName) => setColumn(c, { logicalName })} />
+              {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
+              <TextInput value={c.name} onCommit={(name) => setColumn(c, { name })} className={fkIds.has(c.id) ? 'is-fk' : ''} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
+              <TextInput value={c.logicalName} onCommit={(logicalName) => setColumn(c, { logicalName })} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
               <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, { type: type.toUpperCase() })} />
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
@@ -272,7 +286,12 @@ function CheckEditor({ table }: { table: Table }) {
     <div className="inspector__section">
       <div className="inspector__section-head">
         <h4>CHECK 제약 ({checks.length})</h4>
-        <button className="btn btn-sm" title="값이 지켜야 할 조건. 예: point >= 0" onClick={() => update((list) => [...list, createCheck({ expression: '' })])}>
+        <button className="btn btn-sm" title="값이 지켜야 할 조건. 예: point >= 0" onClick={() => update((list) => {
+          // 새 CHECK의 조건 칸으로 커서를 옮긴다 (버튼에 머물면 스페이스가 버튼을 다시 눌러 빈 CHECK가 생김)
+          const check = createCheck({ expression: '' });
+          requestFocus(`check:${check.id}`);
+          return [...list, check];
+        })}>
           + CHECK
         </button>
       </div>
@@ -288,6 +307,7 @@ function CheckEditor({ table }: { table: Table }) {
             className="mono"
             value={check.expression}
             placeholder="조건 예: point >= 0"
+            focusKey={`check:${check.id}`}
             onCommit={(expression) => update((list) => list.map((k) => (k.id === check.id ? { ...k, expression: expression.trim().replace(/^check\s*/i, '') } : k)))}
           />
           <button className="icon-btn danger" title="CHECK 삭제" onClick={() => update((list) => list.filter((k) => k.id !== check.id))}>×</button>
@@ -295,6 +315,12 @@ function CheckEditor({ table }: { table: Table }) {
       ))}
     </div>
   );
+}
+
+/** 새 인덱스의 첫 컬럼: 기본키가 아니고 아직 어느 인덱스의 첫 컬럼도 아닌 컬럼 (기본키에 또 걸면 바로 중복 인덱스가 됨) */
+function firstUnindexedColumn(table: Table) {
+  const leading = new Set(table.indexes.map((i) => i.columnIds[0]));
+  return table.columns.find((c) => !c.primaryKey && !leading.has(c.id)) ?? table.columns.find((c) => !c.primaryKey) ?? table.columns[0];
 }
 
 function IndexEditor({ table }: { table: Table }) {
@@ -310,7 +336,7 @@ function IndexEditor({ table }: { table: Table }) {
       <div className="inspector__section-head">
         <h4>인덱스 ({table.indexes.length})</h4>
         <span className="row-gap">
-          <button className="btn btn-sm" disabled={table.columns.length === 0} onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [table.columns[0].id] }))}>
+          <button className="btn btn-sm" disabled={table.columns.length === 0} onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [firstUnindexedColumn(table).id] }))}>
             + 인덱스
           </button>
           <button
