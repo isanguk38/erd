@@ -641,7 +641,7 @@ label.btn { display: inline-flex; align-items: center; }
 .sev-dot.sev-error { background: var(--danger); }
 .sev-dot.sev-warning { background: var(--warning); }
 .sev-dot.sev-info { background: var(--accent); }
-.lint-groups { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 8px; }
+.lint-groups { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 6px 8px; }
 .lint-group { border-bottom: 1px solid var(--border); }
 .lint-group:last-child { border-bottom: none; }
 .lint-group__head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 4px; border: none; background: none; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
@@ -649,7 +649,7 @@ label.btn { display: inline-flex; align-items: center; }
 .lint-group__desc { margin: 0 4px 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .lint-group ul { list-style: none; margin: 0 0 8px; padding: 0; }
 .lint-group li { display: flex; align-items: center; gap: 6px; }
-.lint-item { flex: 1; text-align: left; border: none; background: none; padding: 4px 6px; border-radius: 6px; cursor: pointer; color: var(--text); font: inherit; font-size: 12px; }
+.lint-item { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: left; border: none; background: none; padding: 4px 6px; border-radius: 6px; cursor: pointer; color: var(--text); font: inherit; font-size: 12px; }
 .lint-item:hover { background: var(--accent-soft); }
 .lint-empty { display: flex; flex-direction: column; align-items: center; padding: 24px; color: var(--create); }
 .lint-empty p { margin: 6px 0 0; color: var(--text); }
