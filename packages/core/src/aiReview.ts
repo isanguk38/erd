@@ -20,8 +20,6 @@ export interface AiReviewItem {
   message: string;
   /** 고치는 방법 */
   suggestion?: string;
-  /** 펼쳐 보는 상세 설명 (사람이 질문했을 때 답하듯) */
-  detail?: AiReviewDetail;
   status: 'open' | 'resolved';
   /** 검토할 때 대상 테이블의 모양 지문 */
   fingerprint: string;
@@ -41,51 +39,12 @@ export interface AiReview {
   summary?: string;
 }
 
-/** 검토 항목의 상세 설명. 항목마다 같은 순서로 읽히도록 칸을 정해 둔다 */
-export interface AiReviewDetail {
-  /** 무슨 상황인지 */
-  situation?: string;
-  /** 예시 (마크다운 표 | a | b | 를 쓸 수 있음) */
-  example?: string;
-  /** 실제로 생길 수 있는 일 */
-  impact?: string;
-  /** 고치는 방법들 (장단점) */
-  options?: { name: string; how?: string; pros?: string; cons?: string }[];
-  /** 앱에서 처리해도 되는지 */
-  appLevel?: string;
-  /** 이 판단의 전제 (전제가 다르면 무시해도 되는 이유) */
-  assumption?: string;
-}
-
 export interface AiReviewInput {
   severity: ReviewSeverity;
   table?: string;
   column?: string;
   message: string;
   suggestion?: string;
-  detail?: AiReviewDetail;
-}
-
-const MAX_TEXT = 4000;
-const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, MAX_TEXT) : undefined);
-/** 상세 설명 정리 (빈 칸은 빼고, 너무 긴 글은 자른다) */
-function cleanDetail(raw: AiReviewDetail | undefined): AiReviewDetail | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const options = Array.isArray(raw.options)
-    ? raw.options
-        .slice(0, 6)
-        .map((o) => ({ name: text(o?.name) ?? '', how: text(o?.how), pros: text(o?.pros), cons: text(o?.cons) }))
-        .filter((o) => o.name)
-    : undefined;
-  const detail: AiReviewDetail = {
-    situation: text(raw.situation),
-    example: text(raw.example),
-    impact: text(raw.impact),
-    options: options?.length ? options : undefined,
-    appLevel: text(raw.appLevel),
-    assumption: text(raw.assumption),
-  };
-  return Object.values(detail).some((v) => v !== undefined) ? detail : undefined;
 }
 
 /** 화면 표시 상태: 열림 / 다시 확인 필요(대상 테이블이 바뀜) / 해결됨 / 대상 없음(테이블이 지워짐) */
@@ -160,7 +119,6 @@ export function buildReview(
       column,
       message,
       suggestion: raw.suggestion?.trim() || undefined,
-      detail: cleanDetail(raw.detail),
       status: 'open',
       fingerprint: tableFingerprint(schema, table?.name ?? ''),
       createdAt: now,

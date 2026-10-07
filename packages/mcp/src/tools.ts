@@ -201,7 +201,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       description: [
         '내가(AI) 설계를 검토해 찾은 문제를 설계 검사 목록에 저장한다. 사람은 화면의 설계 검사 패널에서 보고, 동의하지 않으면 "무시"한다.',
         'severity: error(이대로면 DB에서 실패하거나 데이터가 깨짐) / warning(실무에서 문제가 될 가능성이 큼) / info(개선 제안).',
-        '기본 검사(check_design의 basicChecks)와 같은 내용은 다시 넣지 않는다. 항목마다 detail(상황·예시·생길 수 있는 일·고치는 방법들·앱 처리 여부·전제)을 채워 사람이 펼쳐 읽고 판단할 수 있게 한다.',
+        '기본 검사(check_design의 basicChecks)와 같은 내용은 다시 넣지 않는다.',
         '이번에 찾은 항목을 더한다 — 이전에 열린 항목은 이번에 안 넣어도 그대로 남는다. 고쳤거나 더 이상 해당 없는 항목은 resolve_design_review로 이유와 함께 해결 표시해야 닫힌다.',
         'tables(검토 범위): 이번에 검토한 테이블 이름 (그 테이블만 "검토함"으로 기록). 기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토해 넣는다. 생략하면 ERD 전체를 검토한 것으로 본다.',
         '같은 내용은 같은 id가 되어 사람이 무시한 기록이 이어진다. 언제: 설계 작업(edit_schema 여러 번)을 마쳤을 때 한 번, 또는 사용자가 검토를 요청할 때. 명령마다 하지 않는다.',
@@ -215,21 +215,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
               table: z.string().optional().describe('대상 테이블 물리명 (프로젝트 전체에 대한 것이면 생략)'),
               column: z.string().optional(),
               message: z.string().describe('무엇이 문제인지 (한국어, 한 문장)'),
-              suggestion: z.string().optional().describe('어떻게 고치면 되는지 (한 줄)'),
-              detail: z
-                .object({
-                  situation: z.string().optional().describe('무슨 상황인지 (쉬운 말로 2~3문장)'),
-                  example: z.string().optional().describe('구체적인 예시. 데이터 예시는 마크다운 표(| 칸 | 칸 |)로'),
-                  impact: z.string().optional().describe('실제로 생길 수 있는 일 (화면·정산·데이터 관점)'),
-                  options: z
-                    .array(z.object({ name: z.string(), how: z.string().optional(), pros: z.string().optional(), cons: z.string().optional() }))
-                    .optional()
-                    .describe('고치는 방법들과 장단점 (1~3개)'),
-                  appLevel: z.string().optional().describe('DB 대신 앱에서 처리해도 되는지, 그 판단'),
-                  assumption: z.string().optional().describe('이 판단의 전제 (전제가 다르면 무시해도 되는 경우)'),
-                })
-                .optional()
-                .describe('펼쳐 보는 상세 설명. 사람이 "이게 무슨 말이야?"라고 물었을 때 답하듯이 쓴다'),
+              suggestion: z.string().optional().describe('어떻게 고치면 되는지'),
             }),
           )
           .describe('검토 결과 전체 (문제가 없으면 빈 배열)'),
