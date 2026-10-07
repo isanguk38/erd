@@ -3,7 +3,7 @@ import { useReactFlow } from '@xyflow/react';
 import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
-import { Icon } from './ui';
+import { Dropdown, Icon } from './ui';
 
 /** AI 검토 항목 중 지금 보여 줄 것 (열림·다시 확인 필요, 대상 테이블이 지워진 것은 뺀다) */
 function openReviewItems(items: AiReviewItem[] | undefined, schema: Schema): (AiReviewItem & { state: AiReviewState })[] {
@@ -29,6 +29,16 @@ export function useReviewPending(): number {
   const schema = useStore((s) => s.schema);
   const review = useStore((s) => s.meta.aiReview);
   return useMemo(() => unreviewedTables(schema, review)?.length ?? 0, [schema, review]);
+}
+
+/** AI에게 보낼 문장을 복사하고 화면 아래에 알린다 */
+async function copyForAi(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    useStore.getState().showNotice({ text: 'AI에게 보낼 문장을 복사했습니다. Claude 등 MCP를 연결한 AI 대화창에 붙여넣으세요.' });
+  } catch {
+    prompt('AI에게 보낼 문장 (복사해서 쓰세요)', text);
+  }
 }
 
 const SEV_LABEL: Record<AiReviewItem['severity'], string> = { error: '오류', warning: '경고', info: '참고' };
@@ -67,7 +77,6 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const [aiOpen, setAiOpen] = useState(true);
   // 마지막 AI 검토 뒤 새로 생기거나 바뀐 테이블 (검토가 밀린 것). 검토를 한 번도 안 했으면 null
   const pending = useMemo(() => (schema.tables.length ? unreviewedTables(schema, review) : []), [schema, review]);
-  const [copiedReview, setCopiedReview] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   const setIgnored = (id: string, on: boolean) => {
     const next = new Set(ignoredIds ?? []);
@@ -78,7 +87,6 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
     useStore.getState().setLintIgnored([...next].filter((x) => live.has(x)));
   };
   const [open, setOpen] = useState<Partial<Record<LintRule, boolean>>>({ 'no-primary-key': true, 'fk-type-mismatch': true, 'fk-without-index': true });
-  const [copied, setCopied] = useState(false);
 
   const groups = useMemo(() => {
     const map = new Map<LintRule, LintIssue[]>();
@@ -106,24 +114,12 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
     const scope = pending?.length ? pending : null;
     const target = scope ? `바뀐 테이블(${scope.join(', ')})과 그 관계 상대` : 'ERD 전체';
     const text = `ERD 프로젝트 "${projectName}"의 설계를 검토만 해줘. 아직 고치지는 마. erd MCP의 check_design으로 기본 검사와 지난 검토를 먼저 확인하고, ${target}를 검토해서 오류·경고·참고로 나눠 save_design_review로 저장해줘${scope ? ' (tables에 검토한 테이블 이름)' : ''}. 기본 검사에 이미 나온 내용은 넣지 말고 고치는 방법도 같이 적어줘. 저장한 뒤 등급별로 요약해서 알려줘.`;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedReview(true);
-      setTimeout(() => setCopiedReview(false), 4000);
-    } catch {
-      prompt('AI에게 보낼 문장 (복사해서 쓰세요)', text);
-    }
+    await copyForAi(text);
   };
 
   const askAi = async () => {
     const text = `ERD 프로젝트 "${projectName}"의 설계를 검토하고 고쳐줘. erd MCP의 check_design으로 문제를 확인하고(사람이 무시한 항목은 고치지 마) edit_schema로 고친 뒤, 고친 AI 검토 항목은 resolve_design_review로 해결 표시해줘. 마지막으로 설계를 다시 검토해 save_design_review로 저장하고, 오류·경고·참고별로 무엇을 고쳤는지 알려줘. 논리명은 한글로 넣어줘.`;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 4000);
-    } catch {
-      prompt('AI에게 보낼 문장 (복사해서 쓰세요)', text);
-    }
+    await copyForAi(text);
   };
 
   return (
@@ -137,24 +133,31 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
         </span>
         <button className="icon-btn" onClick={onClose} title="닫기"><Icon name="close" size={14} /></button>
       </div>
-      {/* AI 검토가 밀린 테이블: 사람이 화면에서 고쳤거나 AI가 검토 없이 끝낸 것 */}
-      {pending !== null && pending.length > 0 && (
-        <div className="lint-pending" title={pending.join(', ')}>
-          <Icon name="sparkles" size={13} />
-          <span>
-            AI 검토 이후 바뀐 테이블 <b>{pending.length}개</b>
-            <span className="muted">: {pending.slice(0, 5).join(', ')}{pending.length > 5 ? ` 외 ${pending.length - 5}개` : ''}</span>
-          </span>
-          <button className="btn btn-ghost small" onClick={askReview}>{copiedReview ? '복사됨' : '이 테이블 검토 요청'}</button>
-        </div>
-      )}
-      {pending === null && (
-        <div className="lint-pending">
-          <Icon name="sparkles" size={13} />
-          <span className="muted">아직 AI 설계 검토가 없습니다.</span>
-          <button className="btn btn-ghost small" onClick={askReview}>{copiedReview ? '복사됨' : 'AI에게 검토만 요청'}</button>
-        </div>
-      )}
+      {/* AI 막대: AI 검토 상태 한 줄 + 요청 메뉴 하나 (검토만 / 검토하고 고치기 / 연결 방법) */}
+      <div className={`lint-ai-bar${pending?.length ? ' lint-ai-bar--pending' : ''}`} title={pending?.length ? pending.join(', ') : undefined}>
+        <Icon name="sparkles" size={13} />
+        <span className="lint-ai-bar__text">
+          {pending === null ? (
+            <span className="muted">아직 AI 설계 검토가 없습니다</span>
+          ) : pending.length > 0 ? (
+            <>
+              AI 검토 이후 바뀐 테이블 <b>{pending.length}개</b>
+              <span className="muted"> · {pending.slice(0, 3).join(', ')}{pending.length > 3 ? ` 외 ${pending.length - 3}개` : ''}</span>
+            </>
+          ) : (
+            <span className="muted">AI 검토 최신 · {review ? new Date(review.reviewedAt).toLocaleString() : ''}</span>
+          )}
+        </span>
+        <Dropdown
+          label="AI에게 요청"
+          title="AI(MCP)에게 보낼 요청 문장을 복사합니다"
+          items={[
+            { label: pending?.length ? '바뀐 테이블 검토' : '설계 검토', hint: pending?.length ? `${pending.length}개만` : '고치지 않음', onClick: askReview },
+            { label: '검토하고 고치기', hint: '무시한 항목 제외', onClick: askAi },
+            { label: 'AI 연결 방법', onClick: onOpenAi },
+          ]}
+        />
+      </div>
       {issues.length === 0 && reviewItems.length === 0 ? (
         <div className="lint-empty">
           <Icon name="check" size={20} />
@@ -306,13 +309,6 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
           )}
         </div>
       )}
-      <div className="lint-panel__foot">
-        <button className="btn" onClick={askAi} title="AI(MCP)에게 보낼 요청 문장을 복사합니다 (설계 검토 + 고치기)">
-          <Icon name="sparkles" />
-          {copied ? '복사됨 — AI에 붙여넣으세요' : 'AI에게 검토·수정 요청'}
-        </button>
-        <button className="btn btn-ghost small" onClick={onOpenAi}>AI 연결 방법</button>
-      </div>
     </div>
   );
 }
