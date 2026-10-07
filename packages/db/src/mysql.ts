@@ -99,8 +99,8 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
   }
 
   for (const row of await query(
-    `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT, GENERATION_EXPRESSION
-     FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+    // SELECT *: GENERATION_EXPRESSION(계산 컬럼) 열은 MySQL 5.7부터 있다 (5.6에는 없음)
+    `SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`,
     [database],
   )) {
     const table = tables.get(row.TABLE_NAME);

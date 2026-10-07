@@ -29,7 +29,7 @@ jobs:
         run: npm run build
 
   databases:
-    name: 실제 DB 왕복 테스트 (MySQL · MariaDB · PostgreSQL · Oracle · SQL Server)
+    name: 실제 DB 왕복 테스트 (MySQL 8.4·5.6 · MariaDB · PostgreSQL · Oracle · SQL Server)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -38,6 +38,14 @@ jobs:
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
         ports: ['3407:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      mysql56:
+        image: mysql:5.6
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports: ['3406:3306']
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1"
           --health-interval 5s --health-timeout 5s --health-retries 30
@@ -85,8 +93,9 @@ jobs:
         working-directory: packages/db
         env:
           ERD_TEST_MYSQL: mysql://root@127.0.0.1:3407
+          ERD_TEST_MYSQL56: mysql://root@127.0.0.1:3406
           ERD_TEST_MARIADB: mysql://root:erdtest@127.0.0.1:3308
           ERD_TEST_POSTGRES: postgres://postgres:erdtest@127.0.0.1:5433
           ERD_TEST_ORACLE: oracle://system:ErdTest_123@127.0.0.1:1521/FREEPDB1
           ERD_TEST_MSSQL: mssql://sa:ErdTest_123%21@127.0.0.1:1433
-        run: npx vitest run test/mysql.integration.test.ts test/postgresql.integration.test.ts test/others.integration.test.ts
+        run: npx vitest run test/mysql.integration.test.ts test/mysql56.integration.test.ts test/postgresql.integration.test.ts test/others.integration.test.ts
