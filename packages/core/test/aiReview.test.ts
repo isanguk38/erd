@@ -40,7 +40,7 @@ describe('AI 설계 검토', () => {
     expect(reviewItemState(general!, changed)).toBe('open');
   });
 
-  it('범위 검토: 검토한 테이블의 항목만 바뀌고 다른 테이블 항목·전체 의견은 남는다', () => {
+  it('범위 검토: 다시 저장해도 이전 열린 항목은 사라지지 않고, 검토한 테이블만 검토함으로 기록', () => {
     const s = design();
     const full = buildReview(s, { items: [
       { severity: 'warning', table: 'member', message: '이메일 UNIQUE 아님' },
@@ -55,8 +55,8 @@ describe('AI 설계 검토', () => {
     expect(unreviewedTables(next, full)).toEqual(['orders', 'payment']);
     const scoped = buildReview(next, { items: [{ severity: 'error', table: 'payment', message: '결제 금액 없음' }], scope: ['orders', 'payment'] }, full);
     const open = scoped.items.filter((i) => i.status === 'open').map((i) => i.message).sort();
-    // orders의 '상태 없음'은 이번 범위에서 다시 안 나왔으니 빠지고, member 항목과 전체 의견은 남는다
-    expect(open).toEqual(['결제 금액 없음', '공통 생성일시', '이메일 UNIQUE 아님']);
+    // 이번에 다시 안 나온 orders '상태 없음'도 남는다 (해결 표시로만 닫힘)
+    expect(open).toEqual(['결제 금액 없음', '공통 생성일시', '상태 없음', '이메일 UNIQUE 아님']);
     expect(unreviewedTables(next, scoped)).toEqual([]);
     // 범위에 없는 테이블 이름은 거절
     expect(() => buildReview(next, { items: [], scope: ['nope'] }, full)).toThrow('검토 범위');
@@ -78,6 +78,9 @@ describe('AI 설계 검토', () => {
     // 다음 검토: B만 다시 나옴 → B 열림, A는 해결 기록으로 남음
     const second = buildReview(s, { items: [{ severity: 'warning', table: 'orders', message: 'B' }] }, review);
     expect(second.items.map((i) => [i.id, i.status])).toEqual([[b!.id, 'open'], [a!.id, 'resolved']]);
+    // 다음 검토에서 B를 안 넣어도 B는 열린 채로 남는다 (조용히 빠지지 않음)
+    const third0 = buildReview(s, { items: [{ severity: 'info', message: 'C' }] }, second);
+    expect(third0.items.find((i) => i.id === b!.id)?.status).toBe('open');
     // A가 다시 나오면 다시 열림
     const third = buildReview(s, { items: [{ severity: 'error', table: 'orders', message: 'A' }] }, second);
     expect(third.items.find((i) => i.id === a!.id)?.status).toBe('open');

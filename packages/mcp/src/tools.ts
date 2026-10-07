@@ -202,8 +202,8 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         '내가(AI) 설계를 검토해 찾은 문제를 설계 검사 목록에 저장한다. 사람은 화면의 설계 검사 패널에서 보고, 동의하지 않으면 "무시"한다.',
         'severity: error(이대로면 DB에서 실패하거나 데이터가 깨짐) / warning(실무에서 문제가 될 가능성이 큼) / info(개선 제안).',
         '기본 검사(check_design의 basicChecks)와 같은 내용은 다시 넣지 않는다.',
-        'tables(검토 범위): 이번에 검토한 테이블 이름. 주면 그 테이블의 이전 항목만 이번 결과로 바뀌고 다른 테이블의 항목은 남는다 — 기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토해 tables에 넣는다.',
-        '생략하면 ERD 전체를 검토한 것으로 보고 이전 열린 항목 전체가 이번 결과로 바뀐다.',
+        '이번에 찾은 항목을 더한다 — 이전에 열린 항목은 이번에 안 넣어도 그대로 남는다. 고쳤거나 더 이상 해당 없는 항목은 resolve_design_review로 이유와 함께 해결 표시해야 닫힌다.',
+        'tables(검토 범위): 이번에 검토한 테이블 이름 (그 테이블만 "검토함"으로 기록). 기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토해 넣는다. 생략하면 ERD 전체를 검토한 것으로 본다.',
         '같은 내용은 같은 id가 되어 사람이 무시한 기록이 이어진다. 언제: 설계 작업(edit_schema 여러 번)을 마쳤을 때 한 번, 또는 사용자가 검토를 요청할 때. 명령마다 하지 않는다.',
       ].join(' '),
       inputSchema: {
@@ -244,7 +244,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     {
       title: 'AI 검토 항목 해결 표시',
       description: [
-        'edit_schema로 고친 AI 검토 항목(check_design의 aiReview id)을 해결됨으로 표시한다. resolution에 무엇을 어떻게 고쳤는지 적는다.',
+        'AI 검토 항목(check_design의 aiReview id)을 해결됨으로 표시한다. edit_schema로 고쳤거나, 다시 보니 더 이상 해당 없을 때 쓴다. resolution에 무엇을 어떻게 고쳤는지(또는 왜 해당 없는지) 적는다. 못 고친 항목은 해결 표시하지 않는다.',
         '고친 뒤 사용자에게 오류·경고·참고별로 무엇을 고쳤고 무엇을 남겼는지(무시된 것 포함) 알려 준다.',
       ].join(' '),
       inputSchema: { project: projectArg, ids: z.array(z.string()).min(1), resolution: z.string().optional() },

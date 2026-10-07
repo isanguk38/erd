@@ -145,7 +145,8 @@ describe('MCP', () => {
     const scopedReview = JSON.parse(textOf(await client.callTool({ name: 'save_design_review', arguments: { project: '쇼핑몰', tables: ['payment', 'orders'], items: [{ severity: 'error', table: 'payment', message: '결제 금액이 없습니다' }] } })));
     expect(scopedReview.stillUnreviewed).toBeUndefined();
     design = JSON.parse(textOf(await client.callTool({ name: 'check_design', arguments: { project: '쇼핑몰' } })));
-    expect(design.aiReview.items.map((i: { message: string }) => i.message).sort()).toEqual(['결제 금액이 없습니다', '회원 이름이 없습니다']);
+    // 이전 검토에서 열린 항목은 다시 저장해도 사라지지 않는다 (해결 표시로만 닫힘)
+    expect(design.aiReview.items.map((i: { message: string }) => i.message).sort()).toEqual(['결제 금액이 없습니다', '생성일시 컬럼을 공통으로 두면 좋습니다', '주문 상태 컬럼이 없습니다', '회원 이름이 없습니다']);
     expect(design.reviewNeeded).toBeUndefined();
 
     // 화면(서버 문서)에도 반영됨 + AI 작업으로 기록됨
