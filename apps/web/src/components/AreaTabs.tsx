@@ -38,12 +38,11 @@ export function AreaTabs() {
     };
   }, [menu]);
 
-  // 새 영역: 고른 테이블이 있으면 그 테이블로 만들고, 바로 이름을 쓰게 한다
+  // 새 영역: 빈 영역을 만들고 바로 이름을 쓰게 한다 (고른 테이블로 묶기는 여러 개 선택의 "새 영역으로 묶기")
   const addArea = () => {
-    const selected = useStore.getState().selectedTables;
     let id = '';
     edit((d) => {
-      id = createArea(d, { name: '새 영역', tableIds: selected }).id;
+      id = createArea(d, { name: '새 영역' }).id;
     });
     setActiveArea(id);
     setRenaming(id);
@@ -119,7 +118,7 @@ export function AreaTabs() {
         </div>
       ))}
       {!readOnly && (
-        <button className="area-tab area-tab--add" onClick={addArea} disabled={!synced} title="새 주제영역 (고른 테이블이 있으면 그 테이블로 만듭니다)">
+        <button className="area-tab area-tab--add" onClick={addArea} disabled={!synced} title="새 주제영역 (빈 영역). 고른 테이블로 만들려면 여러 개 선택에서 새 영역으로 묶기">
           <Icon name="plus" size={14} /> 영역
         </button>
       )}

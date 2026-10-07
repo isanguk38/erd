@@ -188,8 +188,7 @@ function Editor({ projectId }: { projectId: string }) {
           const { role, compare } = useStore.getState();
           if (role === 'viewer' || compare) return;
           e.preventDefault();
-          // Ctrl+Shift+V: 언제나 복사본 (영역 탭에서 Ctrl+V는 같은 테이블을 그 영역에 넣는다)
-          void pasteClipboard(e.shiftKey);
+          void pasteClipboard();
         } else {
           e.preventDefault();
           selectAllTables();

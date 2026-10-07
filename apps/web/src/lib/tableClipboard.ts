@@ -1,4 +1,4 @@
-import { addToArea, areaSchema, copyTables, isClip, pasteTables, removeFromArea, type Clip, type Schema } from '@erd/core';
+import { addToArea, areaSchema, copyTables, isClip, pasteTables, type Clip, type Schema } from '@erd/core';
 import { useStore } from '../store';
 
 // 테이블 복사·붙여넣기. 시스템 클립보드에도 넣어 다른 프로젝트·다른 창에 붙여넣을 수 있게 한다.
@@ -51,12 +51,11 @@ async function readClip(): Promise<Clip | null> {
 /**
  * 붙여넣기. 붙일 때마다 조금씩 비켜서 놓고, 붙인 테이블을 골라 둔다.
  * 주제영역 탭에서 이 ERD의 테이블을 붙이면 복사본 대신 같은 테이블을 이 영역에 넣는다 (관계도 그대로 이어짐).
- * copy=true(Ctrl+Shift+V)면 언제나 복사본을 만든다.
  */
-export async function pasteClipboard(copy = false): Promise<number> {
+export async function pasteClipboard(): Promise<number> {
   const clip = await readClip();
   if (!clip?.tables.length) return 0;
-  if (!copy && addSameTablesToArea(clip)) return clip.tables.length;
+  if (addSameTablesToArea(clip)) return clip.tables.length;
   pasteCount += 1;
   let created: string[] = [];
   const { areaId } = visibleSchema();
@@ -72,29 +71,26 @@ export async function pasteClipboard(copy = false): Promise<number> {
   return created.length;
 }
 
-/** 영역 탭에서 이 ERD의 테이블을 붙였으면 같은 테이블을 이 영역에 넣는다. 넣었으면 true */
+/**
+ * 영역 탭에서 이 ERD의 테이블을 붙이면 복사본을 만들지 않고 같은 테이블을 그 영역에 넣는다 (이미 있으면 아무것도 안 함).
+ * 같은 영역에 같은 테이블의 복사본이 쌓여 관계선이 꼬이지 않게. 처리했으면 true
+ */
 function addSameTablesToArea(clip: Clip): boolean {
   const { schema, activeArea, edit, selectTables, showNotice } = useStore.getState();
   const area = activeArea ? schema.areas?.find((a) => a.id === activeArea) : undefined;
   if (!area) return false;
   const ids = clip.tables.map((t) => t.id);
-  // 모두 이 ERD에 있는 테이블이고, 이 영역에 아직 없는 것이 있을 때만 (이미 다 있으면 복사본을 원하는 것)
+  // 다른 프로젝트에서 복사한 테이블이면 평소처럼 새로 만든다
   if (!ids.every((id) => schema.tables.some((t) => t.id === id))) return false;
   const missing = ids.filter((id) => !area.tableIds.includes(id));
-  if (!missing.length) return false;
+  if (!missing.length) {
+    showNotice({ text: `이미 ${area.name} 영역에 있는 테이블입니다` });
+    return true;
+  }
   edit((d) => void addToArea(d, area.id, missing));
   selectTables(missing);
   const names = missing.map((id) => schema.tables.find((t) => t.id === id)!.name).join(', ');
-  showNotice({
-    text: `${names}을(를) ${area.name} 영역에 넣었습니다 — 복사본이 아니라 같은 테이블이라 관계도 그대로 이어집니다`,
-    action: {
-      label: '복사본 만들기',
-      run: () => {
-        useStore.getState().edit((d) => removeFromArea(d, area.id, missing));
-        void pasteClipboard(true);
-      },
-    },
-  });
+  showNotice({ text: `${names}을(를) ${area.name} 영역에 넣었습니다 (Ctrl+Z로 되돌리기)` });
   return true;
 }
 
