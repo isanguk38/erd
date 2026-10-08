@@ -2,7 +2,7 @@
 // 회사마다 양식이 달라 머리글 이름으로 칸을 찾는다 (용어명/논리명, 영문약어명/물리명, 데이터타입/타입, 길이, 설명).
 
 import ExcelJS from 'exceljs';
-import { splitDictType, type DictTerm, type DictWord, type Dictionary } from '../dictionary';
+import { splitDictType, type DictConflict, type DictTerm, type DictWord, type Dictionary } from '../dictionary';
 
 export interface DictionaryImport {
   terms: DictTerm[];
@@ -64,7 +64,7 @@ export async function parseDictionaryWorkbook(data: ArrayBuffer): Promise<Dictio
   await wb.xlsx.load(data);
   const out: DictionaryImport = { terms: [], words: [], notes: [] };
   for (const sheet of wb.worksheets) {
-    if (/안내|설명서|readme/i.test(sheet.name)) continue;
+    if (/안내|설명서|readme|충돌/i.test(sheet.name)) continue;
     const header = findHeader(sheet);
     if (!header) {
       out.notes.push(`"${sheet.name}" 시트: 논리명·물리명 머리글을 찾지 못해 건너뜀`);
@@ -120,7 +120,7 @@ const SAMPLE_WORDS: DictWord[] = [
 ];
 
 /** 사전 엑셀. dict가 없으면 예시가 든 빈 양식 */
-export async function dictionaryWorkbook(dict: Dictionary | null): Promise<ArrayBuffer> {
+export async function dictionaryWorkbook(dict: Dictionary | null, options: { conflicts?: DictConflict[] } = {}): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
   const terms = wb.addWorksheet('표준용어');
   terms.columns = [
@@ -139,6 +139,26 @@ export async function dictionaryWorkbook(dict: Dictionary | null): Promise<Array
   ];
   for (const w of dict ? dict.words : SAMPLE_WORDS) words.addRow(w);
   for (const sheet of [terms, words]) {
+    sheet.getRow(1).eachCell((c) => {
+      c.fill = HEADER_FILL;
+      c.font = { bold: true };
+    });
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  }
+  // ERD에서 만든 초안: 같은 논리명인데 이름·타입이 다른 것 (검토용. 다시 올릴 때는 읽지 않음)
+  if (options.conflicts?.length) {
+    const sheet = wb.addWorksheet('충돌(검토)');
+    sheet.columns = [
+      { header: '논리명', key: 'logical', width: 20 },
+      { header: '물리명', key: 'physical', width: 22 },
+      { header: '타입', key: 'type', width: 16 },
+      { header: '쓰는 곳 수', key: 'count', width: 10 },
+      { header: '사전에 넣음', key: 'chosen', width: 10 },
+      { header: '쓰는 곳 (테이블.컬럼)', key: 'columns', width: 70 },
+    ];
+    for (const c of options.conflicts) {
+      c.variants.forEach((v, i) => sheet.addRow({ logical: i === 0 ? c.logical : '', physical: v.physical, type: `${v.type}${v.length ? `(${v.length})` : ''}`, count: v.columns.length, chosen: i === 0 ? 'O' : '', columns: v.columns.join(', ') }));
+    }
     sheet.getRow(1).eachCell((c) => {
       c.fill = HEADER_FILL;
       c.font = { bold: true };

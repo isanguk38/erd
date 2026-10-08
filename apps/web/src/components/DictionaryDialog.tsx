@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   checkColumnAgainstDictionary,
   clearDictionary,
+  dictionaryFromSchema,
   dictIndex,
   removeDictEntry,
   searchDictionary,
@@ -10,6 +11,7 @@ import {
   updateColumn,
   writeDictionary,
   type DictCase,
+  type DictConflict,
   type DictTerm,
   type DictWord,
 } from '@erd/core';
@@ -47,6 +49,8 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   // 다른 프로젝트 사전 (복사해 오기). null이면 아직 안 찾음
   const [sources, setSources] = useState<{ id: string; name: string; terms: number; words: number }[] | null>(null);
   const [loadingSources, setLoadingSources] = useState(false);
+  // 지금 ERD로 만든 사전 초안
+  const [draft, setDraft] = useState<{ terms: DictTerm[]; conflicts: DictConflict[]; skipped: number } | null>(null);
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<Entry & { previous?: string }>({ logical: '', physical: '' });
@@ -116,6 +120,31 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
       alert(`사전을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+  const buildFromErd = () => {
+    const result = dictionaryFromSchema(useStore.getState().schema);
+    if (!result.terms.length) return alert('논리명이 있는 컬럼이 없습니다. 컬럼에 논리명(한글 이름)을 넣으면 그걸로 사전을 만듭니다.');
+    setSources(null);
+    setDraft(result);
+  };
+  const downloadDraft = async () => {
+    if (!draft) return;
+    const { dictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
+    const buf = await dictionaryWorkbook({ terms: draft.terms, words: [], case: 'asis' }, { conflicts: draft.conflicts });
+    downloadBlob(new Blob([buf], { type: XLSX }), `${safeFileName(projectName)}_사전초안.xlsx`);
+  };
+  const useDraft = () => {
+    if (!draft) return;
+    setPending({
+      terms: draft.terms,
+      words: [],
+      notes: [
+        `이 ERD 컬럼의 논리명 ${draft.terms.length}개로 만든 초안입니다`,
+        ...(draft.conflicts.length ? [`충돌 ${draft.conflicts.length}개는 가장 많이 쓰는 이름·타입으로 넣습니다`] : []),
+      ],
+      file: '이 ERD',
+    });
+    setDraft(null);
+  };
   const applyImport = () => {
     if (!pending) return;
     let counts = { terms: 0, words: 0 };
@@ -167,6 +196,11 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
           </label>
         )}
         {!readOnly && (
+          <button className="btn" disabled={!schema.tables.length} onClick={buildFromErd} title="지금 ERD 컬럼의 논리명·물리명·타입으로 사전 초안을 만듭니다 (같은 논리명인데 다르게 쓴 곳도 찾아 줌)">
+            ERD에서 만들기
+          </button>
+        )}
+        {!readOnly && (
           <button className="btn" disabled={loadingSources} onClick={() => void findSources()} title="내가 볼 수 있는 다른 프로젝트의 사전을 복사해 옵니다">
             {loadingSources ? '찾는 중…' : '다른 프로젝트에서 가져오기'}
           </button>
@@ -186,6 +220,42 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
           <button className="btn btn-ghost btn-danger-text" onClick={() => confirm('표준 용어 사전을 모두 지울까요? (ERD는 바뀌지 않습니다)') && editDictionary((d) => clearDictionary(d))}>사전 비우기</button>
         )}
       </div>
+
+      {draft && (
+        <div className="baseline-info dict-draft">
+          <div>
+            <b>이 ERD로 만든 사전 초안</b>: 용어 {draft.terms.length}개
+            {draft.skipped > 0 && <span className="muted"> · 논리명이 없는 컬럼 {draft.skipped}개는 뺌</span>}
+          </div>
+          {draft.conflicts.length > 0 ? (
+            <>
+              <div className="dict-draft__warn">같은 논리명인데 이름·타입이 다른 곳 {draft.conflicts.length}개 — 사전에는 가장 많이 쓰는 것(굵게)이 들어갑니다</div>
+              <ul className="dict-conflicts">
+                {draft.conflicts.slice(0, 30).map((c) => (
+                  <li key={c.logical}>
+                    <span className="dict-conflicts__term">{c.logical}</span>
+                    <span className="dict-conflicts__variants">
+                      {c.variants.map((v, i) => (
+                        <span key={i} className={i === 0 ? 'chosen' : ''} title={v.columns.join('\n')}>
+                          {v.physical} {v.type}{v.length ? `(${v.length})` : ''} ×{v.columns.length}
+                        </span>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {draft.conflicts.length > 30 && <p className="muted small">나머지 {draft.conflicts.length - 30}개는 검토용 엑셀의 "충돌(검토)" 시트에서 보세요.</p>}
+            </>
+          ) : (
+            <div className="muted">같은 논리명끼리 이름·타입이 모두 같습니다.</div>
+          )}
+          <div className="btn-row">
+            <button className="btn btn-primary" onClick={useDraft}>사전에 넣기</button>
+            <button className="btn" onClick={() => void downloadDraft()} title="용어 시트 + 충돌(검토) 시트. 고친 뒤 '엑셀 올리기'로 다시 올리면 됩니다">검토용 엑셀 받기</button>
+            <button className="btn" onClick={() => setDraft(null)}>닫기</button>
+          </div>
+        </div>
+      )}
 
       {sources && (
         <div className="baseline-info dict-sources">

@@ -324,3 +324,63 @@ export function dictionaryNotes(dict: Dictionary | null | undefined, before: { t
   }
   return out.length > limit ? [...out.slice(0, limit), `… 외 ${out.length - limit}개`] : out;
 }
+
+// ── ERD에서 사전 만들기 ──────────────────────────────
+
+export interface DictVariant {
+  physical: string;
+  type: string;
+  length: string;
+  /** 이 이름·타입을 쓰는 곳 (테이블.컬럼) */
+  columns: string[];
+}
+
+/** 같은 논리명인데 물리명·타입·길이가 다른 것 */
+export interface DictConflict {
+  logical: string;
+  /** 많이 쓰는 순. 첫 번째가 사전에 들어간 것 */
+  variants: DictVariant[];
+}
+
+/**
+ * 지금 ERD의 컬럼으로 사전 초안을 만든다: 논리명이 같은 컬럼을 묶어 가장 많이 쓰는 물리명·타입·길이를 용어로.
+ * 논리명이 같은데 이름·타입이 섞여 있으면 충돌로 따로 알려 준다 (사전에는 가장 많이 쓰는 것이 들어감).
+ */
+export function dictionaryFromSchema(schema: { tables: { name: string; columns: Column[] }[] }): { terms: DictTerm[]; conflicts: DictConflict[]; skipped: number } {
+  const groups = new Map<string, { logicals: Map<string, number>; comments: Map<string, number>; variants: Map<string, DictVariant> }>();
+  let skipped = 0;
+  for (const t of schema.tables) {
+    for (const c of t.columns) {
+      const logical = c.logicalName.trim();
+      if (!logical) {
+        skipped++;
+        continue;
+      }
+      const key = dictKey(logical);
+      const g = groups.get(key) ?? { logicals: new Map(), comments: new Map(), variants: new Map() };
+      groups.set(key, g);
+      g.logicals.set(logical, (g.logicals.get(logical) ?? 0) + 1);
+      if (c.comment.trim()) g.comments.set(c.comment.trim(), (g.comments.get(c.comment.trim()) ?? 0) + 1);
+      const type = baseType(c.type);
+      const length = c.length.replace(/\s+/g, '');
+      const vkey = `${c.name.toLowerCase()}|${type}|${length}`;
+      const v = g.variants.get(vkey) ?? { physical: c.name, type: c.type.trim().toUpperCase(), length, columns: [] };
+      g.variants.set(vkey, v);
+      v.columns.push(`${t.name}.${c.name}`);
+    }
+  }
+  const top = <T>(m: Map<T, number>): T | undefined => [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const terms: DictTerm[] = [];
+  const conflicts: DictConflict[] = [];
+  for (const g of groups.values()) {
+    const variants = [...g.variants.values()].sort((a, b) => b.columns.length - a.columns.length);
+    const best = variants[0];
+    const logical = top(g.logicals)!;
+    const description = top(g.comments);
+    terms.push({ logical, physical: best.physical, ...(best.type ? { type: best.type } : {}), ...(best.length ? { length: best.length } : {}), ...(description ? { description } : {}) });
+    if (variants.length > 1) conflicts.push({ logical, variants });
+  }
+  terms.sort((a, b) => a.logical.localeCompare(b.logical));
+  conflicts.sort((a, b) => b.variants.length - a.variants.length || a.logical.localeCompare(b.logical));
+  return { terms, conflicts, skipped };
+}

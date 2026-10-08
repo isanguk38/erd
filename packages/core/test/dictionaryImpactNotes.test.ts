@@ -6,6 +6,7 @@ import {
   changeImpact,
   checkColumnAgainstDictionary,
   columnDeleteImpact,
+  dictionaryFromSchema,
   emptySchema,
   lintSchema,
   lookupPhysical,
@@ -102,6 +103,29 @@ describe('표준 용어 사전', () => {
     ws.addRow([1, '회원번호', 'Member Number', 'MBR_NO', '번호V20', 'VARCHAR(20)', '']);
     const company = await parseDictionaryWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
     expect(company.terms).toEqual([{ logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR', length: '20' }]);
+  });
+});
+
+describe('ERD에서 사전 만들기', () => {
+  it('논리명별로 가장 많이 쓰는 이름·타입을 용어로, 다르게 쓴 곳은 충돌로', async () => {
+    const { schema } = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'member', columns: [{ name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true, comment: '회원 구분' }, { name: 'nick', type: 'VARCHAR(20)' }] },
+      { op: 'createTable', name: 'orders', columns: [{ name: 'member_id', logicalName: '회원 번호', type: 'BIGINT' }, { name: 'reg_dt', logicalName: '등록일시', type: 'DATETIME' }] },
+      { op: 'createTable', name: 'point', columns: [{ name: 'mbr_no', logicalName: '회원번호', type: 'VARCHAR(20)' }] },
+    ]);
+    const { terms, conflicts, skipped } = dictionaryFromSchema(schema);
+    expect(skipped).toBe(1);
+    expect(terms).toEqual([
+      { logical: '등록일시', physical: 'reg_dt', type: 'DATETIME' },
+      { logical: '회원번호', physical: 'member_id', type: 'BIGINT', description: '회원 구분' },
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].variants.map((v) => [v.physical, v.columns.length])).toEqual([['member_id', 2], ['mbr_no', 1]]);
+    // 검토용 엑셀: 충돌 시트는 다시 올릴 때 읽지 않는다
+    const buf = await dictionaryWorkbook({ terms, words: [], case: 'asis' }, { conflicts });
+    const parsed = await parseDictionaryWorkbook(buf);
+    expect(parsed.terms).toEqual(terms);
+    expect(parsed.notes.join()).not.toContain('충돌');
   });
 });
 

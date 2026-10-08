@@ -906,3 +906,12 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .dict-sources ul { list-style: none; margin: 8px 0; padding: 0; max-height: 200px; overflow: auto; }
 .dict-sources li { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .dict-sources li > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dict-draft { display: block; margin-bottom: 12px; }
+.dict-draft .btn-row { margin-top: 8px; }
+.dict-draft__warn { margin-top: 6px; color: var(--warning); }
+.dict-conflicts { list-style: none; margin: 6px 0; padding: 0; max-height: 220px; overflow: auto; border-top: 1px solid var(--border); }
+.dict-conflicts li { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.dict-conflicts__term { flex: 0 0 130px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dict-conflicts__variants { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.dict-conflicts__variants .chosen { font-weight: 700; }
+.dict-conflicts__variants span:not(.chosen) { color: var(--muted); }
