@@ -339,7 +339,7 @@ body.area-picking .area-tabs__arrow { border-color: var(--accent); color: var(--
 .color-picker__quick { display: inline-flex; align-items: center; gap: 5px; }
 .color-pop { position: fixed; z-index: 70; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.16); padding: 10px; }
 /* 5열 격자 (색상환 순서 20색) + 기본 + 직접 고르기·HEX */
-.color-grid { display: flex; flex-direction: column; gap: 8px; width: 156px; }
+.color-grid { display: flex; flex-direction: column; gap: 8px; }
 .color-grid__cells { display: grid; grid-template-columns: repeat(5, 22px); gap: 8px; }
 .color-grid__cells .color-chip { width: 22px; height: 22px; }
 .color-grid__default { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 6px; padding: 3px 8px 3px 4px; font-size: 12px; cursor: pointer; align-self: flex-start; }
@@ -849,3 +849,7 @@ body.resizing-side { cursor: col-resize; user-select: none; }
 .react-flow.picking .react-flow__node.selected .table-node { box-shadow: 0 0 0 3px var(--accent), 0 12px 30px rgb(0 0 0 / 0.2); }
 body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed var(--area-color, var(--accent)); outline-offset: -5px; border-radius: 6px; }
 .pick-chip { position: fixed; z-index: 80; pointer-events: none; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 5px 10px; font-size: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); white-space: nowrap; }
+.color-grid { width: 176px; }
+.color-grid__apply { flex: none; height: 26px; padding: 0 8px; }
+.color-grid__hex.invalid { border-color: var(--danger); }
+.color-grid__hint { font-size: 10.5px; line-height: 1.4; }

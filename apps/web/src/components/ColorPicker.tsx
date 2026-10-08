@@ -90,21 +90,40 @@ export function ColorPicker({
 function ColorGrid({ value, onChange, allowDefault, disabled }: { value?: string | null; onChange: (color: string | undefined) => void; allowDefault?: boolean; disabled?: boolean }) {
   const current = value?.toLowerCase();
   const custom = current && HEX.test(current) && !COLOR_PALETTE.includes(current) ? current : null;
+  // HEX 칸: 지금 색을 보여 주고, 색 선택 창에서 고르는 동안은 고르는 색을 실시간으로 보여 준다
   const [hex, setHex] = useState(current && HEX.test(current) ? current : '');
+  useEffect(() => setHex(current && HEX.test(current) ? current : ''), [current]);
   const input = useRef<HTMLInputElement>(null);
-  // 색 선택기를 끄는 동안 값이 계속 바뀌므로(input 이벤트) 다 고른 뒤(change)에만 저장한다
+  // 색 선택 창(브라우저 기본 창)에는 확인 버튼이 없다: 고르는 동안(input)은 미리 보기만, 창을 닫으면(change) 적용
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   useEffect(() => {
     const el = input.current;
     if (!el) return;
-    const commit = () => onChangeRef.current(el.value.toLowerCase());
+    // 고르는 중인 색: 바깥을 눌러 색 선택 창을 닫으면 같은 누름에 이 팝업도 먼저 닫힐 수 있어,
+    // 적용(change)이 오기 전에 사라지면 그때 적용한다
+    let picking: string | null = null;
+    const preview = () => {
+      picking = el.value.toLowerCase();
+      setHex(picking);
+    };
+    const commit = () => {
+      picking = null;
+      onChangeRef.current(el.value.toLowerCase());
+    };
+    el.addEventListener('input', preview);
     el.addEventListener('change', commit);
-    return () => el.removeEventListener('change', commit);
+    return () => {
+      el.removeEventListener('input', preview);
+      el.removeEventListener('change', commit);
+      if (picking) onChangeRef.current(picking);
+    };
   }, []);
-  const applyHex = () => {
-    const v = (hex.startsWith('#') ? hex : `#${hex}`).trim().toLowerCase();
-    if (HEX.test(v)) onChange(v);
+  const typed = (hex.startsWith('#') ? hex : `#${hex}`).trim().toLowerCase();
+  const valid = HEX.test(typed);
+  const pending = valid && typed !== current;
+  const apply = () => {
+    if (valid) onChange(typed);
   };
   return (
     <div className="color-grid">
@@ -119,21 +138,29 @@ function ColorGrid({ value, onChange, allowDefault, disabled }: { value?: string
         ))}
       </div>
       <div className="color-grid__custom">
-        <label className={`color-chip color-chip--custom${custom ? ' active' : ''}${disabled ? ' disabled' : ''}`} title="직접 고르기 (스펙트럼·스포이드)" style={custom ? { background: custom } : undefined}>
+        {/* 색상환: 누르면 색 선택 창. 고르는 동안 이 칩과 HEX 칸이 고르는 색으로 바뀐다 */}
+        <label
+          className={`color-chip color-chip--custom${custom || pending ? ' active' : ''}${disabled ? ' disabled' : ''}`}
+          title="직접 고르기 (스펙트럼·스포이드) — 창을 닫으면 적용"
+          style={pending ? { background: typed } : custom ? { background: custom } : undefined}
+        >
           <input ref={input} type="color" disabled={disabled} defaultValue={custom ?? '#3b82f6'} aria-label="색 직접 고르기" />
         </label>
         <input
-          className="color-grid__hex mono"
+          className={`color-grid__hex mono${hex && !valid ? ' invalid' : ''}`}
           value={hex}
           placeholder="#3b82f6"
           maxLength={7}
           disabled={disabled}
           onChange={(e) => setHex(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && applyHex()}
-          onBlur={() => hex && hex !== current && applyHex()}
+          onKeyDown={(e) => e.key === 'Enter' && apply()}
           aria-label="HEX 색 코드"
         />
+        <button className="btn btn-sm btn-primary color-grid__apply" disabled={disabled || !pending} onClick={apply} title="이 색으로 적용 (Enter)">
+          적용
+        </button>
       </div>
+      <div className="color-grid__hint muted">색상환: 창을 닫으면 적용 · HEX: Enter</div>
     </div>
   );
 }
