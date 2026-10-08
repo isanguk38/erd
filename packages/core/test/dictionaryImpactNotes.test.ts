@@ -50,6 +50,16 @@ describe('표준 용어 사전', () => {
     expect(lookupPhysical(dict, 'mbr_no')?.logical).toBe('회원번호');
   });
 
+  it('camelCase: 용어·단어 모두 mbrNo처럼, 검사·물리명 찾기도 같은 것으로 본다', () => {
+    const camel = { ...dict, case: 'camel' as const };
+    expect(lookupTerm(camel, '회원번호')?.physical).toBe('mbrNo');
+    expect(lookupTerm(camel, '상품수량')?.physical).toBe('prdQty');
+    expect(checkColumnAgainstDictionary(camel, { name: 'mbrNo', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.status).toBe('ok');
+    // camelCase로 정했으면 MBR_NO는 표기가 달라 표준대로 고치라고 알린다
+    expect(checkColumnAgainstDictionary(camel, { name: 'MBR_NO', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.patch?.name).toBe('mbrNo');
+    expect(lookupPhysical(camel, 'mbrNo')?.logical).toBe('회원번호');
+  });
+
   it('컬럼 검사: 대소문자는 무시하고 물리명·타입·길이를 비교', () => {
     expect(checkColumnAgainstDictionary(dict, { name: 'mbr_no', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.status).toBe('ok');
     const r = checkColumnAgainstDictionary(dict, { name: 'member_id', logicalName: '회원번호', type: 'BIGINT', length: '' });

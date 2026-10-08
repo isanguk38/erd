@@ -2,6 +2,7 @@ import pg from 'pg';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
+import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 import { indexDefinitionKeys, isPlainKeyList } from './indexDefinition';
 
@@ -307,5 +308,27 @@ export const postgresConnector: Connector = {
     withClient(config, async (client) => {
       if (config.schema && config.schema !== 'public') await client.query(`SET search_path TO "${config.schema.replace(/"/g, '""')}"`);
       return executePostgres(client, statements);
+    }),
+  check: (config, checks) =>
+    withClient(config, async (client) => {
+      // 읽기 전용 트랜잭션: 검사가 무엇을 하든 DB는 바뀌지 않는다. 검사 하나가 실패해도 세이브포인트로 이어 간다
+      await client.query('BEGIN READ ONLY');
+      try {
+        if (config.schema && config.schema !== 'public') await client.query(`SET LOCAL search_path TO "${config.schema.replace(/"/g, '""')}"`);
+        await client.query(`SET LOCAL statement_timeout = ${CHECK_TIMEOUT_MS}`);
+        return await runSafetyChecks('postgresql', checks, async (sql) => {
+          await client.query('SAVEPOINT erd_check');
+          try {
+            const n = countOf((await client.query(sql)).rows);
+            await client.query('RELEASE SAVEPOINT erd_check');
+            return n;
+          } catch (e) {
+            await client.query('ROLLBACK TO SAVEPOINT erd_check').catch(() => {});
+            throw e;
+          }
+        });
+      } finally {
+        await client.query('ROLLBACK').catch(() => {});
+      }
     }),
 };

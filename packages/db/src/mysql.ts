@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
+import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, StatementResult } from './types';
 
 export interface ColumnRow {
@@ -313,6 +314,18 @@ function makeConnector(dialect: 'mysql' | 'mariadb'): Connector {
       }
       const appliedCount = results.filter((r) => r.ok).length;
       return { results, ok: !failed, rolledBack: false, appliedCount } satisfies ExecuteResult;
+    }),
+  check: (config, checks) =>
+    withConnection(config, async (conn) => {
+      // 읽기 전용 트랜잭션 + 문장 제한 시간 (MySQL 5.7.8+ MAX_EXECUTION_TIME, MariaDB max_statement_time — 없으면 무시)
+      await conn.query(`SET SESSION MAX_EXECUTION_TIME = ${CHECK_TIMEOUT_MS}`).catch(() => {});
+      await conn.query(`SET SESSION max_statement_time = ${CHECK_TIMEOUT_MS / 1000}`).catch(() => {});
+      await conn.query('START TRANSACTION READ ONLY');
+      try {
+        return await runSafetyChecks(dialect, checks, async (sql) => countOf((await conn.query(sql))[0] as unknown[]));
+      } finally {
+        await conn.query('ROLLBACK').catch(() => {});
+      }
     }),
 };
 }

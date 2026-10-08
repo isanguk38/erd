@@ -2,6 +2,7 @@ import oracledb from 'oracledb';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError } from './errors';
+import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 
 // Oracle 12c 이상. 드라이버는 Thin 모드라 Oracle Client 설치가 필요 없다.
@@ -264,6 +265,18 @@ export const oracleConnector: Connector = {
         }
       }
       return { results, ok: !failed, rolledBack: false, appliedCount: results.filter((r) => r.ok).length } satisfies ExecuteResult;
+    }),
+  check: (config, checks) =>
+    withConnection(config, async (conn) => {
+      if (config.schema) await conn.execute(`ALTER SESSION SET CURRENT_SCHEMA = "${config.schema.toUpperCase().replace(/"/g, '')}"`);
+      // 읽기 전용 트랜잭션 + 호출 제한 시간
+      conn.callTimeout = CHECK_TIMEOUT_MS;
+      await conn.execute('SET TRANSACTION READ ONLY');
+      try {
+        return await runSafetyChecks('oracle', checks, async (text) => countOf((await conn.execute(text, [], { outFormat: oracledb.OUT_FORMAT_OBJECT })).rows as unknown[]));
+      } finally {
+        await conn.rollback().catch(() => {});
+      }
     }),
 };
 

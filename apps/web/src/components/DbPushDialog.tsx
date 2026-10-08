@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { appliedChanges, generateStatements, getDialect, planPush, syncedBaseline, type RenameLink, type Schema } from '@erd/core';
+import { appliedChanges, generateStatements, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
@@ -31,6 +31,15 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<ExecuteResult | null>(null);
+  // DB 반영 전 안전 검사 (실행 확인 단계에서): running / done(변경별 안내) / unsupported(옛 설치형 앱) / error
+  const [safety, setSafety] = useState<
+    | { state: 'running' }
+    | { state: 'done'; checked: number; findings: { changeId: string; summary: string; items: SafetyFinding[] }[] }
+    | { state: 'unsupported' }
+    | { state: 'error'; message: string }
+    | null
+  >(null);
+  const [ackFail, setAckFail] = useState(false);
 
   const dialect = getDialect(db?.dialect ?? projectDialect);
   const plan = useMemo(() => (db ? planPush(schema, db.schema, { dialect, baseline: baseline?.schema, links }) : null), [db, schema, dialect, baseline, links]);
@@ -86,14 +95,34 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  // 실행할 변경 중 지금 DB 데이터 때문에 실패하거나 데이터가 사라지는 것을 센다 (읽기만 함)
+  const runSafety = async () => {
+    if (!connection || !plan || !diff) return;
+    setAckFail(false);
+    const changes = diff.changes.filter((c) => selected.has(c.id));
+    const checks = safetyChecks(changes, plan.dbAligned);
+    if (!checks.length) return setSafety({ state: 'done', checked: 0, findings: [] });
+    setSafety({ state: 'running' });
+    try {
+      const results = await api.check(connection.id, checks);
+      if (!results) return setSafety({ state: 'unsupported' });
+      const found = safetyFindings(checks, results);
+      const findings = changes.filter((c) => found.has(c.id)).map((c) => ({ changeId: c.id, summary: c.summary, items: found.get(c.id)! }));
+      setSafety({ state: 'done', checked: checks.length, findings });
+    } catch (e) {
+      setSafety({ state: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const failCount = safety?.state === 'done' ? safety.findings.filter((f) => f.items.some((i) => i.level === 'fail')).length : 0;
+
   const needsTyping = dropCount > 0;
-  const canExecute = statements.length > 0 && (!needsTyping || confirmText === connection?.database);
+  const canExecute = statements.length > 0 && (!needsTyping || confirmText === connection?.database) && safety?.state !== 'running' && (failCount === 0 || ackFail);
 
   const footer = (
     <>
       <button className="btn" onClick={onClose}>닫기</button>
       {step === 'compare' && diff && diff.changes.length > 0 && (
-        <button className="btn btn-primary" disabled={!statements.length} onClick={() => { setConfirmText(''); setStep('confirm'); }}>
+        <button className="btn btn-primary" disabled={!statements.length} onClick={() => { setConfirmText(''); setStep('confirm'); void runSafety(); }}>
           다음: 실행 확인 ({statements.length}문장)
         </button>
       )}
@@ -162,6 +191,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
             </li>
             <li>실행 전후로 ERD 버전이 자동 저장됩니다.</li>
           </ul>
+          <SafetyPanel safety={safety} failCount={failCount} ackFail={ackFail} onAck={setAckFail} onRetry={() => void runSafety()} />
           {needsTyping && (
             <label className="confirm-typing">
               삭제 문장이 포함되어 있습니다. 확인을 위해 데이터베이스 이름 <code>{connection.database}</code>을 입력하세요.
@@ -193,5 +223,50 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+type SafetyState =
+  | { state: 'running' }
+  | { state: 'done'; checked: number; findings: { changeId: string; summary: string; items: SafetyFinding[] }[] }
+  | { state: 'unsupported' }
+  | { state: 'error'; message: string }
+  | null;
+
+/** 안전 검사 결과: 실패할 변경(빨강), 데이터가 사라지는 변경(주황), 검사하지 못한 것(회색) */
+function SafetyPanel({ safety, failCount, ackFail, onAck, onRetry }: { safety: SafetyState; failCount: number; ackFail: boolean; onAck: (v: boolean) => void; onRetry: () => void }) {
+  if (!safety) return null;
+  if (safety.state === 'running') return <div className="safety-box running">데이터 안전 검사 중… (DB를 읽기만 합니다)</div>;
+  if (safety.state === 'unsupported') return <div className="safety-box unknown">데이터 안전 검사는 설치형 앱 0.2.5부터 됩니다. 앱을 업데이트하면 실행 전에 실패할 변경을 미리 알려 드립니다.</div>;
+  if (safety.state === 'error')
+    return (
+      <div className="safety-box unknown">
+        데이터 안전 검사를 하지 못했습니다: {safety.message} <button className="btn btn-sm" onClick={onRetry}>다시 검사</button>
+      </div>
+    );
+  if (!safety.findings.length)
+    return <div className="safety-box ok">데이터 안전 검사: 문제 없음{safety.checked ? ` (검사 ${safety.checked}건)` : ' (데이터를 확인할 변경이 없습니다)'}</div>;
+  const rank = { fail: 0, loss: 1, unknown: 2 } as const;
+  const sorted = [...safety.findings].sort((a, b) => Math.min(...a.items.map((i) => rank[i.level])) - Math.min(...b.items.map((i) => rank[i.level])));
+  return (
+    <div className={`safety-box ${failCount ? 'fail' : 'loss'}`}>
+      <b>{failCount ? `이대로 실행하면 실패할 변경 ${failCount}개` : '데이터가 사라지는 변경이 있습니다'}</b>
+      <ul>
+        {sorted.map((f) => (
+          <li key={f.changeId}>
+            <span className="safety-change">{f.summary}</span>
+            {f.items.map((i, k) => (
+              <div key={k} className={`safety-item ${i.level}`}>{i.level === 'fail' ? '⛔ ' : i.level === 'loss' ? '⚠ ' : ''}{i.text}</div>
+            ))}
+          </li>
+        ))}
+      </ul>
+      {failCount > 0 && (
+        <label className="safety-ack">
+          <input type="checkbox" checked={ackFail} onChange={(e) => onAck(e.target.checked)} /> 실패할 수 있음을 알고 그대로 실행 (앞 단계로 돌아가 해당 변경을 빼거나 데이터를 먼저 정리하는 것을 권합니다)
+        </label>
+      )}
+      <button className="btn btn-sm" onClick={onRetry}>다시 검사</button>
+    </div>
   );
 }

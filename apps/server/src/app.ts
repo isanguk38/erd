@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { dialects, type DialectId } from '@erd/core';
-import { getConnector, type ConnectionConfig } from '@erd/db';
+import { getConnector, validateChecks, type ConnectionConfig } from '@erd/db';
 import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
 import { ProjectStore } from './projects';
 import { registerProjectRoutes } from './routes/projects';
@@ -204,6 +204,19 @@ export function buildApp(options: AppOptions): ErdApp {
     await auth.assertAllowedDbHost(config.host);
     const result = await getConnector(config.dialect).introspect(config, { commentAs: req.body?.commentAs });
     return { ...result, dialect: config.dialect };
+  });
+
+  // DB 반영 전 안전 검사: 검사 목록(종류·이름)만 받아 읽기 전용으로 건수를 센다
+  app.post<{ Params: { id: string }; Body: { checks: unknown } }>('/api/connections/:id/check', async (req) => {
+    let checks;
+    try {
+      checks = validateChecks(req.body?.checks);
+    } catch (e) {
+      throw Object.assign(e as Error, { statusCode: 400 });
+    }
+    const config = store.config(req.params.id, req.user.id);
+    await auth.assertAllowedDbHost(config.host);
+    return { results: await getConnector(config.dialect).check(config, checks) };
   });
 
   app.post<{ Params: { id: string }; Body: { statements: string[] } }>('/api/connections/:id/execute', async (req) => {

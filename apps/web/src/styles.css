@@ -915,3 +915,18 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .dict-conflicts__variants { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .dict-conflicts__variants .chosen { font-weight: 700; }
 .dict-conflicts__variants span:not(.chosen) { color: var(--muted); }
+
+/* ── DB 반영 전 안전 검사 ───────────────────── */
+.safety-box { margin: 10px 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; }
+.safety-box.running, .safety-box.unknown { color: var(--muted); }
+.safety-box.ok { border-color: var(--create); color: var(--create); }
+.safety-box.fail { border-color: var(--danger); background: var(--danger-soft); }
+.safety-box.loss { border-color: var(--warning); background: var(--warning-soft); }
+.safety-box ul { margin: 6px 0; padding-left: 18px; }
+.safety-box li { margin: 4px 0; }
+.safety-change { font-weight: 600; }
+.safety-item { margin-top: 2px; }
+.safety-item.fail { color: var(--danger); }
+.safety-item.loss { color: var(--warning); }
+.safety-item.unknown { color: var(--muted); }
+.safety-ack { display: flex; gap: 6px; align-items: flex-start; margin: 8px 0; color: var(--text); }

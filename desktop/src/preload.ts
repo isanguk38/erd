@@ -4,7 +4,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 contextBridge.exposeInMainWorld('erdDesktop', {
-  version: '0.2.4',
+  version: '0.2.5',
   listConnections: () => ipcRenderer.invoke('erd:connections:list'),
   createConnection: (input: unknown) => ipcRenderer.invoke('erd:connections:create', input),
   updateConnection: (id: string, input: unknown) => ipcRenderer.invoke('erd:connections:update', id, input),
@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('erdDesktop', {
   testConnection: (input: unknown) => ipcRenderer.invoke('erd:connections:test', input),
   introspect: (id: string, commentAs: string) => ipcRenderer.invoke('erd:db:introspect', id, commentAs),
   execute: (id: string, statements: string[]) => ipcRenderer.invoke('erd:db:execute', id, statements),
+  /** DB 반영 전 안전 검사 (0.2.5부터) */
+  check: (id: string, checks: unknown[]) => ipcRenderer.invoke('erd:db:check', id, checks),
   /** 새 버전 설치 파일을 내려받아 실행한다 (0.2.0부터) */
   installUpdate: (url: string) => ipcRenderer.invoke('erd:update:install', url),
   /** 내려받기 진행률(0~100, 모르면 -1). 돌려준 함수를 부르면 그만 듣는다 */

@@ -2,6 +2,7 @@
 // 앱 안에서 열리면 window.erdDesktop이 있고, DB 가져오기·내보내기를 사용자 PC에서 직접 처리한다.
 // 일반 웹 브라우저에서는 없다.
 
+import type { SafetyCheck, SafetyResult } from '@erd/core';
 import type { Connection, ConnectionInput, ExecuteResult, IntrospectResult } from './api';
 
 export interface DesktopBridge {
@@ -13,6 +14,8 @@ export interface DesktopBridge {
   testConnection(input: ConnectionInput & { id?: string }): Promise<{ serverVersion: string }>;
   introspect(id: string, commentAs: 'logicalName' | 'comment'): Promise<IntrospectResult>;
   execute(id: string, statements: string[]): Promise<ExecuteResult>;
+  /** DB 반영 전 안전 검사 (0.2.5부터. 이전 앱에는 없다) */
+  check?(id: string, checks: SafetyCheck[]): Promise<SafetyResult[]>;
   /** 새 버전 설치 파일을 내려받아 실행 (0.2.0부터. 0.1.x에는 없다) */
   installUpdate?(url: string): Promise<{ ok: true }>;
   onUpdateProgress?(callback: (percent: number) => void): () => void;

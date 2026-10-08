@@ -1,4 +1,4 @@
-import type { DialectId, Schema } from '@erd/core';
+import type { DialectId, SafetyCheck, SafetyResult, Schema } from '@erd/core';
 
 export interface ConnectionConfig {
   dialect: DialectId;
@@ -52,4 +52,6 @@ export interface Connector {
   introspect(config: ConnectionConfig, options?: IntrospectOptions): Promise<IntrospectResult>;
   /** 문장을 순서대로 실행한다. 트랜잭션 DDL을 지원하면 하나의 트랜잭션으로 묶는다. */
   execute(config: ConnectionConfig, statements: string[]): Promise<ExecuteResult>;
+  /** DB 반영 전 안전 검사: 읽기 전용으로 건수만 센다 (SQL은 검사 종류로 만든다) */
+  check(config: ConnectionConfig, checks: SafetyCheck[]): Promise<SafetyResult[]>;
 }

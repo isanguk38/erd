@@ -57,6 +57,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
           <ul>
             <li><b>DB에서 가져오기</b>: DB 구조를 읽어 ERD를 만들거나, 바뀐 부분만 반영합니다. 배치·논리명은 유지합니다.</li>
             <li><b>DB로 내보내기</b>: ERD와 DB를 비교해 <b>바뀐 부분만</b> CREATE/ALTER/INDEX로 실행합니다. 테이블 삭제는 기본으로 빠져 있습니다.</li>
+            <li><b>안전 검사</b>: 실행 확인 단계에서 지금 DB 데이터를 읽기만 해서, 이대로 실행하면 실패할 변경(NULL인 행에 NOT NULL, 중복 값에 UNIQUE, 더 긴 값에 길이 줄이기, 숫자가 아닌 값에 숫자 타입, 부모에 없는 값에 외래키, 조건에 안 맞는 행에 CHECK)과 데이터가 사라지는 변경(컬럼·테이블 삭제)을 건수와 함께 알려 줍니다. 규칙을 따로 넣을 필요는 없습니다.</li>
             <li>마지막으로 맞춘 뒤 <b>DB에서 바뀜 / ERD에서 바뀜</b>을 나눠 보여주고, 이름 바뀐 컬럼은 "이름 변경인가요?"라고 묻습니다.</li>
             {!dbAvailable && (
               <li className="help-note">

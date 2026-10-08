@@ -2,6 +2,7 @@ import sql from 'mssql';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
+import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
 
 // SQL Server 2016 이상 / Azure SQL. 스키마는 기본 dbo.
@@ -266,5 +267,20 @@ export const mssqlConnector: Connector = {
       if (failed) await tx.rollback().catch(() => {});
       else await tx.commit();
       return { results, ok: !failed, rolledBack: failed, appliedCount: failed ? 0 : statements.length } satisfies ExecuteResult;
+    }),
+  // SQL Server에는 읽기 전용 트랜잭션이 없어 트랜잭션으로 묶고 끝나면 항상 되돌린다 (검사는 SELECT뿐)
+  check: (config, checks) =>
+    withPool(config, async (pool) => {
+      const tx = new sql.Transaction(pool);
+      await tx.begin();
+      try {
+        return await runSafetyChecks('mssql', checks, async (text) => {
+          const req = new sql.Request(tx);
+          (req as unknown as { timeout: number }).timeout = CHECK_TIMEOUT_MS;
+          return countOf((await req.query(text)).recordset as unknown[]);
+        });
+      } finally {
+        await tx.rollback().catch(() => {});
+      }
     }),
 };

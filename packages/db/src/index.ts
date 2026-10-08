@@ -26,3 +26,4 @@ export function getConnector(dialect: DialectId): Connector {
   return connector;
 }
 export { stabilizeIds } from './stableIds';
+export { validateChecks, runSafetyChecks } from './safety';

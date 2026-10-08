@@ -1,4 +1,4 @@
-import type { DialectId, Dictionary, Schema } from '@erd/core';
+import type { DialectId, Dictionary, SafetyCheck, SafetyResult, Schema } from '@erd/core';
 import { desktop, viaDesktop } from './desktop';
 
 export interface Connection {
@@ -77,6 +77,13 @@ export const api = {
     desktop ? viaDesktop(() => desktop!.testConnection(input)) : request<{ serverVersion: string }>('POST', '/api/connections/test', input),
   introspect: (id: string, commentAs: 'logicalName' | 'comment' = 'logicalName') =>
     desktop ? viaDesktop(() => desktop!.introspect(id, commentAs)) : request<IntrospectResult>('POST', `/api/connections/${id}/introspect`, { commentAs }),
+  /** DB 반영 전 안전 검사. 이 기능이 없는 옛 설치형 앱이면 null (앱 업데이트 필요) */
+  check: (id: string, checks: SafetyCheck[]): Promise<SafetyResult[] | null> =>
+    desktop
+      ? desktop.check
+        ? viaDesktop(() => desktop!.check!(id, checks))
+        : Promise.resolve(null)
+      : request<{ results: SafetyResult[] }>('POST', `/api/connections/${id}/check`, { checks }).then((r) => r.results),
   execute: (id: string, statements: string[]) =>
     desktop ? viaDesktop(() => desktop!.execute(id, statements)) : request<ExecuteResult>('POST', `/api/connections/${id}/execute`, { statements }),
 };

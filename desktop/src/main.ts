@@ -10,7 +10,7 @@ import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { getConnector, type ConnectionConfig } from '@erd/db';
+import { getConnector, validateChecks, type ConnectionConfig } from '@erd/db';
 import { dialects, type DialectId } from '@erd/core';
 
 // 마지막 안전망: DB 드라이버 등에서 처리되지 않은 예외가 나도 오류 창으로 앱을 멈추지 않고 기록만 한다.
@@ -243,6 +243,14 @@ function registerHandlers() {
     const cfg = toConfig(c, decrypt(c.passwordEnc));
     const result = await getConnector(cfg.dialect).introspect(cfg, { commentAs });
     return { ...result, dialect: cfg.dialect };
+  });
+
+  // DB 반영 전 안전 검사 (0.2.5부터): 검사 목록만 받아 읽기 전용으로 건수를 센다. SQL은 받지 않는다
+  handle('erd:db:check', async (id: string, checks: unknown) => {
+    const valid = validateChecks(checks);
+    const c = findConnection(id);
+    const cfg = toConfig(c, decrypt(c.passwordEnc));
+    return getConnector(cfg.dialect).check(cfg, valid);
   });
 
   handle('erd:db:execute', async (id: string, statements: string[]) => {

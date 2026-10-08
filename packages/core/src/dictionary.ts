@@ -25,8 +25,8 @@ export interface DictWord {
   description?: string;
 }
 
-/** 물리명을 채울 때 대소문자: 사전 그대로 / 소문자 / 대문자 */
-export type DictCase = 'asis' | 'lower' | 'upper';
+/** 물리명을 채울 때 표기: 사전 그대로 / 소문자 / 대문자 / camelCase (MBR_NO → mbrNo) */
+export type DictCase = 'asis' | 'lower' | 'upper' | 'camel';
 
 export interface Dictionary {
   terms: DictTerm[];
@@ -150,8 +150,16 @@ export interface DictMatch {
 }
 
 export function applyDictCase(name: string, c: DictCase): string {
+  if (c === 'camel') {
+    // 밑줄·공백·대문자 경계로 낱말을 나눠 첫 낱말만 소문자로 시작 (MBR_NO, mbr_no, MbrNo → mbrNo)
+    const words = name.split(/[_\s-]+/).flatMap((w) => w.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
+    return words.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase())).join('');
+  }
   return c === 'lower' ? name.toLowerCase() : c === 'upper' ? name.toUpperCase() : name;
 }
+
+/** 물리명 비교·찾기용 키: 대소문자와 밑줄을 무시 (MBR_NO = mbrNo) */
+const physicalKey = (name: string) => name.trim().toLowerCase().replace(/_/g, '');
 
 /** 큰 사전에서 여러 번 찾을 때 쓰는 색인 (사전이 바뀔 때만 다시 만든다) */
 export interface DictIndex {
@@ -171,7 +179,7 @@ export function dictIndex(dict: Dictionary): DictIndex {
   const terms = new Map(dict.terms.map((t) => [dictKey(t.logical), t]));
   const words = new Map(dict.words.map((w) => [dictKey(w.logical), w]));
   const byPhysical = new Map<string, DictTerm>();
-  for (const t of dict.terms) if (!byPhysical.has(t.physical.toLowerCase())) byPhysical.set(t.physical.toLowerCase(), t);
+  for (const t of dict.terms) if (!byPhysical.has(physicalKey(t.physical))) byPhysical.set(physicalKey(t.physical), t);
   const index = { dict, terms, words, byPhysical, maxWord: Math.max(0, ...[...words.keys()].map((k) => k.length)) };
   indexCache.set(dict, index);
   return index;
@@ -220,7 +228,7 @@ export function lookupTerm(dict: Dictionary | DictIndex | null | undefined, logi
 export function lookupPhysical(dict: Dictionary | DictIndex | null | undefined, physical: string): DictTerm | null {
   if (!dict || !physical.trim()) return null;
   const index = 'byPhysical' in dict ? dict : dictIndex(dict);
-  return index.byPhysical.get(physical.trim().toLowerCase()) ?? null;
+  return index.byPhysical.get(physicalKey(physical)) ?? null;
 }
 
 /** 사전 안에서 찾기 (논리명·물리명·설명에 글자가 들어 있는 것) */

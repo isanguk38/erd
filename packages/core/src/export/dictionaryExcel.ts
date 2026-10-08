@@ -148,22 +148,28 @@ export async function dictionaryWorkbook(dict: Dictionary | null, options: { con
   // ERD에서 만든 초안: 같은 논리명인데 이름·타입이 다른 것 (검토용. 다시 올릴 때는 읽지 않음)
   if (options.conflicts?.length) {
     const sheet = wb.addWorksheet('충돌(검토)');
+    // 머리글을 3행에 두려고 columns에는 머리글을 넣지 않는다 (넣으면 1행에 써진다)
     sheet.columns = [
-      { header: '논리명', key: 'logical', width: 20 },
-      { header: '물리명', key: 'physical', width: 22 },
-      { header: '타입', key: 'type', width: 16 },
-      { header: '쓰는 곳 수', key: 'count', width: 10 },
-      { header: '사전에 넣음', key: 'chosen', width: 10 },
-      { header: '쓰는 곳 (테이블.컬럼)', key: 'columns', width: 70 },
+      { key: 'logical', width: 20 },
+      { key: 'physical', width: 22 },
+      { key: 'type', width: 16 },
+      { key: 'count', width: 10 },
+      { key: 'chosen', width: 10 },
+      { key: 'columns', width: 70 },
     ];
+    sheet.addRow(['참고용 시트입니다. 고치는 곳은 "표준용어" 시트입니다 — 여기서 다르게 쓰는 곳을 보고, 표준용어 시트의 물리명·타입을 원하는 표준으로 고친 뒤 다시 올리세요.']);
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFB45309' } };
+    sheet.addRow([]);
+    const headerRow = 3;
+    sheet.addRow(['논리명', '물리명', '타입', '쓰는 곳 수', '사전에 넣음', '쓰는 곳 (테이블.컬럼)']);
     for (const c of options.conflicts) {
       c.variants.forEach((v, i) => sheet.addRow({ logical: i === 0 ? c.logical : '', physical: v.physical, type: `${v.type}${v.length ? `(${v.length})` : ''}`, count: v.columns.length, chosen: i === 0 ? 'O' : '', columns: v.columns.join(', ') }));
     }
-    sheet.getRow(1).eachCell((c) => {
+    sheet.getRow(headerRow).eachCell((c) => {
       c.fill = HEADER_FILL;
       c.font = { bold: true };
     });
-    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.views = [{ state: 'frozen', ySplit: headerRow }];
   }
   const guide = wb.addWorksheet('안내');
   guide.getColumn(1).width = 100;

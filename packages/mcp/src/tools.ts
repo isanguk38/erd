@@ -353,7 +353,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       };
       const term = (t: { logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
       return text({
-        dictionary: `용어 ${dict.terms.length}개, 단어 ${dict.words.length}개, 물리명 대소문자: ${{ asis: '사전 그대로', lower: '소문자', upper: '대문자' }[dict.case]}`,
+        dictionary: `용어 ${dict.terms.length}개, 단어 ${dict.words.length}개, 물리명 대소문자: ${{ asis: '사전 그대로', lower: '소문자', upper: '대문자', camel: 'camelCase' }[dict.case]}`,
         results: names?.length
           ? names.map((n) => {
               const m = lookupTerm(index, n);

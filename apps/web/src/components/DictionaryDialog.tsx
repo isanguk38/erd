@@ -28,6 +28,7 @@ const CASES: { id: DictCase; label: string }[] = [
   { id: 'asis', label: '사전 그대로' },
   { id: 'lower', label: '소문자 (mbr_no)' },
   { id: 'upper', label: '대문자 (MBR_NO)' },
+  { id: 'camel', label: 'camelCase (mbrNo)' },
 ];
 
 type Kind = 'terms' | 'words';
@@ -251,7 +252,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
           )}
           <div className="btn-row">
             <button className="btn btn-primary" onClick={useDraft}>사전에 넣기</button>
-            <button className="btn" onClick={() => void downloadDraft()} title="용어 시트 + 충돌(검토) 시트. 고친 뒤 '엑셀 올리기'로 다시 올리면 됩니다">검토용 엑셀 받기</button>
+            <button className="btn" onClick={() => void downloadDraft()} title="엑셀로 받아 '표준용어' 시트에서 물리명·타입을 원하는 표준으로 고친 뒤, '엑셀 올리기'로 다시 올리세요. '충돌(검토)' 시트는 어디서 다르게 쓰는지 보는 참고용입니다">엑셀로 받아 고치기</button>
             <button className="btn" onClick={() => setDraft(null)}>닫기</button>
           </div>
         </div>
