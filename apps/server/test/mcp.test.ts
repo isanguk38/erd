@@ -129,12 +129,12 @@ describe('MCP', () => {
     // 사람이 엑셀로 올린 사전 (화면은 문서에 직접 쓴다)
     const { doc } = erd.projects.load(created.id);
     const { writeDictionary } = await import('@erd/core');
-    doc.transact(() => writeDictionary(doc, { terms: [{ logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR(20)' }], words: [{ logical: '회원', physical: 'MBR' }, { logical: '명', physical: 'NM' }] }));
+    doc.transact(() => writeDictionary(doc, { terms: [{ logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR(20)' }, { logical: '회원명', physical: 'MBR_NM', type: 'VARCHAR(100)' }] }));
 
-    expect((await call('get_schema', { project: '사전' })).project.dictionary).toContain('용어 1개');
+    expect((await call('get_schema', { project: '사전' })).project.dictionary).toContain('용어 2개');
     const found = await call('lookup_dictionary', { project: '사전', names: ['회원번호', '회원명', '배송지'] });
     expect(found.results[0]).toMatchObject({ name: 'MBR_NO', type: 'VARCHAR(20)' });
-    expect(found.results[1]).toMatchObject({ name: 'MBR_NM' });
+    expect(found.results[1]).toMatchObject({ name: 'MBR_NM', type: 'VARCHAR(100)' });
     expect(found.results[2].standard).toBeNull();
 
     // 사전과 다르게 만들면 결과에 dictionary로 알려 준다

@@ -14,6 +14,10 @@ import {
   notesOf,
   propagateColumnType,
   readDictionary,
+  readDictCase,
+  applyDictCase,
+  setDictCase,
+  clearDictionary,
   readNotes,
   readSchema,
   removeNote,
@@ -33,31 +37,32 @@ const dict: Dictionary = {
     { logical: '등록일시', physical: 'REG_DT', type: 'DATETIME' },
     { logical: '비고', physical: 'RMK' },
   ],
-  words: [
-    { logical: '회원', physical: 'MBR' },
-    { logical: '상품', physical: 'PRD' },
-    { logical: '수량', physical: 'QTY' },
-    { logical: '상품수', physical: 'PRDCNT' },
-  ],
 };
 
 describe('표준 용어 사전', () => {
-  it('용어를 찾고, 없으면 단어를 이어 붙인다 (적은 단어 수 우선)', () => {
-    expect(lookupTerm(dict, '회원 번호')).toMatchObject({ physical: 'MBR_NO', type: 'VARCHAR', length: '20', source: 'term' });
-    expect(lookupTerm(dict, '상품수량')).toMatchObject({ physical: 'PRD_QTY', source: 'words', parts: ['상품', '수량'] });
+  it('용어를 찾는다 (띄어쓰기 무시). 사전에 없으면 만들지 않는다 (단어 조합 없음)', () => {
+    expect(lookupTerm(dict, '회원 번호')).toEqual({ physical: 'MBR_NO', type: 'VARCHAR', length: '20' });
+    expect(lookupTerm(dict, '회원등록일시')).toBeNull();
     expect(lookupTerm(dict, '배송지')).toBeNull();
     expect(lookupTerm({ ...dict, case: 'lower' }, '회원번호')?.physical).toBe('mbr_no');
     expect(lookupPhysical(dict, 'mbr_no')?.logical).toBe('회원번호');
   });
 
-  it('camelCase: 용어·단어 모두 mbrNo처럼, 검사·물리명 찾기도 같은 것으로 본다', () => {
+  it('camelCase: mbrNo처럼, 검사·물리명 찾기도 같은 것으로 본다', () => {
     const camel = { ...dict, case: 'camel' as const };
     expect(lookupTerm(camel, '회원번호')?.physical).toBe('mbrNo');
-    expect(lookupTerm(camel, '상품수량')?.physical).toBe('prdQty');
+    expect(lookupTerm(camel, '등록일시')?.physical).toBe('regDt');
     expect(checkColumnAgainstDictionary(camel, { name: 'mbrNo', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.status).toBe('ok');
     // camelCase로 정했으면 MBR_NO는 표기가 달라 표준대로 고치라고 알린다
     expect(checkColumnAgainstDictionary(camel, { name: 'MBR_NO', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.patch?.name).toBe('mbrNo');
     expect(lookupPhysical(camel, 'mbrNo')?.logical).toBe('회원번호');
+  });
+
+  it('표기 바꾸기: 낱말로 나눠 snake_case·SNAKE_CASE·camelCase로', () => {
+    expect(['MBR_NO', 'mbr_no', 'MbrNo', 'mbrNo'].map((n) => applyDictCase(n, 'lower'))).toEqual(['mbr_no', 'mbr_no', 'mbr_no', 'mbr_no']);
+    expect(['MBR_NO', 'mbrNo'].map((n) => applyDictCase(n, 'upper'))).toEqual(['MBR_NO', 'MBR_NO']);
+    expect(['MBR_NO', 'mbr_no'].map((n) => applyDictCase(n, 'camel'))).toEqual(['mbrNo', 'mbrNo']);
+    expect(applyDictCase('MbrNo', 'asis')).toBe('MbrNo');
   });
 
   it('컬럼 검사: 대소문자는 무시하고 물리명·타입·길이를 비교', () => {
@@ -87,23 +92,25 @@ describe('표준 용어 사전', () => {
   it('Y 문서에 저장: replace·merge, 비우면 null', () => {
     const doc = new Y.Doc();
     expect(readDictionary(doc)).toBeNull();
-    writeDictionary(doc, { terms: dict.terms, words: dict.words });
+    writeDictionary(doc, { terms: dict.terms });
     expect(readDictionary(doc)?.terms).toHaveLength(3);
     writeDictionary(doc, { terms: [{ logical: '회원번호', physical: 'MEMBER_NO' }, { logical: ' ', physical: 'X' }] }, 'merge');
     const d = readDictionary(doc)!;
     expect(d.terms).toHaveLength(3);
     expect(d.terms.find((t) => t.logical === '회원번호')?.physical).toBe('MEMBER_NO');
-    expect(d.words).toHaveLength(4);
     writeDictionary(doc, { terms: [{ logical: '비고', physical: 'RMK' }] }, 'replace');
     expect(readDictionary(doc)?.terms).toHaveLength(1);
-    expect(readDictionary(doc)?.words).toHaveLength(4);
+    // 표기 설정은 사전을 비워도 남는다
+    setDictCase(doc, 'camel');
+    clearDictionary(doc);
+    expect(readDictionary(doc)).toBeNull();
+    expect(readDictCase(doc)).toBe('camel');
   });
 
   it('엑셀: 양식을 다시 읽으면 같은 내용, 회사 양식 머리글도 찾는다', async () => {
     const buf = await dictionaryWorkbook(dict);
     const parsed = await parseDictionaryWorkbook(buf);
     expect(parsed.terms).toEqual(dict.terms);
-    expect(parsed.words).toEqual(dict.words);
 
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook();
@@ -111,8 +118,13 @@ describe('표준 용어 사전', () => {
     ws.addRow(['표준 용어 목록']);
     ws.addRow(['번호', '용어명', '영문명', '영문약어명', '도메인', '데이터타입', '설명']);
     ws.addRow([1, '회원번호', 'Member Number', 'MBR_NO', '번호V20', 'VARCHAR(20)', '']);
+    // 예전 양식의 표준단어 시트는 건너뛴다
+    const words = wb.addWorksheet('표준단어');
+    words.addRow(['단어명', '영문약어명']);
+    words.addRow(['회원', 'MBR']);
     const company = await parseDictionaryWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
     expect(company.terms).toEqual([{ logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR', length: '20' }]);
+    expect(company.notes.join('\n')).toContain('표준 단어는 쓰지 않아 건너뜀');
   });
 });
 
@@ -132,7 +144,7 @@ describe('ERD에서 사전 만들기', () => {
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0].variants.map((v) => [v.physical, v.columns.length])).toEqual([['member_id', 2], ['mbr_no', 1]]);
     // 검토용 엑셀: 충돌 시트는 다시 올릴 때 읽지 않는다
-    const buf = await dictionaryWorkbook({ terms, words: [], case: 'asis' }, { conflicts });
+    const buf = await dictionaryWorkbook({ terms, case: 'asis' }, { conflicts });
     const parsed = await parseDictionaryWorkbook(buf);
     expect(parsed.terms).toEqual(terms);
     expect(parsed.notes.join()).not.toContain('충돌');

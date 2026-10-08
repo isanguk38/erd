@@ -2,11 +2,10 @@
 // 회사마다 양식이 달라 머리글 이름으로 칸을 찾는다 (용어명/논리명, 영문약어명/물리명, 데이터타입/타입, 길이, 설명).
 
 import ExcelJS from 'exceljs';
-import { splitDictType, type DictConflict, type DictTerm, type DictWord, type Dictionary } from '../dictionary';
+import { splitDictType, type DictConflict, type DictTerm, type Dictionary } from '../dictionary';
 
 export interface DictionaryImport {
   terms: DictTerm[];
-  words: DictWord[];
   /** 읽은 시트와 건너뛴 시트 안내 */
   notes: string[];
 }
@@ -19,7 +18,7 @@ const HEADER_RULES: [Field, RegExp, number][] = [
   ['physical', /약어|abbr/i, 3],
   ['physical', /물리|physical|컬럼\s*id|column\s*name/i, 2],
   ['physical', /영문|english/i, 1],
-  ['logical', /논리|용어\s*명|^용어$|단어\s*명|^단어$|한글|logical|^term|^word/i, 2],
+  ['logical', /논리|용어\s*명|^용어$|한글|logical|^term/i, 2],
   ['type', /데이터\s*타입|자료\s*형|데이터\s*형|^타입|type/i, 2],
   ['length', /길이|자리\s*수|length|size/i, 2],
   ['description', /설명|정의|비고|description|desc/i, 1],
@@ -62,16 +61,19 @@ function findHeader(sheet: ExcelJS.Worksheet): { row: number; cols: Partial<Reco
 export async function parseDictionaryWorkbook(data: ArrayBuffer): Promise<DictionaryImport> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(data);
-  const out: DictionaryImport = { terms: [], words: [], notes: [] };
+  const out: DictionaryImport = { terms: [], notes: [] };
   for (const sheet of wb.worksheets) {
     if (/안내|설명서|readme|충돌/i.test(sheet.name)) continue;
+    // 표준 단어 시트는 쓰지 않는다 (용어만 사전에 넣음)
+    if (/단어|word/i.test(sheet.name)) {
+      out.notes.push(`"${sheet.name}" 시트: 표준 단어는 쓰지 않아 건너뜀 (표준 용어만 넣습니다)`);
+      continue;
+    }
     const header = findHeader(sheet);
     if (!header) {
       out.notes.push(`"${sheet.name}" 시트: 논리명·물리명 머리글을 찾지 못해 건너뜀`);
       continue;
     }
-    // 시트 이름에 "단어"가 있거나 타입 칸이 없으면 단어 사전, 아니면 용어 사전
-    const isWords = /단어|word/i.test(sheet.name) || (!/용어|term/i.test(sheet.name) && !header.cols.type);
     const { cols } = header;
     let count = 0;
     for (let r = header.row + 1; r <= sheet.rowCount; r++) {
@@ -81,15 +83,11 @@ export async function parseDictionaryWorkbook(data: ArrayBuffer): Promise<Dictio
       const physical = get('physical');
       if (!logical || !physical) continue;
       const description = get('description') || undefined;
-      if (isWords) {
-        out.words.push({ logical, physical, ...(description ? { description } : {}) });
-      } else {
-        const t = splitDictType(get('type'), get('length'));
-        out.terms.push({ logical, physical, ...(t.type ? { type: t.type } : {}), ...(t.length ? { length: t.length } : {}), ...(description ? { description } : {}) });
-      }
+      const t = splitDictType(get('type'), get('length'));
+      out.terms.push({ logical, physical, ...(t.type ? { type: t.type } : {}), ...(t.length ? { length: t.length } : {}), ...(description ? { description } : {}) });
       count++;
     }
-    out.notes.push(`"${sheet.name}" 시트: ${isWords ? '표준 단어' : '표준 용어'} ${count}개`);
+    out.notes.push(`"${sheet.name}" 시트: 표준 용어 ${count}개`);
   }
   return out;
 }
@@ -104,20 +102,6 @@ const SAMPLE_TERMS: DictTerm[] = [
   { logical: '사용여부', physical: 'USE_YN', type: 'CHAR', length: '1', description: 'Y/N' },
   { logical: '등록일시', physical: 'REG_DT', type: 'DATETIME' },
 ];
-const SAMPLE_WORDS: DictWord[] = [
-  { logical: '회원', physical: 'MBR' },
-  { logical: '주문', physical: 'ORD' },
-  { logical: '상품', physical: 'PRD' },
-  { logical: '번호', physical: 'NO' },
-  { logical: '명', physical: 'NM' },
-  { logical: '금액', physical: 'AMT' },
-  { logical: '수량', physical: 'QTY' },
-  { logical: '일시', physical: 'DT' },
-  { logical: '등록', physical: 'REG' },
-  { logical: '수정', physical: 'MOD' },
-  { logical: '여부', physical: 'YN' },
-  { logical: '사용', physical: 'USE' },
-];
 
 /** 사전 엑셀. dict가 없으면 예시가 든 빈 양식 */
 export async function dictionaryWorkbook(dict: Dictionary | null, options: { conflicts?: DictConflict[] } = {}): Promise<ArrayBuffer> {
@@ -131,14 +115,7 @@ export async function dictionaryWorkbook(dict: Dictionary | null, options: { con
     { header: '설명', key: 'description', width: 40 },
   ];
   for (const t of dict ? dict.terms : SAMPLE_TERMS) terms.addRow(t);
-  const words = wb.addWorksheet('표준단어');
-  words.columns = [
-    { header: '논리명', key: 'logical', width: 18 },
-    { header: '물리명', key: 'physical', width: 18 },
-    { header: '설명', key: 'description', width: 40 },
-  ];
-  for (const w of dict ? dict.words : SAMPLE_WORDS) words.addRow(w);
-  for (const sheet of [terms, words]) {
+  for (const sheet of [terms]) {
     sheet.getRow(1).eachCell((c) => {
       c.fill = HEADER_FILL;
       c.font = { bold: true };
@@ -177,10 +154,10 @@ export async function dictionaryWorkbook(dict: Dictionary | null, options: { con
     '표준 용어 사전 양식',
     '',
     '· 표준용어 시트: 논리명(한글 용어) → 물리명·타입·길이. 컬럼 논리명을 입력하면 이 값으로 채우고, 다르면 설계 검사에서 알려 줍니다.',
-    '· 표준단어 시트: 단어 → 약어. 용어에 없는 논리명은 단어를 이어 붙여 물리명을 만듭니다 (예: 상품 + 수량 → PRD_QTY).',
     '· 타입 칸에 VARCHAR(20)처럼 길이를 함께 써도 됩니다. 타입을 비우면 타입은 검사하지 않습니다.',
     '· 회사 양식을 그대로 올려도 됩니다: 머리글 이름(용어명·논리명 / 영문약어명·물리명 / 데이터타입 / 길이 / 설명)으로 칸을 찾습니다.',
-    '· 시트 이름에 "단어"가 있으면 단어 사전으로 읽습니다. 이 안내 시트는 읽지 않습니다.',
+    '· 물리명은 회사 표준 그대로 두세요 (예: MBR_NO). camelCase 등 프로젝트에서 쓸 표기는 ERD 화면의 "물리명 표기"에서 고릅니다.',
+    '· 이 안내 시트와 "단어"가 들어간 시트는 읽지 않습니다.',
   ].forEach((line, i) => {
     const cell = guide.getCell(i + 1, 1);
     cell.value = line;

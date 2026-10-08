@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
+  applyDictCase,
   checkColumnAgainstDictionary,
   clearDictionary,
   dictionaryFromSchema,
@@ -8,12 +9,13 @@ import {
   searchDictionary,
   setDictCase,
   setDictEntry,
+  splitDictType,
   updateColumn,
   writeDictionary,
   type DictCase,
   type DictConflict,
   type DictTerm,
-  type DictWord,
+  type Dictionary,
 } from '@erd/core';
 import type { DictionaryImport } from '@erd/core/dictionary-excel';
 import { useStore } from '../store';
@@ -22,21 +24,31 @@ import { downloadBlob, safeFileName } from '../lib/download';
 import { useProjectName } from '../lib/hooks';
 import { projectApi } from '../lib/api';
 import { Modal } from './Modal';
+import { Dropdown, Icon } from './ui';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const CASES: { id: DictCase; label: string }[] = [
   { id: 'asis', label: '사전 그대로' },
-  { id: 'lower', label: '소문자 (mbr_no)' },
-  { id: 'upper', label: '대문자 (MBR_NO)' },
-  { id: 'camel', label: 'camelCase (mbrNo)' },
+  { id: 'lower', label: 'snake_case' },
+  { id: 'upper', label: 'SNAKE_CASE' },
+  { id: 'camel', label: 'camelCase' },
 ];
 
-type Kind = 'terms' | 'words';
 type Entry = { logical: string; physical: string; type?: string; length?: string; description?: string };
+type Pending = DictionaryImport & { file: string; case?: DictCase };
+type Draft = { terms: DictTerm[]; conflicts: DictConflict[]; skipped: number };
+type Source = { id: string; name: string; terms: number };
+
+/** 표기 미리보기: 사전 용어 두 개 (없으면 예시) */
+function casePreview(dict: Dictionary | null, c: DictCase): string[] {
+  const terms = dict?.terms.length ? dict.terms.slice(0, 2) : [{ logical: '회원번호', physical: 'MBR_NO' }, { logical: '주문금액', physical: 'ORD_AMT' }];
+  return terms.map((t) => `${t.logical} → ${applyDictCase(t.physical, c)}`);
+}
 
 /**
- * 표준 용어 사전: 엑셀로 올리고, 찾아보고, 몇 개는 직접 고친다.
+ * 표준 용어 사전: 엑셀로 올리고(끌어다 놓기 가능), 찾아보고, 몇 개는 직접 고친다.
  * 사전은 이 프로젝트에 저장되어 함께 쓰는 사람과 AI(MCP)가 같이 쓴다. SQL·DB에는 영향이 없다.
+ * 화면은 한 번에 한 가지: 처음 시작 / 사전 보기 / 올릴 내용 확인 / ERD 초안 / 다른 프로젝트 고르기
  */
 export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void; onOpenLint: () => void }) {
   const dictionary = useStore((s) => s.dictionary);
@@ -45,21 +57,367 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   const readOnly = useStore((s) => s.role === 'viewer');
   const { editDictionary, edit, showNotice } = useStore.getState();
   const projectName = useProjectName();
-  const [kind, setKind] = useState<Kind>('terms');
-  const [query, setQuery] = useState('');
-  const [pending, setPending] = useState<(DictionaryImport & { file: string; case?: DictCase }) | null>(null);
-  // 다른 프로젝트 사전 (복사해 오기). null이면 아직 안 찾음
-  const [sources, setSources] = useState<{ id: string; name: string; terms: number; words: number }[] | null>(null);
-  const [loadingSources, setLoadingSources] = useState(false);
-  // 지금 ERD로 만든 사전 초안
-  const [draft, setDraft] = useState<{ terms: DictTerm[]; conflicts: DictConflict[]; skipped: number } | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [sources, setSources] = useState<Source[] | null>(null);
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
-  const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState<Entry & { previous?: string }>({ logical: '', physical: '' });
+  const [busy, setBusy] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  // 지금 ERD가 사전을 얼마나 따르는지
+  // ── 가져오기 ─────────────────────────────
+  const pickFile = async (file: File) => {
+    if (!/\.xlsx$/i.test(file.name)) return alert('엑셀 파일(.xlsx)만 올릴 수 있습니다');
+    setBusy('엑셀 읽는 중…');
+    try {
+      const { parseDictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
+      const parsed = await parseDictionaryWorkbook(await file.arrayBuffer());
+      if (!parsed.terms.length) {
+        alert(`읽을 용어가 없습니다.\n${parsed.notes.join('\n')}\n\n머리글에 "논리명(용어명)"과 "물리명(영문약어명)" 칸이 있어야 합니다. "빈 양식 받기"로 받은 파일을 참고하세요.`);
+        return;
+      }
+      setDraft(null);
+      setSources(null);
+      setMode('replace');
+      setPending({ ...parsed, file: file.name });
+    } catch (e) {
+      alert(`엑셀을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy('');
+    }
+  };
+  const openFile = () => fileInput.current?.click();
+  const findSources = async () => {
+    setBusy('다른 프로젝트 찾는 중…');
+    try {
+      const current = useStore.getState().projectId;
+      const projects = (await projectApi.list()).filter((p) => p.id !== current);
+      const found = await Promise.allSettled(projects.map(async (p) => ({ p, d: (await projectApi.dictionary(p.id)).dictionary })));
+      setDraft(null);
+      setSources(found.flatMap((r) => (r.status === 'fulfilled' && r.value.d ? [{ id: r.value.p.id, name: r.value.p.name, terms: r.value.d.terms.length }] : [])));
+    } catch (e) {
+      alert(`프로젝트 목록을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy('');
+    }
+  };
+  // 고른 프로젝트 사전을 복사본으로 (원본과 연결되지 않음). 엑셀 올리기와 같은 확인 단계를 거친다
+  const pickSource = async (source: Source) => {
+    try {
+      const d = (await projectApi.dictionary(source.id)).dictionary;
+      if (!d) return alert('그 프로젝트에는 사전이 없습니다');
+      setSources(null);
+      setMode('replace');
+      setPending({ terms: d.terms, notes: [`"${source.name}" 프로젝트 사전의 복사본입니다 (원본을 고쳐도 여기는 바뀌지 않음)`], file: `${source.name} 프로젝트`, case: d.case });
+    } catch (e) {
+      alert(`사전을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  const buildFromErd = () => {
+    const result = dictionaryFromSchema(useStore.getState().schema);
+    if (!result.terms.length) return alert('논리명이 있는 컬럼이 없습니다. 컬럼에 논리명(한글 이름)을 넣으면 그걸로 사전을 만듭니다.');
+    setSources(null);
+    setDraft(result);
+  };
+  const downloadDraft = async () => {
+    if (!draft) return;
+    const { dictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
+    const buf = await dictionaryWorkbook({ terms: draft.terms, case: 'asis' }, { conflicts: draft.conflicts });
+    downloadBlob(new Blob([buf], { type: XLSX }), `${safeFileName(projectName)}_사전초안.xlsx`);
+  };
+  const useDraft = () => {
+    if (!draft) return;
+    setMode(dictionary ? 'merge' : 'replace');
+    setPending({
+      terms: draft.terms,
+      notes: [`이 ERD 컬럼의 논리명 ${draft.terms.length}개로 만든 초안입니다`, ...(draft.conflicts.length ? [`다르게 쓴 ${draft.conflicts.length}개는 가장 많이 쓰는 이름·타입으로 넣습니다`] : [])],
+      file: '이 ERD',
+    });
+    setDraft(null);
+  };
+  const applyImport = () => {
+    if (!pending) return;
+    let count = 0;
+    const ok = editDictionary((d) => {
+      // 다른 프로젝트에서 가져오면 표기 설정도 (합치기면 지금 설정 유지)
+      count = writeDictionary(d, { terms: pending.terms, ...(pending.case && (mode === 'replace' || !dictionary) ? { case: pending.case } : {}) }, mode);
+    });
+    if (!ok) return;
+    setPending(null);
+    showNotice({ text: `표준 용어 사전: 용어 ${count}개를 ${mode === 'replace' || !dictionary ? '넣었습니다' : '합쳤습니다'}` });
+  };
+  const download = async (template: boolean) => {
+    const { dictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
+    const buf = await dictionaryWorkbook(template ? null : dictionary);
+    downloadBlob(new Blob([buf], { type: XLSX }), template ? '표준용어사전_양식.xlsx' : `${safeFileName(projectName)}_표준용어사전.xlsx`);
+  };
+
+  // ── 끌어다 놓기: 창 어디에 놓아도 올라간다 ─────────────────────────────
+  const hasFile = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  const dropProps = readOnly
+    ? {}
+    : {
+        onDragEnter: (e: DragEvent) => {
+          if (!hasFile(e)) return;
+          e.preventDefault();
+          dragDepth.current++;
+          setDragging(true);
+        },
+        onDragOver: (e: DragEvent) => hasFile(e) && e.preventDefault(),
+        onDragLeave: () => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (!dragDepth.current) setDragging(false);
+        },
+        onDrop: (e: DragEvent) => {
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          const file = e.dataTransfer.files[0];
+          if (file) void pickFile(file);
+        },
+      };
+
+  const caseSetting = (
+    <div className="dict-case">
+      <div className="dict-case__row">
+        <b>물리명 표기</b>
+        <div className="segmented small">
+          {CASES.map((c) => (
+            <button key={c.id} className={dictCase === c.id ? 'active' : ''} disabled={readOnly} onClick={() => editDictionary((d) => setDictCase(d, c.id))}>{c.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="dict-case__preview">
+        {casePreview(dictionary, dictCase).map((p) => <code key={p}>{p}</code>)}
+        <span className="muted small">사전 엑셀은 회사 표준 그대로 두고, 이 프로젝트에서 쓸 표기만 고릅니다</span>
+      </div>
+    </div>
+  );
+
+  let body: ReactNode;
+  if (pending) {
+    body = <ImportPreview pending={pending} hasDictionary={Boolean(dictionary)} dictCase={dictCase} mode={mode} onMode={setMode} onApply={applyImport} onCancel={() => setPending(null)} />;
+  } else if (draft) {
+    body = <DraftView draft={draft} onUse={useDraft} onDownload={() => void downloadDraft()} onBack={() => setDraft(null)} />;
+  } else if (sources) {
+    body = <SourcesView sources={sources} onPick={(s) => void pickSource(s)} onBack={() => setSources(null)} />;
+  } else if (!dictionary) {
+    body = (
+      <>
+        <p className="dict-lead">
+          회사 표준 용어를 넣어 두면 컬럼 <b>논리명을 입력할 때 물리명·타입이 표준대로 채워지고</b>, 다르게 쓴 곳은 설계 검사에서 알려 줍니다. AI(MCP)도 이 사전대로 설계합니다.
+        </p>
+        {!readOnly && (
+          <button className="dict-drop" onClick={openFile} disabled={Boolean(busy)}>
+            <Icon name="download" size={28} />
+            <b>{busy || '엑셀 파일을 여기에 끌어다 놓거나 눌러서 고르세요'}</b>
+            <span className="muted small">회사 양식 그대로 됩니다 — 머리글(용어명·논리명 / 영문약어명·물리명 / 데이터타입 / 길이 / 설명)로 칸을 찾습니다</span>
+          </button>
+        )}
+        <div className="dict-alt">
+          <button className="dict-alt__card" onClick={() => void download(true)}>
+            <b>빈 양식 받기</b>
+            <span className="muted small">표준용어 시트와 예시가 든 엑셀</span>
+          </button>
+          {!readOnly && (
+            <button className="dict-alt__card" disabled={!schema.tables.length} onClick={buildFromErd}>
+              <b>이 ERD에서 만들기</b>
+              <span className="muted small">지금 컬럼의 논리명·물리명·타입으로 초안을 만듭니다</span>
+            </button>
+          )}
+          {!readOnly && (
+            <button className="dict-alt__card" disabled={Boolean(busy)} onClick={() => void findSources()}>
+              <b>다른 프로젝트에서 복사</b>
+              <span className="muted small">이미 사전을 넣은 프로젝트의 것을 가져옵니다</span>
+            </button>
+          )}
+        </div>
+        {caseSetting}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <div className="dict-summary">
+          <span>
+            표준 용어 <b>{dictionary.terms.length.toLocaleString()}</b>개
+            {dictionary.updatedAt && <span className="muted small"> · {new Date(dictionary.updatedAt).toLocaleString()} 수정</span>}
+          </span>
+          <span className="spacer" />
+          {!readOnly && <button className="btn btn-sm btn-primary" disabled={Boolean(busy)} onClick={openFile} title="엑셀 파일을 이 창에 끌어다 놓아도 됩니다">{busy || '엑셀 올리기'}</button>}
+          <button className="btn btn-sm" onClick={() => void download(false)} title="지금 사전을 엑셀로 받습니다. 고친 뒤 다시 올리면 됩니다">엑셀로 내려받기</button>
+          <Dropdown
+            label="더보기"
+            items={[
+              { label: '이 ERD에서 만들기', hint: '컬럼 논리명으로 초안', disabled: readOnly || !schema.tables.length, onClick: buildFromErd },
+              { label: '다른 프로젝트에서 복사', hint: '복사본으로 가져오기', disabled: readOnly, onClick: () => void findSources() },
+              { label: '빈 양식 받기', hint: '예시가 든 엑셀', onClick: () => void download(true) },
+              { label: '사전 비우기', hint: 'ERD는 그대로', disabled: readOnly, onClick: () => confirm('표준 용어 사전을 모두 지울까요? (ERD는 바뀌지 않습니다)') && editDictionary((d) => clearDictionary(d)) },
+            ]}
+          />
+        </div>
+        {caseSetting}
+        <ErdCheck dictionary={dictionary} readOnly={readOnly} onOpenLint={onOpenLint} onFixAll={(n, run) => {
+          if (!confirm(`표준과 다른 컬럼 ${n}개의 물리명·타입·길이를 사전대로 바꿀까요?\n\n이미 DB에 있는 컬럼이면 "DB로 내보내기"에서 컬럼 이름·타입 변경(ALTER)이 생깁니다. Ctrl+Z로 한 번에 되돌릴 수 있습니다.`)) return;
+          edit(run);
+          showNotice({ text: `${n}개 컬럼을 표준대로 맞췄습니다 (Ctrl+Z로 되돌리기)` });
+        }} />
+        <DictionaryTable dictionary={dictionary} readOnly={readOnly} />
+        {!readOnly && <p className="muted small dict-drop-hint">엑셀 파일을 이 창에 끌어다 놓아도 올라갑니다.</p>}
+      </>
+    );
+  }
+
+  return (
+    <Modal title="표준 용어 사전" onClose={onClose} wide footer={<button className="btn" onClick={onClose}>닫기</button>}>
+      <div className={`dict-root${dragging ? ' dragging' : ''}`} {...dropProps}>
+        <input ref={fileInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickFile(f); }} />
+        {body}
+        {dragging && (
+          <div className="dict-drop-overlay">
+            <Icon name="download" size={32} />
+            <b>놓으면 엑셀을 읽어 올릴 내용을 보여 드립니다</b>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** 올릴 내용 확인: 몇 개인지, 이 프로젝트 표기로 어떻게 채워지는지, 바꾸기/합치기 */
+function ImportPreview({ pending, hasDictionary, dictCase, mode, onMode, onApply, onCancel }: {
+  pending: Pending; hasDictionary: boolean; dictCase: DictCase; mode: 'replace' | 'merge'; onMode: (m: 'replace' | 'merge') => void; onApply: () => void; onCancel: () => void;
+}) {
+  const shownCase = pending.case && (mode === 'replace' || !hasDictionary) ? pending.case : dictCase;
+  return (
+    <div className="dict-step">
+      <div className="dict-step__head">
+        <button className="btn btn-sm btn-ghost" onClick={onCancel}>← 취소</button>
+        <h3>올릴 내용 확인 · {pending.file}</h3>
+      </div>
+      <div className="dict-stats">
+        <div><b>{pending.terms.length.toLocaleString()}</b><span>표준 용어</span></div>
+      </div>
+      {pending.notes.length > 0 && <ul className="dict-notes">{pending.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
+      {pending.terms.length > 0 && (
+        <table className="dict-table compact">
+          <thead><tr><th>논리명</th><th>사전의 물리명</th><th>이 프로젝트에서 채울 이름</th><th>타입</th></tr></thead>
+          <tbody>
+            {pending.terms.slice(0, 5).map((t) => {
+              const st = splitDictType(t.type, t.length);
+              return (
+                <tr key={t.logical}>
+                  <td>{t.logical}</td>
+                  <td className="mono">{t.physical}</td>
+                  <td className="mono"><b>{applyDictCase(t.physical, shownCase)}</b></td>
+                  <td className="mono">{st.type ? `${st.type}${st.length ? `(${st.length})` : ''}` : ''}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {hasDictionary && (
+        <div className="dict-mode">
+          <label className={mode === 'replace' ? 'active' : ''}>
+            <input type="radio" checked={mode === 'replace'} onChange={() => onMode('replace')} />
+            <span><b>새로 바꾸기</b><span className="muted small">지금 사전을 지우고 이 내용으로</span></span>
+          </label>
+          <label className={mode === 'merge' ? 'active' : ''}>
+            <input type="radio" checked={mode === 'merge'} onChange={() => onMode('merge')} />
+            <span><b>합치기</b><span className="muted small">같은 논리명만 새 내용으로 덮어쓰고 나머지는 그대로</span></span>
+          </label>
+        </div>
+      )}
+      <div className="btn-row">
+        <button className="btn btn-primary" onClick={onApply}>사전에 넣기</button>
+        <button className="btn" onClick={onCancel}>취소</button>
+      </div>
+    </div>
+  );
+}
+
+/** 이 ERD로 만든 초안: 다르게 쓴 곳(충돌)과 두 가지 진행 방법 */
+function DraftView({ draft, onUse, onDownload, onBack }: { draft: Draft; onUse: () => void; onDownload: () => void; onBack: () => void }) {
+  return (
+    <div className="dict-step">
+      <div className="dict-step__head">
+        <button className="btn btn-sm btn-ghost" onClick={onBack}>← 뒤로</button>
+        <h3>이 ERD로 만든 사전 초안</h3>
+      </div>
+      <div className="dict-stats">
+        <div><b>{draft.terms.length.toLocaleString()}</b><span>표준 용어</span></div>
+        <div className={draft.conflicts.length ? 'warn' : ''}><b>{draft.conflicts.length}</b><span>다르게 쓴 곳</span></div>
+        {draft.skipped > 0 && <div className="muted"><b>{draft.skipped}</b><span>논리명 없어 뺀 컬럼</span></div>}
+      </div>
+      {draft.conflicts.length > 0 ? (
+        <>
+          <p className="small">같은 논리명인데 이름·타입이 다른 곳입니다. <b>굵은 것</b>(가장 많이 쓰는 것)이 사전에 들어갑니다. 마우스를 올리면 쓰는 곳이 보입니다.</p>
+          <ul className="dict-conflicts">
+            {draft.conflicts.slice(0, 30).map((c) => (
+              <li key={c.logical}>
+                <span className="dict-conflicts__term">{c.logical}</span>
+                <span className="dict-conflicts__variants">
+                  {c.variants.map((v, i) => (
+                    <span key={i} className={i === 0 ? 'chosen' : ''} title={v.columns.join('\n')}>
+                      {v.physical} {v.type}{v.length ? `(${v.length})` : ''} ×{v.columns.length}
+                    </span>
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {draft.conflicts.length > 30 && <p className="muted small">나머지 {draft.conflicts.length - 30}개는 엑셀의 "충돌(검토)" 시트에서 보세요.</p>}
+        </>
+      ) : (
+        <p className="muted small">같은 논리명끼리 이름·타입이 모두 같습니다.</p>
+      )}
+      <div className="dict-choices">
+        <button className="dict-choice primary" onClick={onUse}>
+          <b>바로 사전에 넣기</b>
+          <span>굵게 표시된 이름·타입으로 넣습니다</span>
+        </button>
+        <button className="dict-choice" onClick={onDownload}>
+          <b>엑셀로 받아 고치기</b>
+          <span>"표준용어" 시트에서 원하는 표준으로 고친 뒤, 이 창에 끌어다 놓아 다시 올립니다</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SourcesView({ sources, onPick, onBack }: { sources: Source[]; onPick: (s: Source) => void; onBack: () => void }) {
+  return (
+    <div className="dict-step">
+      <div className="dict-step__head">
+        <button className="btn btn-sm btn-ghost" onClick={onBack}>← 뒤로</button>
+        <h3>다른 프로젝트에서 복사</h3>
+      </div>
+      {sources.length === 0 ? (
+        <p className="empty-state small">사전이 있는 다른 프로젝트가 없습니다.</p>
+      ) : (
+        <>
+          <p className="muted small">복사본으로 가져옵니다. 원본 프로젝트의 사전을 나중에 고쳐도 여기는 바뀌지 않습니다.</p>
+          <ul className="dict-sources">
+            {sources.map((src) => (
+              <li key={src.id}>
+                <span>{src.name}</span>
+                <span className="muted small">용어 {src.terms}개</span>
+                <button className="btn btn-sm" onClick={() => onPick(src)}>가져오기</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 지금 ERD가 사전을 얼마나 따르는지 + 한 번에 맞추기 */
+function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: Dictionary; readOnly: boolean; onOpenLint: () => void; onFixAll: (n: number, run: Parameters<ReturnType<typeof useStore.getState>['edit']>[0]) => void }) {
+  const schema = useStore((s) => s.schema);
   const check = useMemo(() => {
-    if (!dictionary) return null;
     const index = dictIndex(dictionary);
     const mismatches: { tableId: string; columnId: string; patch: NonNullable<ReturnType<typeof checkColumnAgainstDictionary>>['patch'] }[] = [];
     let unknown = 0;
@@ -75,298 +433,73 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
     }
     return { ok, unknown, mismatches };
   }, [dictionary, schema]);
-
-  const entries: Entry[] = dictionary ? (kind === 'terms' ? dictionary.terms : dictionary.words) : [];
-  const shown = useMemo(() => searchDictionary(entries, query, 300), [entries, query]);
-
-  const pickFile = async (file: File) => {
-    setBusy(true);
-    try {
-      const { parseDictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
-      const parsed = await parseDictionaryWorkbook(await file.arrayBuffer());
-      if (!parsed.terms.length && !parsed.words.length) {
-        alert(`읽을 용어가 없습니다.\n${parsed.notes.join('\n')}\n\n머리글에 "논리명(용어명)"과 "물리명(영문약어명)" 칸이 있어야 합니다. "양식 받기"로 받은 파일을 참고하세요.`);
-        return;
-      }
-      setPending({ ...parsed, file: file.name });
-    } catch (e) {
-      alert(`엑셀을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-  // 내가 볼 수 있는 다른 프로젝트 중 사전이 있는 것
-  const findSources = async () => {
-    setLoadingSources(true);
-    try {
-      const current = useStore.getState().projectId;
-      const projects = (await projectApi.list()).filter((p) => p.id !== current);
-      const found = await Promise.allSettled(projects.map(async (p) => ({ p, d: (await projectApi.dictionary(p.id)).dictionary })));
-      setSources(
-        found.flatMap((r) => (r.status === 'fulfilled' && r.value.d ? [{ id: r.value.p.id, name: r.value.p.name, terms: r.value.d.terms.length, words: r.value.d.words.length }] : [])),
-      );
-    } catch (e) {
-      alert(`프로젝트 목록을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLoadingSources(false);
-    }
-  };
-  // 고른 프로젝트 사전을 복사본으로 가져온다 (원본과 연결되지 않음). 엑셀 올리기와 같은 확인 단계를 거친다
-  const pickSource = async (source: { id: string; name: string }) => {
-    try {
-      const d = (await projectApi.dictionary(source.id)).dictionary;
-      if (!d) return alert('그 프로젝트에는 사전이 없습니다');
-      setPending({ terms: d.terms, words: d.words, notes: [`"${source.name}" 프로젝트 사전의 복사본입니다 (원본을 고쳐도 여기는 바뀌지 않음)`], file: `${source.name} 프로젝트`, case: d.case });
-      setSources(null);
-    } catch (e) {
-      alert(`사전을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-  const buildFromErd = () => {
-    const result = dictionaryFromSchema(useStore.getState().schema);
-    if (!result.terms.length) return alert('논리명이 있는 컬럼이 없습니다. 컬럼에 논리명(한글 이름)을 넣으면 그걸로 사전을 만듭니다.');
-    setSources(null);
-    setDraft(result);
-  };
-  const downloadDraft = async () => {
-    if (!draft) return;
-    const { dictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
-    const buf = await dictionaryWorkbook({ terms: draft.terms, words: [], case: 'asis' }, { conflicts: draft.conflicts });
-    downloadBlob(new Blob([buf], { type: XLSX }), `${safeFileName(projectName)}_사전초안.xlsx`);
-  };
-  const useDraft = () => {
-    if (!draft) return;
-    setPending({
-      terms: draft.terms,
-      words: [],
-      notes: [
-        `이 ERD 컬럼의 논리명 ${draft.terms.length}개로 만든 초안입니다`,
-        ...(draft.conflicts.length ? [`충돌 ${draft.conflicts.length}개는 가장 많이 쓰는 이름·타입으로 넣습니다`] : []),
-      ],
-      file: '이 ERD',
-    });
-    setDraft(null);
-  };
-  const applyImport = () => {
-    if (!pending) return;
-    let counts = { terms: 0, words: 0 };
-    // 용어나 단어 시트가 없으면 그쪽은 그대로 둔다
-    const ok = editDictionary((d) => {
-      counts = writeDictionary(
-        d,
-        {
-          ...(pending.terms.length ? { terms: pending.terms } : {}),
-          ...(pending.words.length ? { words: pending.words } : {}),
-          // 다른 프로젝트에서 가져오면 물리명 대소문자 설정도 (합치기면 지금 설정 유지)
-          ...(pending.case && (mode === 'replace' || !dictionary) ? { case: pending.case } : {}),
-        },
-        mode,
-      );
-    });
-    if (!ok) return;
-    setPending(null);
-    showNotice({ text: `표준 용어 사전: 용어 ${counts.terms}개 · 단어 ${counts.words}개를 ${mode === 'replace' ? '새로 넣었습니다' : '합쳤습니다'}` });
-  };
-  const download = async (template: boolean) => {
-    const { dictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
-    const buf = await dictionaryWorkbook(template ? null : dictionary);
-    downloadBlob(new Blob([buf], { type: XLSX }), template ? '표준용어사전_양식.xlsx' : `${safeFileName(projectName)}_표준용어사전.xlsx`);
-  };
-  const saveForm = () => {
-    const entry = kind === 'terms' ? ({ logical: form.logical, physical: form.physical, type: form.type, length: form.length, description: form.description } as DictTerm) : ({ logical: form.logical, physical: form.physical, description: form.description } as DictWord);
-    if (editDictionary((d) => setDictEntry(d, kind, entry, form.previous))) setForm({ logical: '', physical: '' });
-  };
-  const fixAll = () => {
-    if (!check?.mismatches.length) return;
-    if (!confirm(`표준과 다른 컬럼 ${check.mismatches.length}개의 물리명·타입·길이를 사전대로 바꿀까요?\n\n이미 DB에 있는 컬럼이면 "DB로 내보내기"에서 컬럼 이름·타입 변경(ALTER)이 생깁니다. Ctrl+Z로 한 번에 되돌릴 수 있습니다.`)) return;
-    edit((d) => check.mismatches.forEach((m) => updateColumn(d, m.tableId, m.columnId, m.patch!)));
-    showNotice({ text: `${check.mismatches.length}개 컬럼을 표준대로 맞췄습니다 (Ctrl+Z로 되돌리기)` });
-  };
-
   return (
-    <Modal title="표준 용어 사전" onClose={onClose} wide footer={<button className="btn" onClick={onClose}>닫기</button>}>
-      <p className="muted small dict-intro">
-        논리명(한글) → 표준 물리명·타입·길이. 컬럼 논리명을 입력하면 표준대로 채우고, 다르면 설계 검사에서 알려 줍니다. 용어에 없으면 표준 단어를 이어 붙여 물리명을 만듭니다 (상품+수량 → PRD_QTY).
-        AI(MCP)도 설계할 때 이 사전을 찾아 씁니다. SQL·DB에는 영향이 없습니다.
-      </p>
+    <div className="dict-check">
+      <span>이 ERD: 표준대로 <b>{check.ok}</b> · 표준과 다름 <b className={check.mismatches.length ? 'warn' : ''}>{check.mismatches.length}</b> · 사전에 없음 <b>{check.unknown}</b></span>
+      <span className="spacer" />
+      {(check.mismatches.length > 0 || check.unknown > 0) && <button className="btn btn-sm" onClick={onOpenLint}>설계 검사에서 보기</button>}
+      {check.mismatches.length > 0 && !readOnly && (
+        <button className="btn btn-sm btn-primary" onClick={() => onFixAll(check.mismatches.length, (d) => check.mismatches.forEach((m) => updateColumn(d, m.tableId, m.columnId, m.patch!)))}>
+          표준대로 모두 맞추기 ({check.mismatches.length})
+        </button>
+      )}
+    </div>
+  );
+}
 
-      <div className="dict-actions">
-        {!readOnly && (
-          <label className={`btn btn-primary${busy ? ' disabled' : ''}`}>
-            {busy ? '읽는 중…' : '엑셀 올리기'}
-            <input type="file" accept=".xlsx" hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickFile(f); }} />
-          </label>
-        )}
-        {!readOnly && (
-          <button className="btn" disabled={!schema.tables.length} onClick={buildFromErd} title="지금 ERD 컬럼의 논리명·물리명·타입으로 사전 초안을 만듭니다 (같은 논리명인데 다르게 쓴 곳도 찾아 줌)">
-            ERD에서 만들기
-          </button>
-        )}
-        {!readOnly && (
-          <button className="btn" disabled={loadingSources} onClick={() => void findSources()} title="내가 볼 수 있는 다른 프로젝트의 사전을 복사해 옵니다">
-            {loadingSources ? '찾는 중…' : '다른 프로젝트에서 가져오기'}
-          </button>
-        )}
-        <button className="btn" onClick={() => void download(true)} title="표준용어·표준단어 시트와 예시가 든 빈 양식">양식 받기</button>
-        {dictionary && <button className="btn" onClick={() => void download(false)}>지금 사전 엑셀로 받기</button>}
-        <span className="spacer" />
-        {dictionary && !readOnly && (
-          <button className="btn btn-ghost btn-danger-text" onClick={() => confirm('표준 용어 사전을 모두 지울까요? (ERD는 바뀌지 않습니다)') && editDictionary((d) => clearDictionary(d))}>사전 비우기</button>
-        )}
+/** 용어 목록: 찾기, 한 줄 추가·고치기·삭제 */
+function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; readOnly: boolean }) {
+  const { editDictionary } = useStore.getState();
+  const [query, setQuery] = useState('');
+  const [form, setForm] = useState<Entry & { previous?: string }>({ logical: '', physical: '' });
+  const shown = useMemo(() => searchDictionary(dictionary.terms, query, 300), [dictionary.terms, query]);
+  const saveForm = () => {
+    const entry: DictTerm = { logical: form.logical, physical: form.physical, type: form.type, length: form.length, description: form.description };
+    if (editDictionary((d) => setDictEntry(d, entry, form.previous))) setForm({ logical: '', physical: '' });
+  };
+  return (
+    <>
+      <div className="dict-tabs">
+        <input type="search" className="dict-search" placeholder="논리명·물리명·설명 찾기" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-
-      {draft && (
-        <div className="baseline-info dict-draft">
-          <div>
-            <b>이 ERD로 만든 사전 초안</b>: 용어 {draft.terms.length}개
-            {draft.skipped > 0 && <span className="muted"> · 논리명이 없는 컬럼 {draft.skipped}개는 뺌</span>}
-          </div>
-          {draft.conflicts.length > 0 ? (
-            <>
-              <div className="dict-draft__warn">같은 논리명인데 이름·타입이 다른 곳 {draft.conflicts.length}개 — 사전에는 가장 많이 쓰는 것(굵게)이 들어갑니다</div>
-              <ul className="dict-conflicts">
-                {draft.conflicts.slice(0, 30).map((c) => (
-                  <li key={c.logical}>
-                    <span className="dict-conflicts__term">{c.logical}</span>
-                    <span className="dict-conflicts__variants">
-                      {c.variants.map((v, i) => (
-                        <span key={i} className={i === 0 ? 'chosen' : ''} title={v.columns.join('\n')}>
-                          {v.physical} {v.type}{v.length ? `(${v.length})` : ''} ×{v.columns.length}
-                        </span>
-                      ))}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {draft.conflicts.length > 30 && <p className="muted small">나머지 {draft.conflicts.length - 30}개는 검토용 엑셀의 "충돌(검토)" 시트에서 보세요.</p>}
-            </>
-          ) : (
-            <div className="muted">같은 논리명끼리 이름·타입이 모두 같습니다.</div>
-          )}
-          <div className="btn-row">
-            <button className="btn btn-primary" onClick={useDraft}>사전에 넣기</button>
-            <button className="btn" onClick={() => void downloadDraft()} title="엑셀로 받아 '표준용어' 시트에서 물리명·타입을 원하는 표준으로 고친 뒤, '엑셀 올리기'로 다시 올리세요. '충돌(검토)' 시트는 어디서 다르게 쓰는지 보는 참고용입니다">엑셀로 받아 고치기</button>
-            <button className="btn" onClick={() => setDraft(null)}>닫기</button>
-          </div>
+      {!readOnly && (
+        <div className="dict-form">
+          <input placeholder="논리명 (예: 회원번호)" value={form.logical} onChange={(e) => setForm({ ...form, logical: e.target.value })} />
+          <input placeholder="물리명 (예: MBR_NO)" value={form.physical} onChange={(e) => setForm({ ...form, physical: e.target.value })} />
+          <input placeholder="타입" value={form.type ?? ''} onChange={(e) => setForm({ ...form, type: e.target.value })} />
+          <input placeholder="길이" value={form.length ?? ''} onChange={(e) => setForm({ ...form, length: e.target.value })} />
+          <input placeholder="설명" value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && saveForm()} />
+          <button className="btn btn-sm btn-primary" disabled={!form.logical.trim() || !form.physical.trim()} onClick={saveForm}>{form.previous ? '고치기' : '추가'}</button>
+          {form.previous && <button className="btn btn-sm" onClick={() => setForm({ logical: '', physical: '' })}>취소</button>}
         </div>
       )}
-
-      {sources && (
-        <div className="baseline-info dict-sources">
-          {sources.length === 0 ? (
-            <span>사전이 있는 다른 프로젝트가 없습니다.</span>
-          ) : (
-            <>
-              <b>사전을 가져올 프로젝트</b>
-              <ul>
-                {sources.map((src) => (
-                  <li key={src.id}>
-                    <span>{src.name}</span>
-                    <span className="muted small">용어 {src.terms}개 · 단어 {src.words}개</span>
-                    <button className="btn btn-sm" onClick={() => void pickSource(src)}>가져오기</button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          <div className="btn-row">
-            <button className="btn btn-sm" onClick={() => setSources(null)}>닫기</button>
-          </div>
-        </div>
-      )}
-
-      {/* 물리명 표기: 사전이 없어도 미리 정해 둘 수 있다 */}
-      <div className="dict-case">
-        <label>
-          물리명 표기
-          <select value={dictCase} disabled={readOnly} onChange={(e) => editDictionary((d) => setDictCase(d, e.target.value as DictCase))}>
-            {CASES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-          </select>
-        </label>
-        <span className="muted small">사전의 물리명(예: MBR_NO)과 단어 조합을 이 프로젝트에서 어떤 표기로 채울지 고릅니다. 사전 엑셀은 회사 표준 그대로 두면 됩니다.</span>
+      <div className="dict-table-wrap">
+        <table className="dict-table">
+          <thead>
+            <tr>
+              <th>논리명</th><th>물리명</th><th>타입</th><th>길이</th><th>설명</th><th />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((e) => (
+              <tr key={e.logical} className={form.previous === e.logical ? 'editing' : ''} onClick={() => !readOnly && setForm({ ...e, previous: e.logical })} title={readOnly ? undefined : '누르면 위 칸에서 고칠 수 있습니다'}>
+                <td>{e.logical}</td>
+                <td className="mono">{e.physical}</td>
+                <td className="mono">{e.type}</td>
+                <td className="mono">{e.length}</td>
+                <td className="muted">{e.description}</td>
+                <td>
+                  {!readOnly && (
+                    <button className="icon-btn danger" title="삭제" onClick={(ev) => { ev.stopPropagation(); editDictionary((d) => removeDictEntry(d, e.logical)); }}>×</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {shown.length === 0 && <p className="muted small dict-empty">찾는 항목이 없습니다.</p>}
+        {shown.length >= 300 && <p className="muted small dict-empty">앞의 300개만 보입니다. 검색어로 좁혀 보세요.</p>}
       </div>
-
-      {pending && (
-        <div className="baseline-info dict-pending">
-          <b>{pending.file}</b>: 용어 {pending.terms.length}개 · 단어 {pending.words.length}개
-          <ul className="small">{pending.notes.map((n) => <li key={n}>{n}</li>)}</ul>
-          {dictionary && (
-            <div className="radio-list">
-              <label><input type="radio" checked={mode === 'replace'} onChange={() => setMode('replace')} /> 바꾸기 — 올린 시트의 기존 사전을 지우고 새로 넣기</label>
-              <label><input type="radio" checked={mode === 'merge'} onChange={() => setMode('merge')} /> 합치기 — 같은 논리명만 덮어쓰고 나머지는 두기</label>
-            </div>
-          )}
-          <div className="btn-row">
-            <button className="btn btn-primary" onClick={applyImport}>사전에 넣기</button>
-            <button className="btn" onClick={() => setPending(null)}>취소</button>
-          </div>
-        </div>
-      )}
-
-      {!dictionary && !pending && (
-        <div className="empty-state small">
-          아직 사전이 없습니다. 회사 표준 용어 엑셀을 그대로 올리거나 "양식 받기"로 받은 파일에 채워 올리세요.
-          <br />머리글(용어명·논리명 / 영문약어명·물리명 / 데이터타입 / 길이 / 설명)로 칸을 찾고, 시트 이름에 "단어"가 있으면 표준 단어로 읽습니다.
-        </div>
-      )}
-
-      {dictionary && check && (
-        <div className="dict-check">
-          <span>이 ERD: 표준대로 <b>{check.ok}</b> · 표준과 다름 <b className={check.mismatches.length ? 'warn' : ''}>{check.mismatches.length}</b> · 사전에 없음 <b>{check.unknown}</b></span>
-          <span className="spacer" />
-          {(check.mismatches.length > 0 || check.unknown > 0) && <button className="btn btn-sm" onClick={onOpenLint}>설계 검사에서 보기</button>}
-          {check.mismatches.length > 0 && !readOnly && <button className="btn btn-sm btn-primary" onClick={fixAll}>표준대로 모두 맞추기 ({check.mismatches.length})</button>}
-        </div>
-      )}
-
-      {dictionary && (
-        <>
-          <div className="dict-tabs">
-            <div className="segmented">
-              <button className={kind === 'terms' ? 'active' : ''} onClick={() => { setKind('terms'); setForm({ logical: '', physical: '' }); }}>표준 용어 {dictionary.terms.length}</button>
-              <button className={kind === 'words' ? 'active' : ''} onClick={() => { setKind('words'); setForm({ logical: '', physical: '' }); }}>표준 단어 {dictionary.words.length}</button>
-            </div>
-            <input type="search" className="dict-search" placeholder="논리명·물리명·설명 찾기" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          {!readOnly && (
-            <div className={`dict-form${kind === 'words' ? ' words' : ''}`}>
-              <input placeholder="논리명" value={form.logical} onChange={(e) => setForm({ ...form, logical: e.target.value })} />
-              <input placeholder="물리명" value={form.physical} onChange={(e) => setForm({ ...form, physical: e.target.value })} />
-              {kind === 'terms' && <input placeholder="타입" value={form.type ?? ''} onChange={(e) => setForm({ ...form, type: e.target.value })} />}
-              {kind === 'terms' && <input placeholder="길이" value={form.length ?? ''} onChange={(e) => setForm({ ...form, length: e.target.value })} />}
-              <input placeholder="설명" value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && saveForm()} />
-              <button className="btn btn-sm btn-primary" disabled={!form.logical.trim() || !form.physical.trim()} onClick={saveForm}>{form.previous ? '고치기' : '추가'}</button>
-              {form.previous && <button className="btn btn-sm" onClick={() => setForm({ logical: '', physical: '' })}>취소</button>}
-            </div>
-          )}
-          <div className="dict-table-wrap">
-            <table className="dict-table">
-              <thead>
-                <tr>
-                  <th>논리명</th><th>물리명</th>{kind === 'terms' && <><th>타입</th><th>길이</th></>}<th>설명</th><th />
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((e) => (
-                  <tr key={e.logical} onClick={() => !readOnly && setForm({ ...e, previous: e.logical })} title={readOnly ? undefined : '누르면 위 칸에서 고칠 수 있습니다'}>
-                    <td>{e.logical}</td>
-                    <td className="mono">{e.physical}</td>
-                    {kind === 'terms' && <><td className="mono">{e.type}</td><td className="mono">{e.length}</td></>}
-                    <td className="muted">{e.description}</td>
-                    <td>
-                      {!readOnly && (
-                        <button className="icon-btn danger" title="삭제" onClick={(ev) => { ev.stopPropagation(); editDictionary((d) => removeDictEntry(d, kind, e.logical)); }}>×</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {shown.length === 0 && <p className="muted small">찾는 항목이 없습니다.</p>}
-            {shown.length >= 300 && <p className="muted small">앞의 300개만 보입니다. 검색어로 좁혀 보세요.</p>}
-          </div>
-        </>
-      )}
-    </Modal>
+    </>
   );
 }

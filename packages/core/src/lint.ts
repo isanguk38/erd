@@ -48,7 +48,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
   'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
-  'dict-unknown': { label: '사전에 없는 용어', severity: 'info', description: '논리명이 표준 용어 사전에 없고 표준 단어로도 만들 수 없습니다. 사전에 용어를 추가하거나 표준 용어로 바꾸세요.' },
+  'dict-unknown': { label: '사전에 없는 용어', severity: 'info', description: '논리명이 표준 용어 사전에 없습니다. 사전에 용어를 추가하거나 사전에 있는 표준 용어로 바꾸세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
 
@@ -214,7 +214,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   }
 
   // 표준 용어 사전 (사전이 있을 때만)
-  if (options.dictionary && (options.dictionary.terms.length || options.dictionary.words.length)) {
+  if (options.dictionary?.terms.length) {
     const index = dictIndex(options.dictionary);
     for (const t of schema.tables) {
       for (const c of t.columns) {

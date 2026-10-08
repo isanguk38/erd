@@ -932,3 +932,50 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .safety-ack { display: flex; gap: 6px; align-items: flex-start; margin: 8px 0; color: var(--text); }
 .dict-case { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
 .dict-case label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+
+/* ── 표준 용어 사전 (다시 짠 화면) ───────────────── */
+.dict-root { position: relative; min-height: 200px; }
+.dict-root.dragging > :not(.dict-drop-overlay) { opacity: 0.35; }
+.dict-drop-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent-soft) 70%, transparent); color: var(--accent); pointer-events: none; z-index: 2; }
+.dict-lead { margin: 0 0 14px; line-height: 1.6; font-size: 13px; }
+.dict-drop { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 20px; border: 2px dashed var(--border-strong); border-radius: 12px; background: var(--bg); color: var(--text); cursor: pointer; text-align: center; font: inherit; }
+.dict-drop:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.dict-drop svg { color: var(--accent); }
+.dict-alt { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+.dict-alt__card { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+.dict-alt__card:hover:not(:disabled) { border-color: var(--accent); }
+.dict-alt__card:disabled { opacity: 0.5; cursor: default; }
+.dict-case { display: block; padding: 10px 12px; }
+.dict-case__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dict-case__preview { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.dict-case__preview code { padding: 2px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font-size: 12px; }
+.segmented.small button { padding: 3px 10px; font-size: 12px; }
+.dict-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }
+.dict-summary .spacer { flex: 1; }
+.dict-step__head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.dict-step__head h3 { margin: 0; font-size: 15px; }
+.dict-stats { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.dict-stats > div { display: flex; flex-direction: column; padding: 10px 16px; border: 1px solid var(--border); border-radius: 10px; min-width: 110px; }
+.dict-stats b { font-size: 22px; }
+.dict-stats span { font-size: 12px; color: var(--muted); }
+.dict-stats .warn b { color: var(--warning); }
+.dict-notes { margin: 0 0 12px; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.dict-table.compact { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.dict-mode { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.dict-mode label { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.dict-mode label.active { border-color: var(--accent); background: var(--accent-soft); }
+.dict-mode label > span { display: flex; flex-direction: column; gap: 2px; }
+.dict-step .btn-row { margin-top: 12px; }
+.dict-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.dict-choice { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+.dict-choice span { font-size: 12px; color: var(--muted); }
+.dict-choice:hover { border-color: var(--accent); }
+.dict-choice.primary { border-color: var(--accent); background: var(--accent-soft); }
+.dict-sources { list-style: none; padding: 0; margin: 0; }
+.dict-kind-help { margin: 0 0 8px; }
+.dict-table tbody tr.editing { background: var(--accent-soft); }
+.dict-empty { padding: 8px 10px; margin: 0; }
+.dict-drop-hint { margin: 8px 0 0; text-align: right; }
+@media (max-width: 720px) {
+  .dict-alt, .dict-choices { grid-template-columns: 1fr; }
+}

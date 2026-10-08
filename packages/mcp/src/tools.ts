@@ -147,7 +147,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     }
   };
   const dictionaryHint = (d: Dictionary | null) =>
-    d ? `표준 용어 사전 있음 (용어 ${d.terms.length}개, 단어 ${d.words.length}개): 컬럼을 만들거나 이름을 바꿀 때 lookup_dictionary로 논리명의 표준 물리명·타입·길이를 찾아 그대로 쓰세요` : undefined;
+    d ? `표준 용어 사전 있음 (용어 ${d.terms.length}개): 컬럼을 만들거나 이름을 바꿀 때 lookup_dictionary로 논리명의 표준 물리명·타입·길이를 찾아 그대로 쓰세요` : undefined;
 
   server.registerTool(
     'list_projects',
@@ -332,7 +332,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       title: '표준 용어 사전 찾기',
       description: [
         '프로젝트의 표준 용어 사전(사람이 엑셀로 올린 것)에서 논리명의 표준 물리명·타입·길이를 찾는다.',
-        'names에 만들 컬럼의 논리명들(예: ["회원번호","주문금액"])을 주면 각각의 표준을 알려 준다: 용어가 있으면 그대로, 없으면 표준 단어를 이어 붙인 물리명(타입은 직접 정함), 둘 다 없으면 null.',
+        'names에 만들 컬럼의 논리명들(예: ["회원번호","주문금액"])을 주면 각각의 표준 물리명·타입을 알려 준다 (프로젝트의 물리명 표기 적용). 사전에 없으면 null.',
         'query로 사전을 검색할 수도 있다 (비슷한 용어 찾기). 사전이 없으면 사전 없이 평소대로 설계한다.',
       ].join(' '),
       inputSchema: {
@@ -353,22 +353,21 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       };
       const term = (t: { logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
       return text({
-        dictionary: `용어 ${dict.terms.length}개, 단어 ${dict.words.length}개, 물리명 대소문자: ${{ asis: '사전 그대로', lower: '소문자', upper: '대문자', camel: 'camelCase' }[dict.case]}`,
+        dictionary: `용어 ${dict.terms.length}개, 물리명 표기: ${{ asis: '사전 그대로', lower: 'snake_case', upper: 'SNAKE_CASE', camel: 'camelCase' }[dict.case]}`,
         results: names?.length
           ? names.map((n) => {
               const m = lookupTerm(index, n);
-              if (!m) return { logicalName: n, standard: null, note: '사전에 없고 표준 단어로도 만들 수 없음 — query로 비슷한 용어를 찾거나 사용자에게 확인' };
+              if (!m) return { logicalName: n, standard: null, note: '사전에 없음 — query로 비슷한 용어를 찾거나 사용자에게 확인' };
               return {
                 logicalName: n,
                 name: m.physical,
-                type: m.source === 'term' ? typeText(m.type, m.length) : undefined,
-                from: m.source === 'term' ? '표준 용어' : `표준 단어 ${m.parts?.join(' + ')} (타입은 직접 정함)`,
+                type: typeText(m.type, m.length),
                 summary: describeMatch(m),
               };
             })
           : undefined,
         matches: query?.trim()
-          ? { terms: searchDictionary(dict.terms, query, 50).map(term), words: searchDictionary(dict.words, query, 50).map((w) => ({ word: w.logical, abbr: w.physical })) }
+          ? searchDictionary(dict.terms, query, 50).map(term)
           : undefined,
         sample: !names?.length && !query?.trim() ? dict.terms.slice(0, 30).map(term) : undefined,
       });

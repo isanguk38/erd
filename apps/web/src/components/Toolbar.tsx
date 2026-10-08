@@ -212,7 +212,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { light: 'dark', dark: 'light' };
   const THEME_LABEL: Record<ThemeSetting, string> = { light: '라이트', dark: '다크' };
   const commentCount = useOpenCommentCount();
-  const dictionarySize = useStore((s) => (s.dictionary ? `${s.dictionary.terms.length}/${s.dictionary.words.length}` : ''));
+  const dictionarySize = useStore((s) => s.dictionary?.terms.length ?? 0);
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -250,7 +250,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
           {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
         </button>
-        <button className="btn btn-ghost" onClick={() => onOpen('dictionary')} title={dictionarySize ? `표준 용어 사전: 용어 ${dictionarySize.split('/')[0]}개 · 단어 ${dictionarySize.split('/')[1]}개` : '표준 용어 사전: 엑셀로 올리면 논리명으로 물리명·타입을 채우고 다르면 알려 줍니다'}>
+        <button className="btn btn-ghost" onClick={() => onOpen('dictionary')} title={dictionarySize ? `표준 용어 사전: 용어 ${dictionarySize}개` : '표준 용어 사전: 엑셀로 올리면 논리명으로 물리명·타입을 채우고 다르면 알려 줍니다'}>
           <Icon name="book" />
           <span className="hide-narrow">용어 사전</span>
         </button>
