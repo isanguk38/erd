@@ -133,6 +133,8 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
   switch (command.op) {
     case 'createTable': {
       if (schema.tables.some((t) => eq(t.name, command.name))) throw new Error(`테이블 "${command.name}"이 이미 있습니다`);
+      const sameLogical = command.logicalName?.trim() && schema.tables.find((t) => t.logicalName.trim() && t.logicalName.replace(/\s+/g, '') === command.logicalName!.replace(/\s+/g, ''));
+      if (sameLogical) throw new Error(`논리명 "${command.logicalName}"은(는) 이미 ${sameLogical.name} 테이블이 쓰고 있습니다`);
       const table = addTable(schema, { name: command.name, logicalName: command.logicalName ?? '', comment: command.comment ?? '', color: command.color });
       for (const spec of command.columns ?? []) addColumn(schema, table.id, columnPatch(spec));
       created.push(table.id);

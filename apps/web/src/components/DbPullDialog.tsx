@@ -20,7 +20,8 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
   const current = useStore((s) => s.schema);
   const projectId = useStore((s) => s.projectId)!;
   const [connection, setConnection] = useState<Connection | null>(null);
-  const [commentAs, setCommentAs] = useState<'logicalName' | 'comment'>('logicalName');
+  // DB 코멘트는 늘 논리명 (설명은 ERD 전용 상세 설명)
+  const commentAs = 'logicalName' as const;
   const [result, setResult] = useState<IntrospectResult | null>(null);
   const [baseline, setBaseline] = useState<{ at: string; schema: Schema } | null>(null);
   const [links, setLinks] = useState<RenameLink[]>([]);
@@ -120,13 +121,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
       />
       {connection && (
         <div className="toolbar-row">
-          <label className="inline-field">
-            DB 코멘트를
-            <select value={commentAs} onChange={(e) => setCommentAs(e.target.value as 'logicalName' | 'comment')}>
-              <option value="logicalName">논리명으로</option>
-              <option value="comment">설명으로</option>
-            </select>
-          </label>
+          <span className="muted small" title="ERD의 설명(상세 설명)은 ERD에만 있어 가져와도 그대로 남습니다">DB 코멘트는 논리명으로 읽습니다</span>
           <button className="btn btn-primary" disabled={busy} onClick={read}>{busy && !result ? '읽는 중…' : result ? '다시 읽기' : 'DB 구조 읽기'}</button>
         </div>
       )}

@@ -76,7 +76,7 @@ describe('설계 검사', () => {
     expect(only(s, 'naming-mixed').map((i) => i.columnName)).toEqual(['itemId']);
     const half = applyCommands(emptySchema(), [
       { op: 'createTable', name: 'a_b', logicalName: 'x', columns: [{ name: 'a_id', logicalName: 'x', type: 'INT', primaryKey: true }] },
-      { op: 'createTable', name: 'cD', logicalName: 'x', columns: [{ name: 'cId', logicalName: 'x', type: 'INT', primaryKey: true }] },
+      { op: 'createTable', name: 'cD', logicalName: 'y', columns: [{ name: 'cId', logicalName: 'x', type: 'INT', primaryKey: true }] },
     ]).schema;
     expect(only(half, 'naming-mixed')).toEqual([]);
   });

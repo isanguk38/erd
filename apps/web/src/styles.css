@@ -1008,3 +1008,6 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .dict-more { margin: 8px; }
 .lint-group__bulk { margin: 0 0 6px 10px; }
 .dict-check.warn-box { border-color: var(--warning); background: var(--warning-soft); }
+.dict-form.with-kind { grid-template-columns: 80px 1.2fr 1.2fr 0.9fr 0.6fr 2fr auto; }
+.dict-kind { font-size: 12px; padding: 2px 4px; }
+.dict-table.edit input:disabled { opacity: 0.4; }

@@ -162,7 +162,15 @@ describe('MCP', () => {
     expect(added.dictionary.join('\n')).toContain('mbrAge: 사전 표기(SNAKE_CASE)와 다릅니다 — MBR_AGE');
     const again = await call('edit_schema', { project: '사전', commands: [{ op: 'addColumn', table: 'member', column: { name: 'ORD_AMT', logicalName: '주문금액', type: 'DECIMAL(12,2)' } }] });
     expect(again.dictionaryAdded).toBeUndefined();
-    expect((await call('lookup_dictionary', { project: '사전' })).dictionary).toMatch(/용어 3개, 물리명 표기: SNAKE_CASE/);
+    expect((await call('lookup_dictionary', { project: '사전' })).dictionary).toContain('용어 3개 (테이블 0), 물리명 표기: SNAKE_CASE');
+
+    // 테이블 용어: 새 테이블은 사전에 자동으로, lookup_dictionary(tables)로 찾는다
+    const madeTable = await call('edit_schema', { project: '사전', commands: [{ op: 'createTable', name: 'DELIVERY', logicalName: '배송', columns: [{ name: 'DLV_NO', logicalName: '배송번호', type: 'BIGINT', primaryKey: true }] }] });
+    expect(madeTable.dictionaryAdded).toEqual(['배송=DELIVERY', '배송번호=DLV_NO']);
+    expect((await call('lookup_dictionary', { project: '사전', tables: ['배송', '정산'] })).tableResults).toEqual([{ logicalName: '배송', name: 'DELIVERY' }, expect.objectContaining({ logicalName: '정산', standard: null })]);
+    // 같은 논리명의 테이블은 만들 수 없다
+    const dupTable = await client.callTool({ name: 'edit_schema', arguments: { project: '사전', commands: [{ op: 'createTable', name: 'DELIVERY2', logicalName: '배송' }] } });
+    expect(textOf(dupTable)).toContain('이미 DELIVERY 테이블');
 
     // 제안 모드: 승인하기 전에는 사전에 넣지 않고, 사람이 승인하면 넣는다
     await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'propose' } });

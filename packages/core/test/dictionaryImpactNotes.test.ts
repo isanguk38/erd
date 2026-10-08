@@ -172,7 +172,10 @@ describe('ERD에서 사전 만들기 · 논리명 없는 용어', () => {
   ]);
 
   it('논리명별로 가장 많이 쓰는 이름·타입, 다르게 쓴 것은 variants, 논리명 없는 컬럼은 물리명으로 묶어 논리명 없이', () => {
-    const rows = dictionaryFromSchema(schema);
+    const all = dictionaryFromSchema(schema);
+    // 테이블 용어가 먼저 (타입 없이). 논리명 없는 테이블도 물리명으로
+    expect(all.filter((r) => r.kind === 'table').map((r) => [r.logical, r.physical, r.type])).toEqual([['', 'member', undefined], ['', 'orders', undefined], ['', 'point', undefined]]);
+    const rows = all.filter((r) => r.kind !== 'table');
     expect(rows.map((r) => [r.logical, r.physical, r.type, r.variants.length])).toEqual([
       ['등록일시', 'reg_dt', 'DATETIME', 1],
       ['회원번호', 'member_id', 'BIGINT', 2],

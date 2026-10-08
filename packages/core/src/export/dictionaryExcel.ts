@@ -10,10 +10,12 @@ export interface DictionaryImport {
   notes: string[];
 }
 
-type Field = 'logical' | 'physical' | 'type' | 'length' | 'description';
+type Field = 'kind' | 'logical' | 'physical' | 'type' | 'length' | 'description';
 
 /** 머리글 → 칸 종류. 앞에 있는 규칙이 우선 */
 const HEADER_RULES: [Field, RegExp, number][] = [
+  // 구분: 테이블 / 컬럼 (없으면 모두 컬럼)
+  ['kind', /^(구분|종류|대상|용어\s*구분|kind)$/i, 2],
   // 물리명: 약어 > 물리 > 영문 (영문명은 풀네임일 때가 많아 약어 칸이 있으면 그걸 쓴다)
   ['physical', /약어|abbr/i, 3],
   ['physical', /물리|physical|컬럼\s*id|column\s*name/i, 2],
@@ -83,8 +85,13 @@ export async function parseDictionaryWorkbook(data: ArrayBuffer): Promise<Dictio
       const physical = get('physical');
       if (!physical) continue;
       const description = get('description') || undefined;
-      const t = splitDictType(get('type'), get('length'));
-      out.terms.push({ logical, physical, ...(t.type ? { type: t.type } : {}), ...(t.length ? { length: t.length } : {}), ...(description ? { description } : {}) });
+      // 구분 칸에 "테이블"이면 테이블 용어 (타입·길이 없음)
+      if (/테이블|table|엔티티|entity/i.test(get('kind'))) {
+        out.terms.push({ kind: 'table', logical, physical, ...(description ? { description } : {}) });
+      } else {
+        const t = splitDictType(get('type'), get('length'));
+        out.terms.push({ logical, physical, ...(t.type ? { type: t.type } : {}), ...(t.length ? { length: t.length } : {}), ...(description ? { description } : {}) });
+      }
       count++;
     }
     out.notes.push(`"${sheet.name}" 시트: 표준 용어 ${count}개`);
@@ -95,6 +102,8 @@ export async function parseDictionaryWorkbook(data: ArrayBuffer): Promise<Dictio
 const HEADER_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F1' } };
 
 const SAMPLE_TERMS: DictTerm[] = [
+  { kind: 'table', logical: '회원', physical: 'MEMBER', description: '회원 정보' },
+  { kind: 'table', logical: '주문', physical: 'ORDERS' },
   { logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR', length: '20', description: '회원을 구분하는 번호' },
   { logical: '회원명', physical: 'MBR_NM', type: 'VARCHAR', length: '100' },
   { logical: '주문번호', physical: 'ORD_NO', type: 'VARCHAR', length: '20' },
@@ -108,13 +117,14 @@ export async function dictionaryWorkbook(dict: Dictionary | null): Promise<Array
   const wb = new ExcelJS.Workbook();
   const terms = wb.addWorksheet('표준용어');
   terms.columns = [
+    { header: '구분', key: 'kind', width: 8 },
     { header: '논리명', key: 'logical', width: 22 },
     { header: '물리명', key: 'physical', width: 24 },
     { header: '타입', key: 'type', width: 14 },
     { header: '길이', key: 'length', width: 10 },
     { header: '설명', key: 'description', width: 40 },
   ];
-  for (const t of dict ? dict.terms : SAMPLE_TERMS) terms.addRow(t);
+  for (const t of dict ? dict.terms : SAMPLE_TERMS) terms.addRow({ ...t, kind: t.kind === 'table' ? '테이블' : '컬럼' });
   for (const sheet of [terms]) {
     sheet.getRow(1).eachCell((c) => {
       c.fill = HEADER_FILL;
@@ -128,6 +138,7 @@ export async function dictionaryWorkbook(dict: Dictionary | null): Promise<Array
     '표준 용어 사전 양식',
     '',
     '· 표준용어 시트: 논리명(한글 용어) → 물리명·타입·길이. 컬럼 논리명을 입력하면 이 값으로 채우고, 다르면 설계 검사에서 알려 줍니다.',
+    '· 구분: "테이블" 또는 "컬럼" (비우면 컬럼). 테이블 용어는 타입·길이 없이 논리명·물리명만 씁니다 — 같은 이름의 테이블을 두 번 만들지 않고 표기를 맞추는 용도입니다.',
     '· 타입 칸에 VARCHAR(20)처럼 길이를 함께 써도 됩니다. 타입을 비우면 타입은 검사하지 않습니다.',
     '· 회사 양식을 그대로 올려도 됩니다: 머리글 이름(용어명·논리명 / 영문약어명·물리명 / 데이터타입 / 길이 / 설명)으로 칸을 찾습니다.',
     '· 물리명은 한 가지 표기로 맞추세요 (snake_case: mbr_no / SNAKE_CASE: MBR_NO / camelCase: mbrNo). 섞여 있으면 올릴 수 없습니다.',

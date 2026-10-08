@@ -48,8 +48,22 @@ export function addTable(schema: Schema, partial: Partial<Table> = {}): Table {
   return table;
 }
 
+/** 같은 이름(물리명)이나 같은 논리명의 다른 테이블 (없으면 undefined) */
+export function sameNamedTable(schema: Schema, name: { name?: string; logicalName?: string }, exceptId?: string): { table: Table; by: 'name' | 'logicalName' } | undefined {
+  const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+  for (const t of schema.tables) {
+    if (t.id === exceptId) continue;
+    if (name.name?.trim() && norm(t.name) === norm(name.name)) return { table: t, by: 'name' };
+    if (name.logicalName?.trim() && t.logicalName.trim() && norm(t.logicalName) === norm(name.logicalName)) return { table: t, by: 'logicalName' };
+  }
+  return undefined;
+}
+
 export function updateTable(schema: Schema, tableId: string, patch: Partial<Omit<Table, 'id' | 'columns' | 'indexes'>>): Table {
   const table = requireTable(schema, tableId);
+  // 같은 이름·같은 논리명의 테이블은 만들지 않는다 (바꾸는 값만 본다 — 원래 겹쳐 있던 것은 설계 검사가 알린다)
+  const same = sameNamedTable(schema, { name: patch.name !== undefined && patch.name !== table.name ? patch.name : undefined, logicalName: patch.logicalName !== undefined && patch.logicalName !== table.logicalName ? patch.logicalName : undefined }, tableId);
+  if (same) throw new Error(same.by === 'name' ? `테이블 "${same.table.name}"이(가) 이미 있습니다` : `논리명 "${same.table.logicalName}"은(는) 이미 ${same.table.name} 테이블이 쓰고 있습니다`);
   Object.assign(table, patch);
   return table;
 }

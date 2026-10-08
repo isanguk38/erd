@@ -16,6 +16,9 @@ import {
   dictionaryPatch,
   lookupPhysical,
   lookupTerm,
+  checkTableAgainstDictionary,
+  lookupTablePhysical,
+  termFromTable,
   NAME_STYLE_LABEL,
   setDictEntry,
   styleSuggestion,
@@ -301,10 +304,51 @@ function TableEditor({ table }: { table: Table }) {
     const s = styleSuggestion(dict, column.name);
     return s ? { className: 'dict-mismatch', title: `용어 사전은 ${NAME_STYLE_LABEL[s.style]}입니다 — ${s.suggestion}(으)로 바꾸세요` } : undefined;
   };
-  const setTableLogicalName = (logicalName: string) => {
-    const match = dict && DEFAULT_TABLE_NAME.test(table.name) ? lookupTerm(dict, logicalName) : null;
-    setTable(match ? { logicalName, name: match.physical } : { logicalName });
-    if (match) useStore.getState().showNotice({ text: `표준 용어 사전: ${logicalName} → ${match.physical} (Ctrl+Z로 되돌리기)` });
+  // 테이블은 자동으로 채우지 않는다 — 같은 이름 테이블을 막고(ERD가 막음), 사전과 다르면·없으면·표기가 다르면 알린다
+  const adviseTable = () => {
+    if (!dict) return;
+    const now = useStore.getState().schema.tables.find((t) => t.id === table.id);
+    if (!now || DEFAULT_TABLE_NAME.test(now.name)) return;
+    const r = checkTableAgainstDictionary(dict, now);
+    const notice = useStore.getState().showNotice;
+    if (r?.status === 'mismatch') {
+      notice({ text: `용어 사전의 테이블 "${now.logicalName}"은(는) ${r.physical}입니다 (지금: ${now.name})`, action: { label: `${r.physical}(으)로 바꾸기`, run: () => edit((d) => void updateTable(d, table.id, { name: r.physical })) } });
+      return;
+    }
+    if (r?.status === 'ok') return;
+    const style = styleSuggestion(dict, now.name);
+    if (style) {
+      notice({ text: `용어 사전은 ${NAME_STYLE_LABEL[style.style]}입니다 — 테이블 이름 ${now.name} 대신 ${style.suggestion}`, action: { label: `${style.suggestion}(으)로 바꾸기`, run: () => edit((d) => void updateTable(d, table.id, { name: style.suggestion })) } });
+      return;
+    }
+    if (!r) return;
+    const owner = lookupTablePhysical(dict, now.name);
+    if (owner) {
+      notice({ text: `테이블 "${now.logicalName}"은(는) 용어 사전에 없습니다. ${now.name}은(는) 사전에 "${owner.logical}"(으)로 있습니다`, action: { label: `논리명을 "${owner.logical}"(으)로`, run: () => edit((d) => void updateTable(d, table.id, { logicalName: owner.logical })) } });
+      return;
+    }
+    notice({
+      text: `테이블 "${now.logicalName}"(${now.name})은(는) 용어 사전에 없습니다 — 용어 사전에 추가해 주세요`,
+      action: {
+        label: '사전에 추가',
+        run: () => {
+          const term = termFromTable(now);
+          if (useStore.getState().editDictionary((d) => setDictEntry(d, term))) notice({ text: `용어 사전에 테이블을 추가했습니다: ${term.logical} = ${term.physical}` });
+        },
+      },
+    });
+  };
+  const setTableName = (patch: { name?: string; logicalName?: string }) => {
+    setTable(patch);
+    adviseTable();
+  };
+  const tableMark = (field: 'name' | 'logical'): Mark | undefined => {
+    if (!dict) return undefined;
+    const r = checkTableAgainstDictionary(dict, table);
+    if (field === 'logical') return r?.status === 'unknown' ? { className: 'dict-unknown', title: '용어 사전에 없는 테이블입니다 — 용어 사전에 추가해 주세요' } : undefined;
+    if (r?.status === 'mismatch') return { className: 'dict-mismatch', title: `사전의 표준 테이블 물리명은 ${r.physical}입니다` };
+    const s = r?.status === 'ok' || DEFAULT_TABLE_NAME.test(table.name) ? null : styleSuggestion(dict, table.name);
+    return s ? { className: 'dict-mismatch', title: `용어 사전은 ${NAME_STYLE_LABEL[s.style]}입니다 — ${s.suggestion}(으)로 바꾸세요` } : undefined;
   };
   const setAutoIncrement = (column: Column, on: boolean) => {
     if (on && !canAutoIncrement(dialect, column)) {
@@ -359,11 +403,11 @@ function TableEditor({ table }: { table: Table }) {
       </div>
       <div className="form-grid">
         <label>물리명</label>
-        <TextInput value={table.name} onCommit={(name) => setTable({ name })} focusKey={`table:${table.id}`} />
+        <TextInput value={table.name} onCommit={(name) => setTableName({ name })} issue={tableMark('name')} focusKey={`table:${table.id}`} />
         <label>논리명</label>
-        <TextInput value={table.logicalName} onCommit={setTableLogicalName} placeholder="예: 회원" />
+        <TextInput value={table.logicalName} onCommit={(logicalName) => setTableName({ logicalName })} issue={tableMark('logical')} placeholder="예: 회원 (DB comment로 들어갑니다)" />
         <label>설명</label>
-        <TextInput value={table.comment} onCommit={(comment) => setTable({ comment })} placeholder="비우면 논리명이 SQL 코멘트가 됩니다" />
+        <TextInput value={table.comment} onCommit={(comment) => setTable({ comment })} placeholder="상세 설명 — ERD에만 저장 (DB에는 들어가지 않음)" />
         <label>영역</label>
         <TableAreas tableId={table.id} />
         <label>색상</label>
@@ -382,7 +426,7 @@ function TableEditor({ table }: { table: Table }) {
           <div className="column-grid__head">
             <span>물리명</span><span>논리명</span><span>타입</span><span>길이</span>
             <span title="기본키">PK</span><span title="NOT NULL">NN</span><span title="UNIQUE">UQ</span><span title="자동 증가">AI</span>
-            <span>기본값</span><span>설명</span><span />
+            <span>기본값</span><span title="ERD에만 저장되는 상세 설명. DB comment에는 논리명이 들어갑니다">설명</span><span />
           </div>
           {table.columns.map((c, i) => (
             <div key={c.id} className="column-grid__row">

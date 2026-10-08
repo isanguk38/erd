@@ -3,7 +3,7 @@
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
-import { checkColumnAgainstDictionary, describeMatch, dictIndex, lookupPhysical, NAME_STYLE_LABEL, styleSuggestion, type DictTerm, type Dictionary } from './dictionary';
+import { checkColumnAgainstDictionary, checkTableAgainstDictionary, describeMatch, dictIndex, lookupPhysical, lookupTablePhysical, NAME_STYLE_LABEL, styleSuggestion, termFromTable, type DictTerm, type Dictionary } from './dictionary';
 
 export type LintRule =
   | 'no-primary-key'
@@ -19,7 +19,8 @@ export type LintRule =
   | 'type-ignored'
   | 'dict-mismatch'
   | 'dict-unknown'
-  | 'dict-style';
+  | 'dict-style'
+  | 'duplicate-table-logical';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -38,7 +39,8 @@ export interface LintIssue {
     | { kind: 'addIndex'; tableId: string; columnIds: string[] }
     | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> }
     | { kind: 'removeRelation'; relationId: string }
-    | { kind: 'addTerm'; term: DictTerm };
+    | { kind: 'addTerm'; term: DictTerm }
+    | { kind: 'patchTable'; tableId: string; label: string; patch: Partial<Pick<Table, 'name' | 'logicalName'>> };
 }
 
 export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverity; description: string }> = {
@@ -46,7 +48,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'fk-type-mismatch': { label: 'FK 타입 불일치', severity: 'error', description: '외래키 컬럼과 참조하는 기본키의 타입·길이가 다르면 FK를 만들 수 없거나 비교할 때 느려집니다.' },
   'fk-without-index': { label: 'FK에 인덱스 없음', severity: 'warning', description: '외래키 컬럼에 인덱스가 없으면 조인·부모 삭제가 느려집니다 (MySQL/MariaDB는 자동으로 만들어 검사하지 않습니다).' },
   'naming-mixed': { label: '이름 규칙 섞임', severity: 'warning', description: 'snake_case와 camelCase가 섞여 있습니다. 많이 쓰는 쪽에 맞추세요.' },
-  'missing-logical-name': { label: '논리명 없음', severity: 'info', description: '논리명(한글 이름)이나 설명이 없으면 정의서·다른 사람이 보기 어렵습니다.' },
+  'missing-logical-name': { label: '논리명 없음', severity: 'info', description: '논리명(한글 이름)이 없으면 DB comment가 비고, 정의서·다른 사람이 보기 어렵습니다.' },
   'duplicate-index': { label: '중복 인덱스', severity: 'warning', description: '같은 컬럼 조합의 인덱스가 두 개 이상이면 저장 공간과 쓰기 속도만 낭비됩니다.' },
   'varchar-no-length': { label: '문자 길이 없음', severity: 'warning', description: 'VARCHAR/CHAR에 길이가 없으면 DB에 따라 오류가 나거나 의도와 다른 길이가 됩니다.' },
   'duplicate-relation': { label: '중복 관계', severity: 'error', description: '같은 FK 컬럼으로 같은 테이블을 가리키는 관계가 두 번 있습니다. DB로 내보내면 같은 외래키를 두 번 만들다 실패합니다.' },
@@ -54,6 +56,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
   'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
   'dict-unknown': { label: '사전에 없는 용어', severity: 'warning', description: '논리명이 표준 용어 사전에 없습니다. "사전에 추가"로 이 컬럼의 이름·타입을 새 용어로 넣거나, 사전에 있는 표준 용어로 바꾸세요.' },
+  'duplicate-table-logical': { label: '같은 논리명 테이블', severity: 'warning', description: '두 테이블이 같은 논리명을 씁니다. 같은 것을 두 번 만든 것인지 확인하고, 다르면 논리명을 구분하세요.' },
   'dict-style': { label: '사전과 다른 표기', severity: 'warning', description: '물리명 표기가 용어 사전(snake_case·camelCase 등)과 다릅니다. 사전과 같은 표기로 바꾸세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
@@ -146,9 +149,9 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
 
   // 논리명
   for (const t of schema.tables) {
-    if (!t.logicalName.trim() && !t.comment.trim()) add('missing-logical-name', t, `${t.name}: 테이블 논리명이 없습니다`);
+    if (!t.logicalName.trim()) add('missing-logical-name', t, `${t.name}: 테이블 논리명이 없습니다`);
     for (const c of t.columns) {
-      if (!c.logicalName.trim() && !c.comment.trim()) add('missing-logical-name', t, `${t.name}.${c.name}: 컬럼 논리명이 없습니다`, { columnId: c.id, columnName: c.name });
+      if (!c.logicalName.trim()) add('missing-logical-name', t, `${t.name}.${c.name}: 컬럼 논리명이 없습니다`, { columnId: c.id, columnName: c.name });
     }
   }
 
@@ -221,9 +224,40 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
     }
   }
 
+  // 같은 논리명 테이블
+  const seenLogical = new Map<string, Table>();
+  for (const t of schema.tables) {
+    const k = t.logicalName.replace(/\s+/g, '').toLowerCase();
+    if (!k) continue;
+    const first = seenLogical.get(k);
+    if (first) add('duplicate-table-logical', t, `${t.name}: 논리명 "${t.logicalName}"을(를) ${first.name} 테이블도 씁니다`);
+    else seenLogical.set(k, t);
+  }
+
   // 표준 용어 사전 (사전이 있을 때만)
   if (options.dictionary?.terms.length) {
     const index = dictIndex(options.dictionary);
+    // 테이블: 사전의 테이블 용어와 물리명이 다르면, 사전에 없으면, 표기가 다르면
+    for (const t of schema.tables) {
+      const r = checkTableAgainstDictionary(index, t);
+      if (r?.status === 'ok') continue;
+      if (r?.status === 'mismatch') {
+        add('dict-mismatch', t, `${t.name}: 테이블 "${t.logicalName}"의 표준 물리명은 ${r.physical}입니다`, { fix: { kind: 'patchTable', tableId: t.id, label: '표준대로', patch: { name: r.physical! } } });
+        continue;
+      }
+      const style = styleSuggestion(index, t.name);
+      if (style) {
+        add('dict-style', t, `${t.name}: 사전은 ${NAME_STYLE_LABEL[style.style]}입니다 — 테이블 이름을 ${style.suggestion}(으)로 바꾸세요`, { fix: { kind: 'patchTable', tableId: t.id, label: `${style.suggestion}(으)로`, patch: { name: style.suggestion } } });
+        continue;
+      }
+      if (!r) continue;
+      const owner = lookupTablePhysical(index, t.name);
+      add('dict-unknown', t, owner
+        ? `${t.name}: 테이블 논리명 "${t.logicalName}"이(가) 사전에 없습니다 (이 물리명은 사전에 "${owner.logical}"(으)로 있음)`
+        : `${t.name}: 테이블 "${t.logicalName}"이(가) 표준 용어 사전에 없습니다 — 사전에 추가해 주세요`, {
+        fix: owner ? { kind: 'patchTable', tableId: t.id, label: `논리명을 "${owner.logical}"(으)로`, patch: { logicalName: owner.logical } } : { kind: 'addTerm', term: termFromTable(t) },
+      });
+    }
     for (const t of schema.tables) {
       for (const c of t.columns) {
         const r = checkColumnAgainstDictionary(index, c);

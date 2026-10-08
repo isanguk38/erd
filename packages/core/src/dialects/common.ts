@@ -9,8 +9,9 @@ export function literal(value: string, escapeBackslash = false): string {
 }
 
 /** SQL에 들어갈 코멘트. 설명이 없으면 논리명을 쓴다 (국내 실무 관례). */
+/** DB comment에 넣는 값: 논리명. 설명(comment)은 ERD에서만 보는 상세 설명이라 DB에 넣지 않는다 */
 export function sqlComment(item: { comment: string; logicalName: string }): string {
-  return item.comment.trim() || item.logicalName.trim();
+  return item.logicalName.trim();
 }
 
 export function columnNames(table: Table, ids: string[]): string[] {

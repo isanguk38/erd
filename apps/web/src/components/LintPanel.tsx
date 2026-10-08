@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, addMissingTerms, autoFixColumnPatch, setDictEntry, type DictTerm, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
+import { addIndex, addMissingTerms, autoFixColumnPatch, setDictEntry, updateTable, type DictTerm, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
@@ -60,13 +60,17 @@ function fixAllDictionary(list: LintIssue[]) {
   const { edit, editDictionary, showNotice } = useStore.getState();
   const terms = list.flatMap((i) => (i.fix?.kind === 'addTerm' ? [i.fix.term] : []));
   const patches = list.flatMap((i) => (i.fix?.kind === 'patchColumn' ? [i.fix] : []));
+  const tablePatches = list.flatMap((i) => (i.fix?.kind === 'patchTable' ? [i.fix] : []));
   if (terms.length) {
     let added: DictTerm[] = [];
     if (editDictionary((d) => void (added = addMissingTerms(d, terms)))) showNotice({ text: `용어 사전에 ${added.length}개를 넣었습니다${added.length < terms.length ? ` (겹치는 ${terms.length - added.length}개는 건너뜀)` : ''}` });
   }
-  if (patches.length) {
-    edit((d) => patches.forEach((f) => updateColumn(d, f.tableId, f.columnId, f.patch)));
-    showNotice({ text: `컬럼 ${patches.length}개를 고쳤습니다 (Ctrl+Z로 한 번에 되돌리기)` });
+  if (patches.length || tablePatches.length) {
+    edit((d) => {
+      tablePatches.forEach((f) => updateTable(d, f.tableId, f.patch));
+      patches.forEach((f) => updateColumn(d, f.tableId, f.columnId, f.patch));
+    });
+    showNotice({ text: `${[tablePatches.length && `테이블 ${tablePatches.length}개`, patches.length && `컬럼 ${patches.length}개`].filter(Boolean).join(', ')}를 고쳤습니다 (Ctrl+Z로 한 번에 되돌리기)` });
   }
 }
 
@@ -268,6 +272,18 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                         )}
                         {issue.fix?.kind === 'patchColumn' && !readOnly && (
                           <button className="btn btn-ghost small" title="이 컬럼을 고칩니다 (Ctrl+Z로 되돌리기)" onClick={() => applyColumnFix(issue)}>
+                            {issue.fix.label}
+                          </button>
+                        )}
+                        {issue.fix?.kind === 'patchTable' && !readOnly && (
+                          <button
+                            className="btn btn-ghost small"
+                            title="이 테이블을 고칩니다 (Ctrl+Z로 되돌리기)"
+                            onClick={() => {
+                              const f = issue.fix as Extract<LintIssue['fix'], { kind: 'patchTable' }>;
+                              useStore.getState().edit((d) => void updateTable(d, f.tableId, f.patch));
+                            }}
+                          >
                             {issue.fix.label}
                           </button>
                         )}

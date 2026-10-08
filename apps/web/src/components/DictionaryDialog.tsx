@@ -2,6 +2,9 @@ import { useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react
 import {
   addMissingTerms,
   checkColumnAgainstDictionary,
+  checkTableAgainstDictionary,
+  newTableTerms,
+  updateTable,
   clearDictionary,
   detectStyle,
   dictIndex,
@@ -44,6 +47,18 @@ type Row = DictTerm & { id: number; include: boolean; variants: DictVariant[] };
 type Staged = { from: string; rows: Row[]; notes: string[] };
 
 const physKey = (p: string) => p.trim().toLowerCase();
+/** 같은 구분(테이블/컬럼) 안에서만 겹침을 본다 */
+const scoped = (r: Pick<DictTerm, 'kind'>, key: string) => `${r.kind === 'table' ? 't:' : ''}${key}`;
+
+/** 구분 선택 (테이블이면 타입·길이를 비운다) */
+function KindSelect({ value, onChange, disabled }: { value: DictTerm['kind']; onChange: (kind: DictTerm['kind']) => void; disabled?: boolean }) {
+  return (
+    <select className="dict-kind" value={value === 'table' ? 'table' : 'column'} disabled={disabled} onChange={(e) => onChange(e.target.value === 'table' ? 'table' : undefined)}>
+      <option value="column">컬럼</option>
+      <option value="table">테이블</option>
+    </select>
+  );
+}
 
 /**
  * 표준 용어 사전: 엑셀로 올리거나(끌어다 놓기), 이 ERD에서 만들거나, 다른 프로젝트에서 복사한다.
@@ -114,7 +129,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   const buildFromErd = () => {
     const rows = dictionaryFromSchema(useStore.getState().schema);
     if (!rows.length) return alert('ERD에 컬럼이 없습니다.');
-    stage('이 ERD', rows, ['컬럼마다 가장 많이 쓰는 이름·타입을 골라 두었습니다. "다르게 쓴 곳"에서 다른 것을 고를 수 있습니다', '논리명이 없는 컬럼도 넣습니다 — 나중에 채우면 됩니다', '여기서 물리명·타입을 고쳐도 ERD 컬럼은 그대로입니다. 넣은 뒤 "표준대로 모두 맞추기"로 ERD를 사전에 맞출 수 있습니다']);
+    stage('이 ERD', rows, ['테이블과 컬럼을 함께 넣습니다 (테이블은 타입·길이 없이)', '컬럼마다 가장 많이 쓰는 이름·타입을 골라 두었습니다. "다르게 쓴 곳"에서 다른 것을 고를 수 있습니다', '논리명이 없는 테이블·컬럼도 넣습니다 — 나중에 채우면 됩니다', '여기서 물리명·타입을 고쳐도 ERD 컬럼은 그대로입니다. 넣은 뒤 "표준대로 모두 맞추기"로 ERD를 사전에 맞출 수 있습니다']);
   };
   const applyStaged = (terms: DictTerm[], mode: 'replace' | 'merge') => {
     let count = 0;
@@ -268,7 +283,7 @@ function StyleBadge({ terms }: { terms: DictTerm[] }) {
   return <span className="dict-style-badge" title="사전 용어들의 물리명을 보고 정했습니다. 새 용어도 이 표기로만 넣을 수 있고, 사전에 없는 컬럼이 다른 표기면 설계 검사에서 경고합니다">{NAME_STYLE_LABEL[style]}</span>;
 }
 
-type Filter = 'all' | 'variants' | 'noLogical' | 'style' | 'dup';
+type Filter = 'all' | 'table' | 'variants' | 'noLogical' | 'style' | 'dup';
 
 /**
  * 넣기 전 편집 목록 (엑셀·이 ERD·다른 프로젝트 공통): 칸을 바로 고치고, 뺄 것은 체크를 풀고, 넣는다.
@@ -293,17 +308,18 @@ function StagedEditor({ staged, onChange, current, onApply, onCancel }: {
     const check = detectStyle(result);
     const offKeys = new Set(check.offenders.map((t) => termKey(t)));
     const byPhys = new Map<string, number>();
-    for (const t of result) byPhys.set(physKey(t.physical), (byPhys.get(physKey(t.physical)) ?? 0) + 1);
+    for (const t of result) byPhys.set(scoped(t, physKey(t.physical)), (byPhys.get(scoped(t, physKey(t.physical))) ?? 0) + 1);
     const logicals = new Map<string, number>();
-    for (const r of included) if (r.logical.trim()) logicals.set(dictKey(r.logical), (logicals.get(dictKey(r.logical)) ?? 0) + 1);
+    for (const r of included) if (r.logical.trim()) logicals.set(scoped(r, dictKey(r.logical)), (logicals.get(scoped(r, dictKey(r.logical))) ?? 0) + 1);
     const styleOff = included.filter((r) => offKeys.has(termKey(r)));
-    const dup = included.filter((r) => (byPhys.get(physKey(r.physical)) ?? 0) > 1 || (r.logical.trim() && (logicals.get(dictKey(r.logical)) ?? 0) > 1));
+    const dup = included.filter((r) => (byPhys.get(scoped(r, physKey(r.physical))) ?? 0) > 1 || (r.logical.trim() && (logicals.get(scoped(r, dictKey(r.logical))) ?? 0) > 1));
     return { style: check.style, styleOff: new Set(styleOff.map((r) => r.id)), dup: new Set(dup.map((r) => r.id)) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, current, mode, hasDictionary]);
 
   const counts: Record<Filter, number> = {
     all: rows.length,
+    table: rows.filter((r) => r.kind === 'table').length,
     variants: rows.filter((r) => r.variants.length > 1).length,
     noLogical: rows.filter((r) => r.include && !r.logical.trim()).length,
     style: problems.styleOff.size,
@@ -312,6 +328,7 @@ function StagedEditor({ staged, onChange, current, onApply, onCancel }: {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
+      if (filter === 'table' && r.kind !== 'table') return false;
       if (filter === 'variants' && r.variants.length < 2) return false;
       if (filter === 'noLogical' && (!r.include || r.logical.trim())) return false;
       if (filter === 'style' && !problems.styleOff.has(r.id)) return false;
@@ -349,7 +366,7 @@ function StagedEditor({ staged, onChange, current, onApply, onCancel }: {
       )}
       <div className="dict-tabs">
         <div className="segmented small">
-          {([['all', '전체'], ['variants', '다르게 쓴 곳'], ['noLogical', '논리명 없음'], ['style', '다른 표기'], ['dup', '겹침']] as [Filter, string][]).map(([f, label]) =>
+          {([['all', '전체'], ['table', '테이블'], ['variants', '다르게 쓴 곳'], ['noLogical', '논리명 없음'], ['style', '다른 표기'], ['dup', '겹침']] as [Filter, string][]).map(([f, label]) =>
             f === 'all' || counts[f] ? (
               <button key={f} className={filter === f ? 'active' : ''} onClick={() => { setFilter(f); setLimit(PAGE); }}>{label} {counts[f]}</button>
             ) : null,
@@ -372,7 +389,7 @@ function StagedEditor({ staged, onChange, current, onApply, onCancel }: {
                   }}
                 />
               </th>
-              <th>논리명</th><th>물리명</th><th>타입</th><th>길이</th><th>설명</th><th>쓰는 곳</th>
+              <th>구분</th><th>논리명</th><th>물리명</th><th>타입</th><th>길이</th><th>설명</th><th>쓰는 곳</th>
             </tr>
           </thead>
           <tbody>
@@ -381,6 +398,7 @@ function StagedEditor({ staged, onChange, current, onApply, onCancel }: {
               return (
                 <tr key={r.id} className={`${r.include ? '' : 'excluded'}${bad ? ` bad-${bad}` : ''}`}>
                   <td className="narrow"><input type="checkbox" checked={r.include} onChange={(e) => update(r.id, { include: e.target.checked })} /></td>
+                  <td><KindSelect value={r.kind} onChange={(kind) => update(r.id, kind === 'table' ? { kind, type: undefined, length: undefined } : { kind: undefined })} /></td>
                   <td><input value={r.logical} placeholder="(논리명 없음)" onChange={(e) => update(r.id, { logical: e.target.value })} /></td>
                   <td>
                     <input
@@ -390,26 +408,26 @@ function StagedEditor({ staged, onChange, current, onApply, onCancel }: {
                       onChange={(e) => update(r.id, { physical: e.target.value })}
                     />
                   </td>
-                  <td><input className="mono" value={r.type ?? ''} onChange={(e) => update(r.id, { type: e.target.value })} /></td>
-                  <td><input className="mono" value={r.length ?? ''} onChange={(e) => update(r.id, { length: e.target.value })} /></td>
+                  <td><input className="mono" value={r.type ?? ''} disabled={r.kind === 'table'} placeholder={r.kind === 'table' ? '—' : undefined} onChange={(e) => update(r.id, { type: e.target.value })} /></td>
+                  <td><input className="mono" value={r.length ?? ''} disabled={r.kind === 'table'} placeholder={r.kind === 'table' ? '—' : undefined} onChange={(e) => update(r.id, { length: e.target.value })} /></td>
                   <td><input value={r.description ?? ''} onChange={(e) => update(r.id, { description: e.target.value })} /></td>
                   <td className="uses">
                     {r.variants.length > 1 ? (
                       <select
-                        title="이 논리명을 다르게 쓴 곳 — 고르면 그 이름·타입으로"
+                        title={r.kind === 'table' ? '같은 논리명을 쓰는 테이블 — 고르면 그 이름으로' : '이 논리명을 다르게 쓴 곳 — 고르면 그 이름·타입으로'}
                         value=""
                         onChange={(e) => {
                           const v = r.variants[Number(e.target.value)];
-                          if (v) update(r.id, { physical: v.physical, type: v.type || undefined, length: v.length || undefined });
+                          if (v) update(r.id, r.kind === 'table' ? { physical: v.physical } : { physical: v.physical, type: v.type || undefined, length: v.length || undefined });
                         }}
                       >
                         <option value="">다르게 쓴 곳 {r.variants.length}가지 ▾</option>
                         {r.variants.map((v, i) => (
-                          <option key={i} value={i}>{v.physical} {v.type}{v.length ? `(${v.length})` : ''} ×{v.columns.length}</option>
+                          <option key={i} value={i}>{v.physical} {v.type}{v.length ? `(${v.length})` : ''}{r.kind === 'table' ? '' : ` ×${v.columns.length}`}</option>
                         ))}
                       </select>
                     ) : r.variants.length === 1 ? (
-                      <span className="muted small" title={r.variants[0].columns.join('\n')}>{r.variants[0].columns.length}곳</span>
+                      r.kind === 'table' ? null : <span className="muted small" title={r.variants[0].columns.join('\n')}>{r.variants[0].columns.length}곳</span>
                     ) : null}
                   </td>
                 </tr>
@@ -489,9 +507,18 @@ function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: 
         else if (r?.status === 'unknown') unknown++;
       }
     }
-    const missing = newTermsFromColumns(index, schema.tables.flatMap((t) => t.columns.map((column) => ({ table: t.name, column })))).add;
+    // 테이블도 같은 규칙으로 센다
+    const tableMismatches: { tableId: string; name: string }[] = [];
+    for (const t of schema.tables) {
+      const r = checkTableAgainstDictionary(index, t);
+      if (r?.status === 'ok') ok++;
+      else if (r?.status === 'mismatch') tableMismatches.push({ tableId: t.id, name: r.physical! });
+      else if (styleSuggestion(index, t.name)) style++;
+      else if (r?.status === 'unknown') unknown++;
+    }
+    const missing = [...newTableTerms(index, schema.tables).add, ...newTermsFromColumns(index, schema.tables.flatMap((t) => t.columns.map((column) => ({ table: t.name, column })))).add];
     const fills = logicalFillsFromSchema(dictionary, schema);
-    return { ok, unknown, style, mismatches, missing, fills };
+    return { ok, unknown, style, mismatches, tableMismatches, missing, fills };
   }, [dictionary, schema]);
   const addMissing = (terms: DictTerm[], what: string) => {
     let added: DictTerm[] = [];
@@ -500,13 +527,13 @@ function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: 
   return (
     <div className="dict-check">
       <span>
-        이 ERD: 표준대로 <b>{check.ok}</b> · 표준과 다름 <b className={check.mismatches.length ? 'warn' : ''}>{check.mismatches.length}</b> · 사전에 없음 <b className={check.unknown ? 'warn' : ''}>{check.unknown}</b>
+        이 ERD(테이블·컬럼): 표준대로 <b>{check.ok}</b> · 표준과 다름 <b className={check.mismatches.length + check.tableMismatches.length ? 'warn' : ''}>{check.mismatches.length + check.tableMismatches.length}</b> · 사전에 없음 <b className={check.unknown ? 'warn' : ''}>{check.unknown}</b>
         {check.style > 0 && <> · 다른 표기 <b className="warn">{check.style}</b></>}
       </span>
       <span className="spacer" />
-      {(check.mismatches.length > 0 || check.unknown > 0 || check.style > 0) && <button className="btn btn-sm" onClick={onOpenLint}>설계 검사에서 보기</button>}
+      {(check.mismatches.length + check.tableMismatches.length > 0 || check.unknown > 0 || check.style > 0) && <button className="btn btn-sm" onClick={onOpenLint}>설계 검사에서 보기</button>}
       {check.missing.length > 0 && !readOnly && (
-        <button className="btn btn-sm" title="사전에 없는 컬럼의 논리명·물리명·타입을 새 용어로 넣습니다 (사전 표기와 다르거나 물리명이 이미 있는 것은 빼고)" onClick={() => addMissing(check.missing, '새로 넣었습니다')}>
+        <button className="btn btn-sm" title="사전에 없는 테이블·컬럼의 논리명·물리명(·타입)을 새 용어로 넣습니다 (사전 표기와 다르거나 물리명이 이미 있는 것은 빼고)" onClick={() => addMissing(check.missing, '새로 넣었습니다')}>
           사전에 없는 용어 추가 ({check.missing.length})
         </button>
       )}
@@ -515,9 +542,17 @@ function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: 
           논리명 채우기 ({check.fills.length})
         </button>
       )}
-      {check.mismatches.length > 0 && !readOnly && (
-        <button className="btn btn-sm btn-primary" onClick={() => onFixAll(check.mismatches.length, (d) => check.mismatches.forEach((m) => updateColumn(d, m.tableId, m.columnId, m.patch!)))}>
-          표준대로 모두 맞추기 ({check.mismatches.length})
+      {check.mismatches.length + check.tableMismatches.length > 0 && !readOnly && (
+        <button
+          className="btn btn-sm btn-primary"
+          onClick={() =>
+            onFixAll(check.mismatches.length + check.tableMismatches.length, (d) => {
+              check.tableMismatches.forEach((m) => updateTable(d, m.tableId, { name: m.name }));
+              check.mismatches.forEach((m) => updateColumn(d, m.tableId, m.columnId, m.patch!));
+            })
+          }
+        >
+          표준대로 모두 맞추기 ({check.mismatches.length + check.tableMismatches.length})
         </button>
       )}
     </div>
@@ -529,16 +564,18 @@ function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; rea
   const { editDictionary } = useStore.getState();
   const [query, setQuery] = useState('');
   const [onlyNoLogical, setOnlyNoLogical] = useState(false);
+  const [kindFilter, setKindFilter] = useState<'all' | 'table' | 'column'>('all');
   const [limit, setLimit] = useState(PAGE);
   const [form, setForm] = useState<DictTerm>({ logical: '', physical: '' });
+  const tableCount = dictionary.terms.filter((t) => t.kind === 'table').length;
   const noLogical = dictionary.terms.filter((t) => !t.logical).length;
   const shown = useMemo(() => {
     // 마지막 하나까지 채우면 필터 체크도 사라지므로 그때는 전체를 보인다
-    const base = onlyNoLogical && noLogical > 0 ? dictionary.terms.filter((t) => !t.logical) : dictionary.terms;
+    const base = (onlyNoLogical && noLogical > 0 ? dictionary.terms.filter((t) => !t.logical) : dictionary.terms).filter((t) => kindFilter === 'all' || (kindFilter === 'table') === (t.kind === 'table'));
     return searchDictionary(base, query, Number.MAX_SAFE_INTEGER);
-  }, [dictionary.terms, query, onlyNoLogical, noLogical]);
+  }, [dictionary.terms, query, onlyNoLogical, noLogical, kindFilter]);
   const addForm = () => {
-    if (editDictionary((d) => setDictEntry(d, form))) setForm({ logical: '', physical: '' });
+    if (editDictionary((d) => setDictEntry(d, form))) setForm({ kind: form.kind, logical: '', physical: '' });
   };
   // 한 칸 고치기: 원래 용어(previous)를 새 값으로. 막히면(표기·겹침) 알리고 그대로 둔다
   const saveCell = (term: DictTerm, patch: Partial<DictTerm>) => {
@@ -549,6 +586,11 @@ function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; rea
   return (
     <>
       <div className="dict-tabs">
+        <div className="segmented small">
+          <button className={kindFilter === 'all' ? 'active' : ''} onClick={() => setKindFilter('all')}>전체 {dictionary.terms.length}</button>
+          <button className={kindFilter === 'table' ? 'active' : ''} onClick={() => setKindFilter('table')}>테이블 {tableCount}</button>
+          <button className={kindFilter === 'column' ? 'active' : ''} onClick={() => setKindFilter('column')}>컬럼 {dictionary.terms.length - tableCount}</button>
+        </div>
         <input type="search" className="dict-search" placeholder="논리명·물리명·설명 찾기" value={query} onChange={(e) => { setQuery(e.target.value); setLimit(PAGE); }} />
         {noLogical > 0 && (
           <label className="row-gap small" title="ERD에서 만들 때 논리명이 없던 용어 — 칸을 눌러 채우세요">
@@ -557,11 +599,12 @@ function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; rea
         )}
       </div>
       {!readOnly && (
-        <div className="dict-form">
-          <input placeholder="논리명 (예: 회원번호)" value={form.logical} onChange={(e) => setForm({ ...form, logical: e.target.value })} />
-          <input placeholder="물리명 (예: member_no)" value={form.physical} onChange={(e) => setForm({ ...form, physical: e.target.value })} />
-          <input placeholder="타입" value={form.type ?? ''} onChange={(e) => setForm({ ...form, type: e.target.value })} />
-          <input placeholder="길이" value={form.length ?? ''} onChange={(e) => setForm({ ...form, length: e.target.value })} />
+        <div className="dict-form with-kind">
+          <KindSelect value={form.kind} onChange={(kind) => setForm(kind === 'table' ? { ...form, kind, type: undefined, length: undefined } : { ...form, kind: undefined })} />
+          <input placeholder={form.kind === 'table' ? '논리명 (예: 회원)' : '논리명 (예: 회원번호)'} value={form.logical} onChange={(e) => setForm({ ...form, logical: e.target.value })} />
+          <input placeholder={form.kind === 'table' ? '물리명 (예: member)' : '물리명 (예: member_no)'} value={form.physical} onChange={(e) => setForm({ ...form, physical: e.target.value })} />
+          <input placeholder="타입" disabled={form.kind === 'table'} value={form.type ?? ''} onChange={(e) => setForm({ ...form, type: e.target.value })} />
+          <input placeholder="길이" disabled={form.kind === 'table'} value={form.length ?? ''} onChange={(e) => setForm({ ...form, length: e.target.value })} />
           <input placeholder="설명" value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && addForm()} />
           <button className="btn btn-sm btn-primary" disabled={!form.physical.trim()} onClick={addForm}>추가</button>
         </div>
@@ -570,7 +613,7 @@ function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; rea
         <table className={`dict-table${readOnly ? '' : ' edit'}`}>
           <thead>
             <tr>
-              <th>논리명</th><th>물리명</th><th>타입</th><th>길이</th><th>설명</th><th />
+              <th>구분</th><th>논리명</th><th>물리명</th><th>타입</th><th>길이</th><th>설명</th><th />
             </tr>
           </thead>
           <tbody>
@@ -578,6 +621,7 @@ function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; rea
               <tr key={termKey(e)} className={e.logical ? '' : 'no-logical'}>
                 {readOnly ? (
                   <>
+                    <td>{e.kind === 'table' ? '테이블' : '컬럼'}</td>
                     <td>{e.logical || <span className="muted">(논리명 없음)</span>}</td>
                     <td className="mono">{e.physical}</td>
                     <td className="mono">{e.type}</td>
@@ -587,10 +631,11 @@ function DictionaryTable({ dictionary, readOnly }: { dictionary: Dictionary; rea
                   </>
                 ) : (
                   <>
+                    <td><KindSelect value={e.kind} onChange={(kind) => saveCell(e, kind === 'table' ? { kind, type: undefined, length: undefined } : { kind: undefined })} /></td>
                     <td><CellInput value={e.logical} placeholder="(논리명 없음 — 눌러서 입력)" onCommit={(v) => saveCell(e, { logical: v })} /></td>
                     <td><CellInput className="mono" value={e.physical} onCommit={(v) => v && saveCell(e, { physical: v })} /></td>
-                    <td><CellInput className="mono" value={e.type ?? ''} onCommit={(v) => saveCell(e, { type: v || undefined })} /></td>
-                    <td><CellInput className="mono" value={e.length ?? ''} onCommit={(v) => saveCell(e, { length: v || undefined })} /></td>
+                    <td>{e.kind === 'table' ? <span className="muted">—</span> : <CellInput className="mono" value={e.type ?? ''} onCommit={(v) => saveCell(e, { type: v || undefined })} />}</td>
+                    <td>{e.kind === 'table' ? <span className="muted">—</span> : <CellInput className="mono" value={e.length ?? ''} onCommit={(v) => saveCell(e, { length: v || undefined })} />}</td>
                     <td><CellInput value={e.description ?? ''} onCommit={(v) => saveCell(e, { description: v || undefined })} /></td>
                     <td>
                       <button

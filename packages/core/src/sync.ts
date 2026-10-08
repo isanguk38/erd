@@ -35,7 +35,8 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema, opti
     table.position = { ...match.position };
     table.color = match.color;
     if (inheritNames && !table.logicalName) table.logicalName = match.logicalName;
-    if (inheritNames && !table.comment && !table.logicalName) table.comment = match.comment;
+    // 설명은 ERD에만 있으므로 DB에서 읽은 쪽에 늘 이어 붙인다 (가져와도 지워지지 않게)
+    table.comment = match.comment;
 
     const currentColumns = new Map(match.columns.map((c) => [key(c.name), c]));
     for (const column of table.columns) {
@@ -43,10 +44,8 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema, opti
       if (!m) continue;
       columnIdMap.set(column.id, m.id);
       column.id = m.id;
-      if (inheritNames && !column.logicalName && !column.comment) {
-        column.logicalName = m.logicalName;
-        column.comment = m.comment;
-      }
+      if (inheritNames && !column.logicalName) column.logicalName = m.logicalName;
+      column.comment = m.comment;
     }
     for (const index of table.indexes) index.columnIds = index.columnIds.map((id) => columnIdMap.get(id) ?? id);
 

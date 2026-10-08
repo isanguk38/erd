@@ -36,7 +36,7 @@ const columnSpec = z.object({
   onUpdate: z.string().nullable().optional().describe('MySQL·MariaDB 전용: 행이 바뀔 때 넣는 값 (예: CURRENT_TIMESTAMP). null이면 해제'),
   generated: z.string().nullable().optional().describe('계산 컬럼 식 (예: qty * price). null이면 일반 컬럼으로'),
   generatedStored: z.boolean().optional().describe('계산 값을 저장(STORED)할지. 기본 VIRTUAL (PostgreSQL은 STORED만, Oracle은 VIRTUAL만)'),
-  comment: z.string().optional(),
+  comment: z.string().optional().describe('상세 설명 — ERD에만 저장 (DB comment에는 logicalName이 들어간다)'),
 });
 
 const command = z.discriminatedUnion('op', [
@@ -44,7 +44,7 @@ const command = z.discriminatedUnion('op', [
     op: z.literal('createTable'),
     name: z.string(),
     logicalName: z.string().optional(),
-    comment: z.string().optional(),
+    comment: z.string().optional().describe('상세 설명 — ERD에만 저장 (DB comment에는 logicalName)'),
     columns: z.array(columnSpec).optional(),
     area: z.string().optional().describe('넣을 주제영역 이름 (그 영역 탭에 함께 놓인다)'),
   }),
@@ -334,17 +334,19 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       title: '표준 용어 사전 찾기',
       description: [
         '프로젝트의 표준 용어 사전(사람이 엑셀로 올린 것)에서 논리명의 표준 물리명·타입·길이를 찾는다.',
-        'names에 만들 컬럼의 논리명들(예: ["회원번호","주문금액"])을 주면 각각의 표준 물리명·타입을 알려 준다 (프로젝트의 물리명 표기 적용). 사전에 없으면 null.',
+        'names에 만들 컬럼의 논리명들(예: ["회원번호","주문금액"])을 주면 각각의 표준 물리명·타입을 알려 준다. 사전에 없으면 null.',
+        'tables에 만들 테이블의 논리명들(예: ["회원","주문"])을 주면 사전의 표준 테이블 물리명을 알려 준다 (테이블 용어는 타입 없음). 사전에 있는 테이블 이름과 같은 테이블은 두 번 만들지 않는다.',
         'query로 사전을 검색할 수도 있다 (비슷한 용어 찾기). 사전이 없으면 사전 없이 평소대로 설계한다.',
       ].join(' '),
       inputSchema: {
         project: projectArg,
-        names: z.array(z.string()).optional().describe('찾을 논리명들'),
+        names: z.array(z.string()).optional().describe('찾을 컬럼 논리명들'),
+        tables: z.array(z.string()).optional().describe('찾을 테이블 논리명들'),
         query: z.string().optional().describe('사전 검색어 (논리명·물리명·설명에 들어 있는 것)'),
       },
       annotations: { readOnlyHint: true },
     },
-    safe(async ({ project, names, query }: { project: string; names?: string[]; query?: string }) => {
+    safe(async ({ project, names, tables, query }: { project: string; names?: string[]; tables?: string[]; query?: string }) => {
       const p = await resolveProject(project);
       const dict = await dictionaryOf(p.id);
       if (!dict) return text('이 프로젝트에는 표준 용어 사전이 없습니다. 사전 없이 평소대로 설계하세요 (사람이 화면의 "용어 사전"에서 엑셀로 올릴 수 있음).');
@@ -353,9 +355,15 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         const st = splitDictType(type, length);
         return st.type ? `${st.type}${st.length ? `(${st.length})` : ''}` : undefined;
       };
-      const term = (t: { logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
+      const term = (t: { kind?: string; logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ kind: t.kind === 'table' ? '테이블' : '컬럼', logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
       return text({
-        dictionary: `용어 ${dict.terms.length}개, 물리명 표기: ${index.style ? NAME_STYLE_LABEL[index.style] : '-'} — 사전에 없는 컬럼도 이 표기로 이름을 짓는다`,
+        dictionary: `용어 ${dict.terms.length}개 (테이블 ${index.tables.size}), 물리명 표기: ${index.style ? NAME_STYLE_LABEL[index.style] : '-'} — 사전에 없는 테이블·컬럼도 이 표기로 이름을 짓는다`,
+        tableResults: tables?.length
+          ? tables.map((n) => {
+              const t = index.tables.get(n.replace(/\s+/g, '').toLowerCase());
+              return t ? { logicalName: n, name: t.physical } : { logicalName: n, standard: null, note: '사전에 없음 — 사전 표기로 이름을 지으면 반영될 때 사전에 추가된다' };
+            })
+          : undefined,
         results: names?.length
           ? names.map((n) => {
               const m = lookupTerm(index, n);
