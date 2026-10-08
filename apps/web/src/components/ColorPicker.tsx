@@ -29,14 +29,16 @@ export function ColorPicker({
 }) {
   const [open, setOpen] = useState<{ x: number; y: number } | null>(null);
   const pop = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => !pop.current?.contains(e.target as Node) && setOpen(null);
+    // 캔버스를 눌러도 닫히게 캡처 단계에서 받는다. 색 버튼은 그 버튼이 열고 닫는다
+    const close = (e: MouseEvent) => !pop.current?.contains(e.target as Node) && !trigger.current?.contains(e.target as Node) && setOpen(null);
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(null);
-    document.addEventListener('mousedown', close);
+    document.addEventListener('pointerdown', close, true);
     document.addEventListener('keydown', esc);
     return () => {
-      document.removeEventListener('mousedown', close);
+      document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', esc);
     };
   }, [open]);
@@ -52,6 +54,7 @@ export function ColorPicker({
   return (
     <div className="color-picker">
       <button
+        ref={trigger}
         className="color-picker__trigger"
         disabled={disabled}
         aria-haspopup="dialog"

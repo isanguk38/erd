@@ -52,10 +52,10 @@ export function Dropdown({ label, icon, items, title }: { label: ReactNode; icon
     if (!open) return;
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', close);
+    document.addEventListener('pointerdown', close, true);
     document.addEventListener('keydown', esc);
     return () => {
-      document.removeEventListener('mousedown', close);
+      document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', esc);
     };
   }, [open]);

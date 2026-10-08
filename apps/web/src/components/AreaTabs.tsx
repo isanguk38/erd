@@ -33,12 +33,13 @@ export function AreaTabs() {
   }, [synced, activeArea, active, setActiveArea]);
   useEffect(() => {
     if (!menu) return;
-    const close = (e: MouseEvent) => !menuRef.current?.contains(e.target as Node) && setMenu(null);
+    // 캔버스를 눌러도 닫히게 캡처 단계에서 받는다 (캔버스가 누름 이벤트를 막음). ⋯ 버튼은 그 버튼이 열고 닫는다
+    const close = (e: MouseEvent) => !menuRef.current?.contains(e.target as Node) && !(e.target as Element).closest?.('.area-tab__more') && setMenu(null);
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(null);
-    document.addEventListener('mousedown', close);
+    document.addEventListener('pointerdown', close, true);
     document.addEventListener('keydown', esc);
     return () => {
-      document.removeEventListener('mousedown', close);
+      document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', esc);
     };
   }, [menu]);
@@ -86,12 +87,12 @@ export function AreaTabs() {
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!list) return;
-    const close = (e: MouseEvent) => !listRef.current?.contains(e.target as Node) && setList(null);
+    const close = (e: MouseEvent) => !listRef.current?.contains(e.target as Node) && !(e.target as Element).closest?.('.area-tab--list') && setList(null);
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setList(null);
-    document.addEventListener('mousedown', close);
+    document.addEventListener('pointerdown', close, true);
     document.addEventListener('keydown', esc);
     return () => {
-      document.removeEventListener('mousedown', close);
+      document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', esc);
     };
   }, [list]);
