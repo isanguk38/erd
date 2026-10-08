@@ -1,4 +1,4 @@
-import type { DialectId, Schema } from '@erd/core';
+import type { DialectId, Dictionary, Schema } from '@erd/core';
 import { desktop, viaDesktop } from './desktop';
 
 export interface Connection {
@@ -123,6 +123,8 @@ export interface ProposalInfo {
 
 export const projectApi = {
   list: () => request<ProjectInfo[]>('GET', '/api/projects'),
+  /** 그 프로젝트의 표준 용어 사전 (없으면 null) */
+  dictionary: (id: string) => request<{ dictionary: Dictionary | null }>('GET', `/api/projects/${id}/dictionary`),
   create: (body: { name: string; dialect: DialectId; schema?: Schema }) => request<ProjectInfo>('POST', '/api/projects', body),
   remove: (id: string) => request<{ ok: true }>('DELETE', `/api/projects/${id}`),
   update: (id: string, patch: { aiMode?: 'apply' | 'propose'; aiAllowDbExecute?: boolean }) => request('PATCH', `/api/projects/${id}`, patch),

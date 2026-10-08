@@ -18,6 +18,7 @@ import { useStore } from '../store';
 import { loadModule } from '../lib/appVersion';
 import { downloadBlob, safeFileName } from '../lib/download';
 import { useProjectName } from '../lib/hooks';
+import { projectApi } from '../lib/api';
 import { Modal } from './Modal';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -42,7 +43,10 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   const projectName = useProjectName();
   const [kind, setKind] = useState<Kind>('terms');
   const [query, setQuery] = useState('');
-  const [pending, setPending] = useState<(DictionaryImport & { file: string }) | null>(null);
+  const [pending, setPending] = useState<(DictionaryImport & { file: string; case?: DictCase }) | null>(null);
+  // 다른 프로젝트 사전 (복사해 오기). null이면 아직 안 찾음
+  const [sources, setSources] = useState<{ id: string; name: string; terms: number; words: number }[] | null>(null);
+  const [loadingSources, setLoadingSources] = useState(false);
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<Entry & { previous?: string }>({ logical: '', physical: '' });
@@ -85,12 +89,48 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
       setBusy(false);
     }
   };
+  // 내가 볼 수 있는 다른 프로젝트 중 사전이 있는 것
+  const findSources = async () => {
+    setLoadingSources(true);
+    try {
+      const current = useStore.getState().projectId;
+      const projects = (await projectApi.list()).filter((p) => p.id !== current);
+      const found = await Promise.allSettled(projects.map(async (p) => ({ p, d: (await projectApi.dictionary(p.id)).dictionary })));
+      setSources(
+        found.flatMap((r) => (r.status === 'fulfilled' && r.value.d ? [{ id: r.value.p.id, name: r.value.p.name, terms: r.value.d.terms.length, words: r.value.d.words.length }] : [])),
+      );
+    } catch (e) {
+      alert(`프로젝트 목록을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoadingSources(false);
+    }
+  };
+  // 고른 프로젝트 사전을 복사본으로 가져온다 (원본과 연결되지 않음). 엑셀 올리기와 같은 확인 단계를 거친다
+  const pickSource = async (source: { id: string; name: string }) => {
+    try {
+      const d = (await projectApi.dictionary(source.id)).dictionary;
+      if (!d) return alert('그 프로젝트에는 사전이 없습니다');
+      setPending({ terms: d.terms, words: d.words, notes: [`"${source.name}" 프로젝트 사전의 복사본입니다 (원본을 고쳐도 여기는 바뀌지 않음)`], file: `${source.name} 프로젝트`, case: d.case });
+      setSources(null);
+    } catch (e) {
+      alert(`사전을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
   const applyImport = () => {
     if (!pending) return;
     let counts = { terms: 0, words: 0 };
     // 용어나 단어 시트가 없으면 그쪽은 그대로 둔다
     const ok = editDictionary((d) => {
-      counts = writeDictionary(d, { ...(pending.terms.length ? { terms: pending.terms } : {}), ...(pending.words.length ? { words: pending.words } : {}) }, mode);
+      counts = writeDictionary(
+        d,
+        {
+          ...(pending.terms.length ? { terms: pending.terms } : {}),
+          ...(pending.words.length ? { words: pending.words } : {}),
+          // 다른 프로젝트에서 가져오면 물리명 대소문자 설정도 (합치기면 지금 설정 유지)
+          ...(pending.case && (mode === 'replace' || !dictionary) ? { case: pending.case } : {}),
+        },
+        mode,
+      );
     });
     if (!ok) return;
     setPending(null);
@@ -126,6 +166,11 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
             <input type="file" accept=".xlsx" hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickFile(f); }} />
           </label>
         )}
+        {!readOnly && (
+          <button className="btn" disabled={loadingSources} onClick={() => void findSources()} title="내가 볼 수 있는 다른 프로젝트의 사전을 복사해 옵니다">
+            {loadingSources ? '찾는 중…' : '다른 프로젝트에서 가져오기'}
+          </button>
+        )}
         <button className="btn" onClick={() => void download(true)} title="표준용어·표준단어 시트와 예시가 든 빈 양식">양식 받기</button>
         {dictionary && <button className="btn" onClick={() => void download(false)}>지금 사전 엑셀로 받기</button>}
         <span className="spacer" />
@@ -141,6 +186,30 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
           <button className="btn btn-ghost btn-danger-text" onClick={() => confirm('표준 용어 사전을 모두 지울까요? (ERD는 바뀌지 않습니다)') && editDictionary((d) => clearDictionary(d))}>사전 비우기</button>
         )}
       </div>
+
+      {sources && (
+        <div className="baseline-info dict-sources">
+          {sources.length === 0 ? (
+            <span>사전이 있는 다른 프로젝트가 없습니다.</span>
+          ) : (
+            <>
+              <b>사전을 가져올 프로젝트</b>
+              <ul>
+                {sources.map((src) => (
+                  <li key={src.id}>
+                    <span>{src.name}</span>
+                    <span className="muted small">용어 {src.terms}개 · 단어 {src.words}개</span>
+                    <button className="btn btn-sm" onClick={() => void pickSource(src)}>가져오기</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <div className="btn-row">
+            <button className="btn btn-sm" onClick={() => setSources(null)}>닫기</button>
+          </div>
+        </div>
+      )}
 
       {pending && (
         <div className="baseline-info dict-pending">

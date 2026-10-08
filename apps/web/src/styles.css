@@ -901,3 +901,8 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 @media (max-width: 640px) {
   .dict-form, .dict-form.words { grid-template-columns: 1fr 1fr; }
 }
+.dict-sources, .dict-pending { display: block; }
+.dict-sources { margin-bottom: 12px; }
+.dict-sources ul { list-style: none; margin: 8px 0; padding: 0; max-height: 200px; overflow: auto; }
+.dict-sources li { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.dict-sources li > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
