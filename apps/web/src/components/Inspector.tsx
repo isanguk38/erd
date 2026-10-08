@@ -33,7 +33,7 @@ import {
 } from '@erd/core';
 import { selectAreas, useStore } from '../store';
 import { Dropdown } from './ui';
-import { ColorPicker } from './ColorPicker';
+import { ColorPicker, usedColors } from './ColorPicker';
 import { TemplateApplyMenu } from './TemplatePanels';
 import { TableComments } from './Comments';
 import { useDialect } from '../lib/hooks';
@@ -177,7 +177,7 @@ function TableEditor({ table }: { table: Table }) {
         <label>영역</label>
         <TableAreas tableId={table.id} />
         <label>색상</label>
-        <ColorPicker allowDefault value={table.color} onChange={(color) => setTable({ color })} />
+        <ColorPicker allowDefault value={table.color} recent={usedColors(schema.tables.map((t) => t.color))} onChange={(color) => setTable({ color })} />
       </div>
 
       <div className="inspector__section">

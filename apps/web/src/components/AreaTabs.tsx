@@ -215,7 +215,7 @@ export function AreaTabs() {
           <div className="area-menu" ref={menuRef} role="menu" style={{ left: menu.x, top: menu.y }}>
             <button role="menuitem" onClick={() => { setMenu(null); setRenaming(a.id); }}>이름 바꾸기</button>
             <div className="area-menu__colors" aria-label="색">
-              <ColorPicker value={a.color} onChange={(color) => color && edit((d) => void updateArea(d, a.id, { color }))} />
+              <ColorPicker inline value={a.color} onChange={(color) => color && edit((d) => void updateArea(d, a.id, { color }))} />
             </div>
             <button
               role="menuitem"
