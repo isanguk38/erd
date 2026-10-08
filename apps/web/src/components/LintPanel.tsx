@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, autoFixColumnPatch, setDictEntry, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
+import { addIndex, addMissingTerms, autoFixColumnPatch, setDictEntry, type DictTerm, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
@@ -53,6 +53,21 @@ function applyColumnFix(issue: LintIssue) {
   if (!column) return;
   const fixed = autoFixColumnPatch(meta.dialect || 'mysql', column, patch);
   edit((d) => updateColumn(d, tableId, columnId, fixed.patch));
+}
+
+/** 사전 관련 경고를 한 번에: 컬럼 고치기는 한 번의 Ctrl+Z로 되돌리고, 사전에 추가는 겹치는 것을 건너뛴다 */
+function fixAllDictionary(list: LintIssue[]) {
+  const { edit, editDictionary, showNotice } = useStore.getState();
+  const terms = list.flatMap((i) => (i.fix?.kind === 'addTerm' ? [i.fix.term] : []));
+  const patches = list.flatMap((i) => (i.fix?.kind === 'patchColumn' ? [i.fix] : []));
+  if (terms.length) {
+    let added: DictTerm[] = [];
+    if (editDictionary((d) => void (added = addMissingTerms(d, terms)))) showNotice({ text: `용어 사전에 ${added.length}개를 넣었습니다${added.length < terms.length ? ` (겹치는 ${terms.length - added.length}개는 건너뜀)` : ''}` });
+  }
+  if (patches.length) {
+    edit((d) => patches.forEach((f) => updateColumn(d, f.tableId, f.columnId, f.patch)));
+    showNotice({ text: `컬럼 ${patches.length}개를 고쳤습니다 (Ctrl+Z로 한 번에 되돌리기)` });
+  }
 }
 
 /** 설계 검사 결과. 항목을 누르면 그 테이블로 이동한다 */
@@ -224,6 +239,12 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
               {open[rule] && (
                 <>
                   <p className="lint-group__desc">{LINT_RULES[rule].description}</p>
+                  {/* 사전 관련 경고는 한 번에 고칠 수 있다 (사전에 추가 / 표준대로 / 표기 바꾸기) */}
+                  {rule.startsWith('dict-') && !readOnly && list.filter((i) => i.fix).length > 1 && (
+                    <button className="btn btn-sm lint-group__bulk" onClick={() => fixAllDictionary(list)}>
+                      {rule === 'dict-unknown' ? '모두 사전에 추가' : rule === 'dict-mismatch' ? '모두 표준대로' : '모두 사전 표기로'} ({list.filter((i) => i.fix).length})
+                    </button>
+                  )}
                   <ul>
                     {list.map((issue) => (
                       <li key={issue.id}>

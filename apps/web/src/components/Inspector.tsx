@@ -87,7 +87,8 @@ function TextInput({ value, onCommit, placeholder, className, list, issue, focus
   suggest?: (query: string) => DictTerm[]; onPick?: (term: DictTerm) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const [active, setActive] = useState(0);
+  // 고른 후보 (-1: 아직 안 고름 — Enter는 입력한 그대로 저장)
+  const [active, setActive] = useState(-1);
   const [closed, setClosed] = useState(false);
   const inputEl = useRef<HTMLInputElement | null>(null);
   // 후보를 골랐으면 칸을 떠날 때 입력하던 글자를 저장하지 않는다 (고른 용어가 덮이지 않게)
@@ -123,17 +124,17 @@ function TextInput({ value, onCommit, placeholder, className, list, issue, focus
         autoComplete="off"
         onChange={(e) => {
           setDraft(e.target.value);
-          setActive(0);
+          setActive(-1);
           setClosed(false);
         }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (items.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
             e.preventDefault();
-            setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
+            setActive((a) => (a < 0 ? (e.key === 'ArrowDown' ? 0 : items.length - 1) : (a + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length));
             return;
           }
-          if (items.length && e.key === 'Enter') {
+          if (items.length && active >= 0 && e.key === 'Enter') {
             e.preventDefault();
             pick(items[Math.min(active, items.length - 1)]);
             return;
@@ -168,7 +169,7 @@ function TextInput({ value, onCommit, placeholder, className, list, issue, focus
               <span className="muted mono">{t.type ? `${t.type}${t.length ? `(${t.length})` : ''}` : ''}</span>
             </li>
           ))}
-          <li className="term-suggest__hint muted">표준 용어 사전 · ↑↓ Enter로 고르기 · Esc 닫기</li>
+          <li className="term-suggest__hint muted">표준 용어 사전 · 누르거나 ↑↓ 후 Enter로 고르기 · 그냥 Enter는 입력한 그대로 · Esc 닫기</li>
         </ul>
       )}
     </>
@@ -279,7 +280,8 @@ function TableEditor({ table }: { table: Table }) {
   };
   // 물리명만 넣고 논리명이 비어 있으면 사전에서 논리명을 채운다
   const setPhysicalName = (column: Column, name: string) => {
-    const term = dict && !column.logicalName.trim() ? lookupPhysical(dict, name) : null;
+    const found = dict && !column.logicalName.trim() ? lookupPhysical(dict, name) : null;
+    const term = found?.logical ? found : null;
     setColumn(column, term ? { name, logicalName: term.logical } : { name });
     if (term) useStore.getState().showNotice({ text: `표준 용어 사전: ${name} → 논리명 ${term.logical} (Ctrl+Z로 되돌리기)` });
     else adviseDictionary(column);

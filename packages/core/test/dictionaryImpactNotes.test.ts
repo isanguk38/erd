@@ -22,6 +22,8 @@ import {
   setDictEntry,
   syncDictionaryForAi,
   addMissingTerms,
+  logicalFillsFromSchema,
+  removeDictEntry,
   readNotes,
   readSchema,
   removeNote,
@@ -113,7 +115,7 @@ describe('표준 용어 사전', () => {
     expect(() => setDictEntry(doc, { logical: '회원고유번호', physical: 'mbr_no' })).toThrow(/이미 "회원번호"/);
     setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'INT' });
     // 자기 자신을 고칠 때는 같은 물리명이어도 된다
-    setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'SMALLINT' }, '회원나이');
+    setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'SMALLINT' }, { logical: '회원나이', physical: 'mbr_age' });
     expect(readDictionary(doc)?.terms.find((t) => t.logical === '회원나이')?.type).toBe('SMALLINT');
     clearDictionary(doc);
     expect(readDictionary(doc)).toBeNull();
@@ -162,26 +164,49 @@ describe('표준 용어 사전', () => {
   });
 });
 
-describe('ERD에서 사전 만들기', () => {
-  it('논리명별로 가장 많이 쓰는 이름·타입을 용어로, 다르게 쓴 곳은 충돌로', async () => {
-    const { schema } = applyCommands(emptySchema(), [
-      { op: 'createTable', name: 'member', columns: [{ name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true, comment: '회원 구분' }, { name: 'nick', type: 'VARCHAR(20)' }] },
-      { op: 'createTable', name: 'orders', columns: [{ name: 'member_id', logicalName: '회원 번호', type: 'BIGINT' }, { name: 'reg_dt', logicalName: '등록일시', type: 'DATETIME' }] },
-      { op: 'createTable', name: 'point', columns: [{ name: 'mbr_no', logicalName: '회원번호', type: 'VARCHAR(20)' }] },
+describe('ERD에서 사전 만들기 · 논리명 없는 용어', () => {
+  const { schema } = applyCommands(emptySchema(), [
+    { op: 'createTable', name: 'member', columns: [{ name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true, comment: '회원 구분' }, { name: 'nick', type: 'VARCHAR(20)' }] },
+    { op: 'createTable', name: 'orders', columns: [{ name: 'member_id', logicalName: '회원 번호', type: 'BIGINT' }, { name: 'reg_dt', logicalName: '등록일시', type: 'DATETIME' }, { name: 'nick', type: 'VARCHAR(20)' }] },
+    { op: 'createTable', name: 'point', columns: [{ name: 'mbr_no', logicalName: '회원번호', type: 'VARCHAR(20)' }] },
+  ]);
+
+  it('논리명별로 가장 많이 쓰는 이름·타입, 다르게 쓴 것은 variants, 논리명 없는 컬럼은 물리명으로 묶어 논리명 없이', () => {
+    const rows = dictionaryFromSchema(schema);
+    expect(rows.map((r) => [r.logical, r.physical, r.type, r.variants.length])).toEqual([
+      ['등록일시', 'reg_dt', 'DATETIME', 1],
+      ['회원번호', 'member_id', 'BIGINT', 2],
+      ['', 'nick', 'VARCHAR', 1],
     ]);
-    const { terms, conflicts, skipped } = dictionaryFromSchema(schema);
-    expect(skipped).toBe(1);
-    expect(terms).toEqual([
-      { logical: '등록일시', physical: 'reg_dt', type: 'DATETIME' },
-      { logical: '회원번호', physical: 'member_id', type: 'BIGINT', description: '회원 구분' },
-    ]);
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0].variants.map((v) => [v.physical, v.columns.length])).toEqual([['member_id', 2], ['mbr_no', 1]]);
-    // 검토용 엑셀: 충돌 시트는 다시 올릴 때 읽지 않는다
-    const buf = await dictionaryWorkbook({ terms }, { conflicts });
-    const parsed = await parseDictionaryWorkbook(buf);
+    expect(rows[1].description).toBe('회원 구분');
+    expect(rows[1].variants.map((v) => [v.physical, v.columns.length])).toEqual([['member_id', 2], ['mbr_no', 1]]);
+    expect(rows[2].variants[0].columns).toEqual(['member.nick', 'orders.nick']);
+  });
+
+  it('논리명 없는 용어: 넣을 수 있고, 같은 물리명에 논리명을 채우면 그 용어가 된다 (AI·ERD 채우기)', () => {
+    const doc = new Y.Doc();
+    writeDictionary(doc, { terms: [{ logical: '', physical: 'nick', type: 'VARCHAR', length: '20' }, { logical: '회원번호', physical: 'member_id' }] });
+    let d = readDictionary(doc)!;
+    expect(d.terms.map((t) => t.logical)).toEqual(['회원번호', '']);
+    // 이 컬럼은 논리명이 사전에 없지만 물리명이 논리명 없이 있으므로 문제 아님
+    expect(checkColumnAgainstDictionary(d, { name: 'nick', logicalName: '별명', type: 'VARCHAR', length: '20' })?.status).toBe('ok');
+    expect(logicalFillsFromSchema(d, { tables: [{ columns: [{ ...schema.tables[0].columns[1], logicalName: '별명' }] }] })).toEqual([{ logical: '별명', physical: 'nick', type: 'VARCHAR', length: '20' }]);
+    expect(addMissingTerms(doc, [{ logical: '별명', physical: 'nick', type: 'VARCHAR', length: '20' }]).length).toBe(1);
+    d = readDictionary(doc)!;
+    expect(d.terms.map((t) => `${t.logical}=${t.physical}`)).toEqual(['별명=nick', '회원번호=member_id']);
+    // 화면에서 논리명 칸을 채우는 것도 같은 용어로
+    setDictEntry(doc, { logical: '', physical: 'reg_dt' });
+    setDictEntry(doc, { logical: '등록일시', physical: 'reg_dt' }, { logical: '', physical: 'reg_dt' });
+    expect(readDictionary(doc)!.terms.filter((t) => t.physical === 'reg_dt').map((t) => t.logical)).toEqual(['등록일시']);
+    // 엑셀로 내려받아 다시 읽어도 논리명 없는 줄이 남는다
+    removeDictEntry(doc, { logical: '별명', physical: 'nick' });
+    setDictEntry(doc, { logical: '', physical: 'nick' });
+  });
+
+  it('엑셀: 논리명 없는 줄도 다시 읽는다', async () => {
+    const terms = [{ logical: '회원번호', physical: 'member_id' }, { logical: '', physical: 'nick' }];
+    const parsed = await parseDictionaryWorkbook(await dictionaryWorkbook({ terms }));
     expect(parsed.terms).toEqual(terms);
-    expect(parsed.notes.join()).not.toContain('충돌');
   });
 });
 

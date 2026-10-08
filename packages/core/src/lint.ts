@@ -140,7 +140,9 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   if (tMajor) for (const [t, s] of tableStyles) if (s && s !== tMajor) add('naming-mixed', t, `${t.name}: 테이블 이름이 ${label(s)}입니다 (대부분 ${label(tMajor)})`);
   const cols = schema.tables.flatMap((t) => t.columns.map((c) => [t, c, styleOf(c.name)] as const));
   const cMajor = majority(cols.map(([, , s]) => s));
-  if (cMajor) for (const [t, c, s] of cols) if (s && s !== cMajor) add('naming-mixed', t, `${t.name}.${c.name}: 컬럼 이름이 ${label(s)}입니다 (대부분 ${label(cMajor)})`, { columnId: c.id, columnName: c.name });
+  // 사전이 있으면 컬럼 표기는 사전 기준(dict-style)으로만 본다 — 같은 컬럼에 경고가 두 번 뜨지 않게
+  const dictionaryStyle = options.dictionary?.terms.length ? dictIndex(options.dictionary).style : null;
+  if (cMajor && !dictionaryStyle) for (const [t, c, s] of cols) if (s && s !== cMajor) add('naming-mixed', t, `${t.name}.${c.name}: 컬럼 이름이 ${label(s)}입니다 (대부분 ${label(cMajor)})`, { columnId: c.id, columnName: c.name });
 
   // 논리명
   for (const t of schema.tables) {

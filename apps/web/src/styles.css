@@ -124,7 +124,7 @@ code, pre, .sql-view { font-family: 'JetBrains Mono', Consolas, 'D2Coding', mono
 /* 펼침 메뉴 */
 .dropdown { position: relative; }
 .dropdown__menu {
-  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 220px; padding: 4px;
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 220px; width: max-content; max-width: min(420px, 90vw); padding: 4px;
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15);
 }
 .dropdown__menu button {
@@ -133,8 +133,8 @@ code, pre, .sql-view { font-family: 'JetBrains Mono', Consolas, 'D2Coding', mono
 }
 .dropdown__menu button:hover:not(:disabled) { background: var(--accent-soft); }
 .dropdown__menu button:disabled { opacity: 0.45; cursor: default; }
-.dropdown__label { flex: 1; }
-.dropdown__hint { color: var(--muted); font-size: 11px; }
+.dropdown__label { flex: 1; white-space: nowrap; }
+.dropdown__hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
 
 input, select {
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 6px; padding: 5px 8px;
@@ -989,3 +989,22 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .dict-style-help { margin: 4px 0 0; }
 .dict-offenders { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
 .dict-stats > div b { white-space: nowrap; }
+
+/* 사전 목록·넣기 전 편집: 칸을 바로 고친다 */
+.dict-table.edit td { padding: 2px 4px; }
+.dict-table.edit input:not([type=checkbox]) { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid transparent; background: transparent; padding: 3px 6px; border-radius: 4px; font: inherit; color: inherit; }
+.dict-table.edit input:not([type=checkbox]):hover { border-color: var(--border); }
+.dict-table.edit input:not([type=checkbox]):focus { border-color: var(--accent); background: var(--panel); outline: none; }
+.dict-table.edit input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.dict-table.edit tbody tr { cursor: default; }
+.dict-table.edit tbody tr:hover { background: transparent; }
+.dict-table th.narrow, .dict-table td.narrow { width: 28px; text-align: center; }
+.dict-table td.uses { white-space: nowrap; }
+.dict-table td.uses select { font-size: 12px; max-width: 220px; }
+.dict-table tr.excluded { opacity: 0.45; }
+.dict-table tr.bad-style td, .dict-table tr.bad-dup td { background: var(--danger-soft); }
+.dict-table tr.no-logical input::placeholder { color: var(--warning); }
+.dict-table-wrap.tall { max-height: 46vh; }
+.dict-more { margin: 8px; }
+.lint-group__bulk { margin: 0 0 6px 10px; }
+.dict-check.warn-box { border-color: var(--warning); background: var(--warning-soft); }
