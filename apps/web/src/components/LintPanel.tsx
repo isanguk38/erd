@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, addMissingTerms, autoFixColumnPatch, setDictEntry, updateTable, type DictTerm, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
+import { addIndex, autoFixColumnPatch, updateTable, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
@@ -16,13 +16,13 @@ export function useLintCount(): number {
   const dialect = useStore((s) => s.meta.dialect);
   const ignored = useStore((s) => s.meta.lintIgnored);
   const review = useStore((s) => s.meta.aiReview);
-  const dictionary = useStore((s) => s.dictionary);
+  const namingStyle = useStore((s) => s.meta.namingStyle);
   return useMemo(() => {
     const skip = new Set(ignored ?? []);
-    const basic = lintSchema(schema, dialect, { dictionary }).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
+    const basic = lintSchema(schema, dialect, { namingStyle }).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
     const ai = openReviewItems(review?.items, schema).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
     return basic + ai;
-  }, [schema, dialect, ignored, review, dictionary]);
+  }, [schema, dialect, ignored, review, namingStyle]);
 }
 
 /** AI 검토 이후 바뀐 테이블 수 (검토를 한 번도 안 한 프로젝트는 0 — AI를 안 쓰는 프로젝트에 계속 뜨지 않게) */
@@ -55,23 +55,17 @@ function applyColumnFix(issue: LintIssue) {
   edit((d) => updateColumn(d, tableId, columnId, fixed.patch));
 }
 
-/** 사전 관련 경고를 한 번에: 컬럼 고치기는 한 번의 Ctrl+Z로 되돌리고, 사전에 추가는 겹치는 것을 건너뛴다 */
-function fixAllDictionary(list: LintIssue[]) {
-  const { edit, editDictionary, showNotice } = useStore.getState();
-  const terms = list.flatMap((i) => (i.fix?.kind === 'addTerm' ? [i.fix.term] : []));
-  const patches = list.flatMap((i) => (i.fix?.kind === 'patchColumn' ? [i.fix] : []));
-  const tablePatches = list.flatMap((i) => (i.fix?.kind === 'patchTable' ? [i.fix] : []));
-  if (terms.length) {
-    let added: DictTerm[] = [];
-    if (editDictionary((d) => void (added = addMissingTerms(d, terms)))) showNotice({ text: `용어 사전에 ${added.length}개를 넣었습니다${added.length < terms.length ? ` (겹치는 ${terms.length - added.length}개는 건너뜀)` : ''}` });
-  }
-  if (patches.length || tablePatches.length) {
-    edit((d) => {
-      tablePatches.forEach((f) => updateTable(d, f.tableId, f.patch));
-      patches.forEach((f) => updateColumn(d, f.tableId, f.columnId, f.patch));
-    });
-    showNotice({ text: `${[tablePatches.length && `테이블 ${tablePatches.length}개`, patches.length && `컬럼 ${patches.length}개`].filter(Boolean).join(', ')}를 고쳤습니다 (Ctrl+Z로 한 번에 되돌리기)` });
-  }
+/** 이름 표기 기준 경고를 한 번에 고친다 (Ctrl+Z 한 번으로 되돌림) */
+function fixAllNaming(list: LintIssue[]) {
+  const { edit, showNotice } = useStore.getState();
+  const columns = list.flatMap((i) => (i.fix?.kind === 'patchColumn' ? [i.fix] : []));
+  const tables = list.flatMap((i) => (i.fix?.kind === 'patchTable' ? [i.fix] : []));
+  if (!columns.length && !tables.length) return;
+  edit((d) => {
+    tables.forEach((f) => updateTable(d, f.tableId, f.patch));
+    columns.forEach((f) => updateColumn(d, f.tableId, f.columnId, f.patch));
+  });
+  showNotice({ text: `${[tables.length && `테이블 ${tables.length}개`, columns.length && `컬럼 ${columns.length}개`].filter(Boolean).join(', ')} 이름을 기준대로 바꿨습니다 (Ctrl+Z로 한 번에 되돌리기)` });
 }
 
 /** 설계 검사 결과. 항목을 누르면 그 테이블로 이동한다 */
@@ -82,8 +76,8 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const projectName = useProjectName();
   const { fitView } = useReactFlow();
   const ignoredIds = useStore((s) => s.meta.lintIgnored);
-  const dictionary = useStore((s) => s.dictionary);
-  const all = useMemo(() => lintSchema(schema, dialect, { dictionary }), [schema, dialect, dictionary]);
+  const namingStyle = useStore((s) => s.meta.namingStyle);
+  const all = useMemo(() => lintSchema(schema, dialect, { namingStyle }), [schema, dialect, namingStyle]);
   // 무시한 항목은 목록·배지에서 빼고 아래 "무시한 항목"에 모은다
   const ignoredSet = useMemo(() => new Set(ignoredIds ?? []), [ignoredIds]);
   const issues = useMemo(() => all.filter((i) => !ignoredSet.has(i.id)), [all, ignoredSet]);
@@ -243,10 +237,10 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
               {open[rule] && (
                 <>
                   <p className="lint-group__desc">{LINT_RULES[rule].description}</p>
-                  {/* 사전 관련 경고는 한 번에 고칠 수 있다 (사전에 추가 / 표준대로 / 표기 바꾸기) */}
-                  {rule.startsWith('dict-') && !readOnly && list.filter((i) => i.fix).length > 1 && (
-                    <button className="btn btn-sm lint-group__bulk" onClick={() => fixAllDictionary(list)}>
-                      {rule === 'dict-unknown' ? '모두 사전에 추가' : rule === 'dict-mismatch' ? '모두 표준대로' : '모두 사전 표기로'} ({list.filter((i) => i.fix).length})
+                  {/* 이름 표기 기준 경고는 한 번에 고칠 수 있다 */}
+                  {rule === 'naming-mixed' && !readOnly && list.filter((i) => i.fix).length > 1 && (
+                    <button className="btn btn-sm lint-group__bulk" onClick={() => fixAllNaming(list)}>
+                      모두 기준대로 바꾸기 ({list.filter((i) => i.fix).length})
                     </button>
                   )}
                   <ul>
@@ -285,18 +279,6 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                             }}
                           >
                             {issue.fix.label}
-                          </button>
-                        )}
-                        {issue.fix?.kind === 'addTerm' && !readOnly && (
-                          <button
-                            className="btn btn-ghost small"
-                            title={`이 컬럼의 논리명·물리명·타입을 표준 용어 사전에 새 용어로 넣습니다`}
-                            onClick={() => {
-                              const { term } = issue.fix as Extract<LintIssue['fix'], { kind: 'addTerm' }>;
-                              if (useStore.getState().editDictionary((d) => setDictEntry(d, term))) useStore.getState().showNotice({ text: `용어 사전에 추가했습니다: ${term.logical} = ${term.physical}` });
-                            }}
-                          >
-                            사전에 추가
                           </button>
                         )}
                         {issue.fix?.kind === 'removeRelation' && !readOnly && (

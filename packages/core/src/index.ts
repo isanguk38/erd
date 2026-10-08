@@ -20,6 +20,6 @@ export * from './aiReview';
 export * from './comments';
 export * from './changes';
 export * from './notes';
-export * from './dictionary';
+export * from './naming';
 export * from './impact';
 export * from './safety';

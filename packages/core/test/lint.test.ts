@@ -67,18 +67,15 @@ describe('설계 검사', () => {
     expect(only(t, 'fk-type-mismatch')).toEqual([]);
   });
 
-  it('이름 규칙: 많이 쓰는 쪽과 다른 것만, 한 단어 이름은 상관없음, 반반이면 알리지 않음', () => {
+  it('이름 표기 기준: 프로젝트 기준(없으면 많이 쓰는 표기)과 다른 테이블·컬럼, 한 단어 이름은 상관없음', () => {
     const s = applyCommands(good(), [
       { op: 'createTable', name: 'orderItem', logicalName: '주문상품', columns: [{ name: 'itemId', logicalName: '번호', type: 'BIGINT', primaryKey: true }, { name: 'qty', logicalName: '수량', type: 'INT' }] },
     ]).schema;
-    // 테이블: member(한 단어), orders(한 단어), orderItem(camel) → 비교 대상 1개뿐이라 알리지 않음
-    // 컬럼: member_id, order_id, member_id(snake) vs itemId(camel) → itemId만
-    expect(only(s, 'naming-mixed').map((i) => i.columnName)).toEqual(['itemId']);
-    const half = applyCommands(emptySchema(), [
-      { op: 'createTable', name: 'a_b', logicalName: 'x', columns: [{ name: 'a_id', logicalName: 'x', type: 'INT', primaryKey: true }] },
-      { op: 'createTable', name: 'cD', logicalName: 'y', columns: [{ name: 'cId', logicalName: 'x', type: 'INT', primaryKey: true }] },
-    ]).schema;
-    expect(only(half, 'naming-mixed')).toEqual([]);
+    // 대부분 snake → 테이블 orderItem, 컬럼 itemId (qty·member 같은 한 단어는 상관없음)
+    expect(only(s, 'naming-mixed').map((i) => i.columnName ?? i.tableName)).toEqual(['orderItem', 'itemId']);
+    // 저장한 기준이 camelCase면 그 기준으로
+    expect(only(s, 'naming-mixed').length).toBeGreaterThan(0);
+    expect(lintSchema(s, 'mysql', { namingStyle: 'camel' }).filter((i) => i.rule === 'naming-mixed').map((i) => i.columnName)).toContain('member_id');
   });
 
   it('중복 인덱스 (기본키와 같은 것 포함)', () => {

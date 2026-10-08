@@ -27,9 +27,10 @@ import {
   setAreaPosition,
   toScript,
   changeImpact,
-  syncDictionaryForAi,
-  addMissingTerms,
-  readDictionary,
+  namingNotes,
+  projectNamingStyle,
+  detectNamingStyle,
+  isNameStyle,
   readNotes,
   addNote,
   updateNote,
@@ -113,25 +114,24 @@ export function registerProjectRoutes(
     return { mode: 'apply' as const, messages: options.messages, changes: summarize(changes) };
   }
 
+  /** 함께 바뀐 것(영향도)과, 이번에 만들거나 바꾼 이름 중 프로젝트 표기 기준과 다른 것 */
   function reviewNotes(id: string, before: Schema, after: Schema) {
     const impact = changeImpact(before, after);
-    const dictionary = syncDictionaryForAi(readDictionary(store.load(id).doc), before, after).notes;
-    return { ...(impact.length ? { impact } : {}), ...(dictionary.length ? { dictionary } : {}) };
+    const { style } = projectNamingStyle(store.meta(id).namingStyle, after);
+    const naming = namingNotes(before, after, style);
+    return { ...(impact.length ? { impact } : {}), ...(naming.length ? { naming } : {}) };
   }
 
   /**
-   * AI가 만든 컬럼 중 사전에 없는 용어를 사전에 넣는다 (사전이 있을 때만).
-   * 같은 논리명·물리명이 이미 있으면 넣지 않고, 사전 표기와 다른 이름은 넣지 않는다. 넣은 용어 "논리명=물리명"
+   * 표기 기준을 아직 정하지 않았으면, AI가 반영한 뒤의 이름들로 판단해 저장한다
+   * (처음 AI가 snake_case로 만들면 다음 명령부터 snake_case 기준을 따른다). 저장한 기준
    */
-  function addAiTerms(id: string, before: Schema, after: Schema): string[] {
-    const { doc } = store.load(id);
-    const { add } = syncDictionaryForAi(readDictionary(doc), before, after);
-    if (!add.length) return [];
-    let added: { logical: string; physical: string }[] = [];
-    doc.transact(() => {
-      added = addMissingTerms(doc, add);
-    }, 'ai');
-    return added.map((t) => `${t.logical}=${t.physical}`);
+  function rememberNamingStyle(id: string): string | undefined {
+    if (isNameStyle(store.meta(id).namingStyle)) return undefined;
+    const style = detectNamingStyle(store.schema(id));
+    if (!style) return undefined;
+    store.setMeta(id, { namingStyle: style }, 'ai');
+    return style;
   }
 
   const modeOf = (id: string, mode: unknown, source: Source): Mode => {
@@ -141,8 +141,6 @@ export function registerProjectRoutes(
     return 'apply';
   };
 
-  // ── 표준 용어 사전 (MCP가 읽는다. 화면은 문서로 직접 읽고 쓴다) ─────────────
-  app.get<{ Params: { id: string } }>('/api/projects/:id/dictionary', async (req) => ({ dictionary: readDictionary(store.load(req.params.id).doc) }));
 
   // ── 캔버스 메모 (ERD 구조와 따로 저장. SQL·DB에는 영향 없음) ─────────────
   type NoteBody = { text?: string; area?: string | null; color?: string; x?: number; y?: number; width?: number; height?: number; source?: Source };
@@ -313,8 +311,8 @@ export function registerProjectRoutes(
         return { mode, proposalId: proposal.id, messages: result.messages, pendingChanges: summarize(store.proposalChanges(id, proposal)), ...extra };
       }
       const applied = change(id, result.schema, { mode, source, title, messages: result.messages });
-      const dictionaryAdded = source === 'ai' ? addAiTerms(id, base, result.schema) : [];
-      return { ...applied, ...extra, ...(dictionaryAdded.length ? { dictionaryAdded } : {}) };
+      const namingStyleSaved = source === 'ai' ? rememberNamingStyle(id) : undefined;
+      return { ...applied, ...extra, ...(namingStyleSaved ? { namingStyleSaved } : {}) };
     },
   );
 
@@ -418,12 +416,11 @@ export function registerProjectRoutes(
   });
   app.post<{ Params: { id: string; pid: string }; Body: { selected?: string[] } }>('/api/projects/:id/proposals/:pid/apply', async (req) => {
     const { id, pid } = req.params;
-    const before = store.schema(id);
     const fromAi = store.proposals(id).find((p) => p.id === pid)?.source === 'ai';
     const applied = store.applyProposal(id, pid, req.body?.selected);
-    // AI 제안이면 승인한 컬럼 중 사전에 없는 용어를 사전에 넣는다
-    const dictionaryAdded = fromAi ? addAiTerms(id, before, store.schema(id)) : [];
-    return { ok: true, applied: summarize(applied), ...(dictionaryAdded.length ? { dictionaryAdded } : {}) };
+    // AI 제안을 승인하면, 아직 표기 기준이 없을 때 그 이름들로 기준을 정한다
+    if (fromAi) rememberNamingStyle(id);
+    return { ok: true, applied: summarize(applied) };
   });
   app.post<{ Params: { id: string; pid: string } }>('/api/projects/:id/proposals/:pid/reject', async (req) => {
     store.rejectProposal(req.params.id, req.params.pid);

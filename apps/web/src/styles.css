@@ -872,49 +872,8 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .note-toolbar__btn:hover { background: var(--border); }
 .note-toolbar__btn.danger { color: var(--danger); }
 
-/* ── 표준 용어 사전 ─────────────────────────── */
-.column-grid__row input.dict-mismatch { border-color: var(--warning); border-style: dashed; }
-.column-grid__row input.dict-unknown { text-decoration: underline dotted var(--muted); }
-.dict-intro { margin: 0 0 12px; line-height: 1.6; }
-.dict-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.dict-actions .spacer, .dict-check .spacer { flex: 1; }
-.dict-actions label.btn { cursor: pointer; }
-.dict-actions label.btn.disabled { opacity: 0.6; pointer-events: none; }
-.dict-actions select { margin-left: 6px; }
-.dict-pending { margin-bottom: 12px; }
-.dict-pending ul { margin: 6px 0; padding-left: 18px; }
-.dict-pending .btn-row { margin-top: 8px; }
-.dict-check { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
-.dict-check b.warn { color: var(--warning); }
-.dict-tabs { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.dict-search { flex: 1; min-width: 160px; }
-.dict-form { display: grid; grid-template-columns: 1.2fr 1.2fr 0.9fr 0.6fr 2fr auto auto; gap: 6px; margin-bottom: 8px; }
-.dict-form.words { grid-template-columns: 1.2fr 1.2fr 2fr auto auto; }
-.dict-form input { min-width: 0; }
-.dict-table-wrap { max-height: 42vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
-.dict-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.dict-table th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); }
-.dict-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
-.dict-table tbody tr { cursor: pointer; }
-.dict-table tbody tr:hover { background: var(--accent-soft); }
-.dict-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 640px) {
-  .dict-form, .dict-form.words { grid-template-columns: 1fr 1fr; }
 }
-.dict-sources, .dict-pending { display: block; }
-.dict-sources { margin-bottom: 12px; }
-.dict-sources ul { list-style: none; margin: 8px 0; padding: 0; max-height: 200px; overflow: auto; }
-.dict-sources li { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
-.dict-sources li > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dict-draft { display: block; margin-bottom: 12px; }
-.dict-draft .btn-row { margin-top: 8px; }
-.dict-draft__warn { margin-top: 6px; color: var(--warning); }
-.dict-conflicts { list-style: none; margin: 6px 0; padding: 0; max-height: 220px; overflow: auto; border-top: 1px solid var(--border); }
-.dict-conflicts li { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
-.dict-conflicts__term { flex: 0 0 130px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dict-conflicts__variants { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.dict-conflicts__variants .chosen { font-weight: 700; }
-.dict-conflicts__variants span:not(.chosen) { color: var(--muted); }
 
 /* ── DB 반영 전 안전 검사 ───────────────────── */
 .safety-box { margin: 10px 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; }
@@ -930,84 +889,15 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .safety-item.loss { color: var(--warning); }
 .safety-item.unknown { color: var(--muted); }
 .safety-ack { display: flex; gap: 6px; align-items: flex-start; margin: 8px 0; color: var(--text); }
-.dict-case { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
-.dict-case label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
 
-/* ── 표준 용어 사전 (다시 짠 화면) ───────────────── */
-.dict-root { position: relative; min-height: 200px; }
-.dict-root.dragging > :not(.dict-drop-overlay) { opacity: 0.35; }
-.dict-drop-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent-soft) 70%, transparent); color: var(--accent); pointer-events: none; z-index: 2; }
-.dict-lead { margin: 0 0 14px; line-height: 1.6; font-size: 13px; }
-.dict-drop { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 20px; border: 2px dashed var(--border-strong); border-radius: 12px; background: var(--bg); color: var(--text); cursor: pointer; text-align: center; font: inherit; }
-.dict-drop:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
-.dict-drop svg { color: var(--accent); }
-.dict-alt { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
-.dict-alt__card { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
-.dict-alt__card:hover:not(:disabled) { border-color: var(--accent); }
-.dict-alt__card:disabled { opacity: 0.5; cursor: default; }
-.dict-case { display: block; padding: 10px 12px; }
-.dict-case__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.dict-case__preview { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-.dict-case__preview code { padding: 2px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font-size: 12px; }
 .segmented.small button { padding: 3px 10px; font-size: 12px; }
-.dict-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }
-.dict-summary .spacer { flex: 1; }
-.dict-step__head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.dict-step__head h3 { margin: 0; font-size: 15px; }
-.dict-stats { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-.dict-stats > div { display: flex; flex-direction: column; padding: 10px 16px; border: 1px solid var(--border); border-radius: 10px; min-width: 110px; }
-.dict-stats b { font-size: 22px; }
-.dict-stats span { font-size: 12px; color: var(--muted); }
-.dict-stats .warn b { color: var(--warning); }
-.dict-notes { margin: 0 0 12px; padding-left: 18px; font-size: 12px; color: var(--muted); }
-.dict-table.compact { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; }
-.dict-mode { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
-.dict-mode label { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
-.dict-mode label.active { border-color: var(--accent); background: var(--accent-soft); }
-.dict-mode label > span { display: flex; flex-direction: column; gap: 2px; }
-.dict-step .btn-row { margin-top: 12px; }
-.dict-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-.dict-choice { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
-.dict-choice span { font-size: 12px; color: var(--muted); }
-.dict-choice:hover { border-color: var(--accent); }
-.dict-choice.primary { border-color: var(--accent); background: var(--accent-soft); }
-.dict-sources { list-style: none; padding: 0; margin: 0; }
-.dict-kind-help { margin: 0 0 8px; }
-.dict-table tbody tr.editing { background: var(--accent-soft); }
-.dict-empty { padding: 8px 10px; margin: 0; }
-.dict-drop-hint { margin: 8px 0 0; text-align: right; }
 @media (max-width: 720px) {
-  .dict-alt, .dict-choices { grid-template-columns: 1fr; }
 }
 
-/* 표준 용어 자동완성 (편집 창 컬럼 이름) */
-.term-suggest { position: fixed; z-index: 1000; list-style: none; margin: 0; padding: 4px 0; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 8px 24px rgb(15 23 42 / 0.18); max-height: 280px; overflow: auto; font-size: 12px; }
-.term-suggest li { display: grid; grid-template-columns: minmax(90px, auto) 1fr auto; gap: 10px; padding: 5px 10px; cursor: pointer; align-items: center; }
-.term-suggest li.active { background: var(--accent-soft); }
-.term-suggest .term-suggest__hint { display: block; cursor: default; font-size: 11px; border-top: 1px solid var(--border); margin-top: 2px; padding-top: 5px; }
-.dict-style-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; }
-.dict-style-help { margin: 4px 0 0; }
-.dict-offenders { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
-.dict-stats > div b { white-space: nowrap; }
 
-/* 사전 목록·넣기 전 편집: 칸을 바로 고친다 */
-.dict-table.edit td { padding: 2px 4px; }
-.dict-table.edit input:not([type=checkbox]) { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid transparent; background: transparent; padding: 3px 6px; border-radius: 4px; font: inherit; color: inherit; }
-.dict-table.edit input:not([type=checkbox]):hover { border-color: var(--border); }
-.dict-table.edit input:not([type=checkbox]):focus { border-color: var(--accent); background: var(--panel); outline: none; }
-.dict-table.edit input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.dict-table.edit tbody tr { cursor: default; }
-.dict-table.edit tbody tr:hover { background: transparent; }
-.dict-table th.narrow, .dict-table td.narrow { width: 28px; text-align: center; }
-.dict-table td.uses { white-space: nowrap; }
-.dict-table td.uses select { font-size: 12px; max-width: 220px; }
-.dict-table tr.excluded { opacity: 0.45; }
-.dict-table tr.bad-style td, .dict-table tr.bad-dup td { background: var(--danger-soft); }
-.dict-table tr.no-logical input::placeholder { color: var(--warning); }
-.dict-table-wrap.tall { max-height: 46vh; }
-.dict-more { margin: 8px; }
 .lint-group__bulk { margin: 0 0 6px 10px; }
-.dict-check.warn-box { border-color: var(--warning); background: var(--warning-soft); }
-.dict-form.with-kind { grid-template-columns: 80px 1.2fr 1.2fr 0.9fr 0.6fr 2fr auto; }
-.dict-kind { font-size: 12px; padding: 2px 4px; }
-.dict-table.edit input:disabled { opacity: 0.4; }
+
+/* 이름 표기 기준: 헤더 배지와 기준과 다른 이름 표시 */
+.naming-chip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.naming-chip.auto { color: var(--muted); }
+.column-grid__row input.naming-off, .form-grid input.naming-off { border-color: var(--warning); border-style: dashed; }

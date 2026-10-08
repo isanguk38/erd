@@ -10,6 +10,7 @@
 
 import * as Y from 'yjs';
 import type { AiReview } from './aiReview';
+import { isNameStyle, type NameStyle } from './naming';
 import type { Area, CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
@@ -227,6 +228,8 @@ export interface ProjectMeta {
   lintIgnored?: string[];
   /** MCP로 연결한 AI의 설계 검토 결과 (aiReview.ts) */
   aiReview?: AiReview | null;
+  /** 이름 표기 기준 (naming.ts). 없으면 지금 이름들로 판단 */
+  namingStyle?: NameStyle | null;
 }
 
 export function readMeta(doc: Y.Doc): ProjectMeta {
@@ -241,6 +244,7 @@ export function readMeta(doc: Y.Doc): ProjectMeta {
     dbConnectionId: (meta.get('dbConnectionId') as string) ?? null,
     lintIgnored: Array.isArray(meta.get('lintIgnored')) ? [...(meta.get('lintIgnored') as string[])] : [],
     aiReview: (meta.get('aiReview') as AiReview | undefined) ?? null,
+    namingStyle: isNameStyle(meta.get('namingStyle')) ? (meta.get('namingStyle') as NameStyle) : null,
   };
 }
 

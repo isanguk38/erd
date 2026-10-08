@@ -1,23 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import * as Y from 'yjs';
 import {
-  addMissingTerms,
   applyCommands,
-  checkTableAgainstDictionary,
+  detectNamingStyle,
   diffIncoming,
+  diffSchemas,
   emptySchema,
   generateStatements,
-  diffSchemas,
   getDialect,
   lintSchema,
-  readDictionary,
-  setDictEntry,
-  syncDictionaryForAi,
+  namingIssues,
+  namingNotes,
+  projectNamingStyle,
+  toStyle,
   updateTable,
-  writeDictionary,
-  type Dictionary,
 } from '../src';
-import { dictionaryWorkbook, parseDictionaryWorkbook } from '../src/export/dictionaryExcel';
 
 describe('DB comment = 논리명, 설명 = ERD 전용', () => {
   const { schema } = applyCommands(emptySchema(), [
@@ -45,22 +41,14 @@ describe('DB comment = 논리명, 설명 = ERD 전용', () => {
     db.tables[0].comment = '';
     db.tables[0].columns[0].comment = '';
     db.tables[0].columns[0].logicalName = '회원 번호';
-    const diff = diffIncoming(schema, db, getDialect('mysql'));
-    const change = diff.changes.find((c) => c.kind === 'alterColumn');
+    const change = diffIncoming(schema, db, getDialect('mysql')).changes.find((c) => c.kind === 'alterColumn');
     expect(change && change.kind === 'alterColumn' && change.after.comment).toBe('내부 일련번호, 외부 노출 금지');
     expect(change && change.kind === 'alterColumn' && change.after.logicalName).toBe('회원 번호');
   });
 });
 
-describe('테이블 용어 · 같은 이름 테이블 막기', () => {
-  const dict: Dictionary = {
-    terms: [
-      { kind: 'table', logical: '회원', physical: 'member' },
-      { logical: '회원번호', physical: 'member_no', type: 'VARCHAR', length: '20' },
-    ],
-  };
-
-  it('같은 이름·같은 논리명의 테이블은 만들거나 바꿀 수 없다', () => {
+describe('같은 이름·같은 논리명 테이블 막기', () => {
+  it('만들거나 바꿀 때 막고, 원래 겹친 것은 설계 검사가 알린다', () => {
     const { schema } = applyCommands(emptySchema(), [
       { op: 'createTable', name: 'member', logicalName: '회원' },
       { op: 'createTable', name: 'orders', logicalName: '주문' },
@@ -70,50 +58,47 @@ describe('테이블 용어 · 같은 이름 테이블 막기', () => {
     expect(() => updateTable(schema, orders.id, { name: 'MEMBER' })).toThrow(/이미 있습니다/);
     expect(() => updateTable(schema, orders.id, { logicalName: '회원' })).toThrow(/이미 member 테이블/);
     updateTable(schema, orders.id, { name: 'orders', logicalName: '주문' }); // 그대로는 괜찮다
+    schema.tables[1].logicalName = '회원'; // (예전에 겹쳐 들어간 경우)
+    expect(lintSchema(schema, 'mysql').filter((i) => i.rule === 'duplicate-table-logical').map((i) => i.tableName)).toEqual(['orders']);
+  });
+});
+
+describe('이름 표기 기준', () => {
+  const { schema } = applyCommands(emptySchema(), [
+    { op: 'createTable', name: 'member', columns: [{ name: 'member_id', type: 'BIGINT', primaryKey: true }, { name: 'nick_name', type: 'VARCHAR(20)' }, { name: 'memberAge', type: 'INT' }] },
+    { op: 'createTable', name: 'OrderItem', columns: [{ name: 'order_item_id', type: 'BIGINT', primaryKey: true }, { name: '비고', type: 'TEXT' }] },
+  ]);
+
+  it('표기 바꾸기·판단 (한 단어는 snake·camel 둘 다 맞음, 많이 맞는 쪽)', () => {
+    expect(toStyle('memberAge', 'snake')).toBe('member_age');
+    expect(toStyle('MEMBER_AGE', 'camel')).toBe('memberAge');
+    expect(toStyle('member_age', 'SNAKE')).toBe('MEMBER_AGE');
+    expect(detectNamingStyle(schema)).toBe('snake');
+    expect(detectNamingStyle(emptySchema())).toBeNull();
+    expect(projectNamingStyle('camel', schema)).toEqual({ style: 'camel', auto: false });
+    expect(projectNamingStyle(null, schema)).toEqual({ style: 'snake', auto: true });
   });
 
-  it('테이블 검사: 사전과 다른 물리명·사전에 없음·다른 표기·같은 논리명', () => {
-    const { schema } = applyCommands(emptySchema(), [
-      { op: 'createTable', name: 'tb_member', logicalName: '회원', columns: [{ name: 'member_no', logicalName: '회원번호', type: 'VARCHAR(20)', primaryKey: true }] },
-      { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_no', logicalName: '주문번호', type: 'BIGINT', primaryKey: true }] },
-      { op: 'createTable', name: 'OrderItem', logicalName: '주문상품', columns: [{ name: 'item_no', logicalName: '상품번호', type: 'BIGINT', primaryKey: true }] },
+  it('기준과 다른 테이블·컬럼 (바꿀 이름이 없으면 고치기 없이)', () => {
+    expect(namingIssues(schema, 'snake').map((i) => [i.column ?? i.table, i.suggestion])).toEqual([
+      ['memberAge', 'member_age'],
+      ['OrderItem', 'order_item'],
+      ['비고', undefined],
     ]);
-    expect(checkTableAgainstDictionary(dict, schema.tables[0])).toEqual({ status: 'mismatch', physical: 'member' });
-    const issues = lintSchema(schema, 'mysql', { dictionary: dict }).filter((i) => !i.columnId && i.rule.startsWith('dict-'));
-    expect(issues.map((i) => [i.rule, i.tableName])).toEqual(
-      expect.arrayContaining([['dict-mismatch', 'tb_member'], ['dict-unknown', 'orders'], ['dict-style', 'OrderItem']]),
-    );
-    expect(issues.find((i) => i.tableName === 'orders')?.fix).toEqual({ kind: 'addTerm', term: { kind: 'table', logical: '주문', physical: 'orders' } });
-    expect(issues.find((i) => i.tableName === 'OrderItem')?.fix).toMatchObject({ kind: 'patchTable', patch: { name: 'order_item' } });
   });
 
-  it('사전: 테이블·컬럼은 구분해서 겹침을 보고, 표기는 함께 맞춘다. 테이블 용어엔 타입이 없다', () => {
-    const doc = new Y.Doc();
-    writeDictionary(doc, { terms: dict.terms });
-    setDictEntry(doc, { logical: '회원', physical: 'member' }); // 같은 이름의 컬럼 용어는 따로
-    expect(() => setDictEntry(doc, { kind: 'table', logical: '회원정보', physical: 'member' })).toThrow(/테이블 물리명 member/);
-    expect(() => setDictEntry(doc, { kind: 'table', logical: '회원', physical: 'member_info' })).toThrow(/테이블 논리명 "회원"/);
-    expect(() => setDictEntry(doc, { kind: 'table', logical: '주문', physical: 'Orders' })).toThrow(/snake_case/);
-    setDictEntry(doc, { kind: 'table', logical: '주문', physical: 'orders', type: 'BIGINT' });
-    const d = readDictionary(doc)!;
-    expect(d.terms.find((t) => t.logical === '주문')).toEqual({ kind: 'table', logical: '주문', physical: 'orders' });
-    expect(d.terms.filter((t) => t.physical === 'member').length).toBe(2);
+  it('설계 검사: 저장한 기준(없으면 판단한 기준)으로, 고치기 버튼 포함', () => {
+    const auto = lintSchema(schema, 'mysql').filter((i) => i.rule === 'naming-mixed');
+    expect(auto.map((i) => i.message)).toEqual(expect.arrayContaining([expect.stringContaining('이 프로젝트는 snake_case 기준입니다 — member_age')]));
+    expect(auto.find((i) => i.tableName === 'OrderItem' && !i.columnId)?.fix).toMatchObject({ kind: 'patchTable', patch: { name: 'order_item' } });
+    const camel = lintSchema(schema, 'mysql', { namingStyle: 'camel' }).filter((i) => i.rule === 'naming-mixed');
+    expect(camel.find((i) => i.columnName === 'member_id')?.fix).toMatchObject({ kind: 'patchColumn', patch: { name: 'memberId' } });
   });
 
-  it('AI: 새 테이블도 사전에 자동으로 (같은 것은 한 번만)', () => {
-    const { schema } = applyCommands(emptySchema(), [
-      { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_no', logicalName: '주문번호', type: 'BIGINT', primaryKey: true }] },
-      { op: 'createTable', name: 'member', logicalName: '회원' },
-    ]);
-    const r = syncDictionaryForAi(dict, emptySchema(), schema);
-    expect(r.add.filter((t) => t.kind === 'table')).toEqual([{ kind: 'table', logical: '주문', physical: 'orders' }]);
-    const doc = new Y.Doc();
-    writeDictionary(doc, { terms: dict.terms });
-    expect(addMissingTerms(doc, [...r.add, ...r.add]).length).toBe(2);
-  });
-
-  it('엑셀: 구분 칸으로 테이블 용어를 읽고 쓴다', async () => {
-    const parsed = await parseDictionaryWorkbook(await dictionaryWorkbook(dict));
-    expect(parsed.terms).toEqual(dict.terms);
+  it('AI 편집 결과: 이번에 만들거나 바꾼 이름만 알린다', () => {
+    const { schema: after } = applyCommands(schema, [{ op: 'addColumn', table: 'member', column: { name: 'joinDate', type: 'DATE' } }]);
+    const notes = namingNotes(schema, after, 'snake');
+    expect(notes).toEqual(['member.joinDate: 이 프로젝트는 snake_case 기준입니다 — join_date(으)로 바꾸세요']);
+    expect(namingNotes(schema, after, null)).toEqual([]);
   });
 });
