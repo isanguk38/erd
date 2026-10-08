@@ -67,6 +67,11 @@ export function readDictionary(doc: Y.Doc): Dictionary | null {
   return { terms, words, case: ((root.get('case') as DictCase) ?? 'asis'), updatedAt: (root.get('updatedAt') as string | undefined) ?? undefined };
 }
 
+/** 물리명 표기 설정 (사전이 비어 있어도 프로젝트에 남는다) */
+export function readDictCase(doc: Y.Doc): DictCase {
+  return (dictMap(doc).get('case') as DictCase | undefined) ?? 'asis';
+}
+
 const cleanTerm = (t: DictTerm): DictTerm | null => {
   const logical = t.logical?.trim();
   const physical = t.physical?.trim();

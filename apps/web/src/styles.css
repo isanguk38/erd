@@ -930,3 +930,5 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .safety-item.loss { color: var(--warning); }
 .safety-item.unknown { color: var(--muted); }
 .safety-ack { display: flex; gap: 6px; align-items: flex-start; margin: 8px 0; color: var(--text); }
+.dict-case { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+.dict-case label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }

@@ -40,6 +40,7 @@ type Entry = { logical: string; physical: string; type?: string; length?: string
  */
 export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void; onOpenLint: () => void }) {
   const dictionary = useStore((s) => s.dictionary);
+  const dictCase = useStore((s) => s.dictionary?.case ?? s.dictCase);
   const schema = useStore((s) => s.schema);
   const readOnly = useStore((s) => s.role === 'viewer');
   const { editDictionary, edit, showNotice } = useStore.getState();
@@ -209,14 +210,6 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
         <button className="btn" onClick={() => void download(true)} title="표준용어·표준단어 시트와 예시가 든 빈 양식">양식 받기</button>
         {dictionary && <button className="btn" onClick={() => void download(false)}>지금 사전 엑셀로 받기</button>}
         <span className="spacer" />
-        {dictionary && (
-          <label className="row-gap small">
-            물리명 채우기
-            <select value={dictionary.case} disabled={readOnly} onChange={(e) => editDictionary((d) => setDictCase(d, e.target.value as DictCase))}>
-              {CASES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-          </label>
-        )}
         {dictionary && !readOnly && (
           <button className="btn btn-ghost btn-danger-text" onClick={() => confirm('표준 용어 사전을 모두 지울까요? (ERD는 바뀌지 않습니다)') && editDictionary((d) => clearDictionary(d))}>사전 비우기</button>
         )}
@@ -281,6 +274,17 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
           </div>
         </div>
       )}
+
+      {/* 물리명 표기: 사전이 없어도 미리 정해 둘 수 있다 */}
+      <div className="dict-case">
+        <label>
+          물리명 표기
+          <select value={dictCase} disabled={readOnly} onChange={(e) => editDictionary((d) => setDictCase(d, e.target.value as DictCase))}>
+            {CASES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </label>
+        <span className="muted small">사전의 물리명(예: MBR_NO)과 단어 조합을 이 프로젝트에서 어떤 표기로 채울지 고릅니다. 사전 엑셀은 회사 표준 그대로 두면 됩니다.</span>
+      </div>
 
       {pending && (
         <div className="baseline-info dict-pending">

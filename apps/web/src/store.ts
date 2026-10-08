@@ -10,6 +10,8 @@ import {
   emptySchema,
   readComments,
   readDictionary,
+  readDictCase,
+  type DictCase,
   readMeta,
   readNotes,
   addNote as addNoteToDoc,
@@ -111,6 +113,8 @@ interface State extends LocalPrefs {
   removeNotes: (ids: string[]) => void;
   /** 표준 용어 사전 (없으면 null) */
   dictionary: Dictionary | null;
+  /** 물리명 표기 (사전이 없어도 정해 둘 수 있다) */
+  dictCase: DictCase;
   /** 사전 고치기 (되돌리기 대상 아님) */
   editDictionary: (fn: (d: Y.Doc) => void) => boolean;
   /** 화면 아래 잠깐 뜨는 안내 (되돌릴 수 있는 작업 등) */
@@ -235,6 +239,7 @@ export const useStore = create<State>()(
         comments: [],
         notes: [],
         dictionary: null,
+        dictCase: 'asis',
         remoteChanges: {},
         notice: null,
         showNotice: (notice) => set({ notice }),
@@ -300,11 +305,11 @@ export const useStore = create<State>()(
           provider.on('status', ({ status }: { status: SyncStatus }) => set({ status }));
           provider.on('sync', (synced: boolean) => {
             set({ synced });
-            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc), notes: readNotes(doc), dictionary: readDictionary(doc) });
+            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc), notes: readNotes(doc), dictionary: readDictionary(doc), dictCase: readDictCase(doc) });
           });
           // 사전은 클 수 있어 사전이 바뀔 때만 다시 읽는다
           const dictDoc = doc;
-          doc.getMap('dictionary').observeDeep(() => set({ dictionary: readDictionary(dictDoc) }));
+          doc.getMap('dictionary').observeDeep(() => set({ dictionary: readDictionary(dictDoc), dictCase: readDictCase(dictDoc) }));
           provider.awareness.on('change', () => {
             const me = provider?.awareness.clientID;
             const peers: Peer[] = [];
@@ -314,7 +319,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], notes: [], dictionary: null, remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], notes: [], dictionary: null, dictCase: 'asis', remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
           publishPresence();
           authApi
             .project(projectId)
@@ -402,7 +407,7 @@ export const useStore = create<State>()(
             alert(e instanceof Error ? e.message : String(e));
             return false;
           }
-          set({ dictionary: readDictionary(d) });
+          set({ dictionary: readDictionary(d), dictCase: readDictCase(d) });
           return true;
         },
 
