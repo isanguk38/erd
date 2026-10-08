@@ -22,6 +22,7 @@ import { RelationEdge } from './RelationEdge';
 import { ConnectionLine } from './ConnectionLine';
 import { buildAreaView, buildCompareGraph, buildEdges, buildNodes, FIT_MAX_ZOOM } from '../lib/graph';
 import { GhostNode, type GhostNodeType } from './GhostNode';
+import { arrangeTables } from '../lib/arrange';
 import type { TableNodeType } from './TableNode';
 import { matchIds } from '../lib/search';
 import { addTableWithTemplate } from '../lib/templates';
@@ -48,7 +49,7 @@ const edgeTypes = { relation: RelationEdge };
 const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id) => b.includes(id));
 
 /** fitRequest가 바뀌면 전체가 보이게 화면을 맞춘다 (가져오기 직후 등) */
-export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
+export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: number; relayoutRequest?: number }) {
   const schema = useStore((s) => s.schema);
   const viewMode = useStore((s) => s.viewMode);
   const selection = useStore((s) => s.selection);
@@ -90,7 +91,7 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
   const dialectId = useStore((s) => s.meta.dialect);
   const synced = useStore((s) => s.synced);
   const { edit, select, selectTables, setCursor } = useStore.getState();
-  const { screenToFlowPosition, fitView, getViewport, setViewport } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setViewport, getNodes } = useReactFlow();
   // 편집 창이 열리며 캔버스가 좁아질 때, 고른 테이블·관계가 편집 창 뒤로 가려지면 보일 만큼만 화면을 옮긴다
   const inspectorOpen = useStore((s) => s.inspectorOpen);
   const selectedKey = selection ? `${selection.type}:${selection.id}` : '';
@@ -149,6 +150,17 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
     fitted.current = true;
     fitView({ padding: 0.15, maxZoom: FIT_MAX_ZOOM });
   }, [synced, nodesInitialized, fitView]);
+  // 다시 정렬 요청(빈 ERD로 DB를 가져온 직후): 테이블을 다 그려 크기를 잰 뒤 실제 크기로 정렬해 겹치지 않게
+  const relayoutPending = useRef(false);
+  useEffect(() => {
+    if (relayoutRequest) relayoutPending.current = true;
+  }, [relayoutRequest]);
+  useEffect(() => {
+    if (!relayoutPending.current || !nodesInitialized) return;
+    relayoutPending.current = false;
+    void arrangeTables(getNodes()).then(() => setTimeout(() => fitView({ padding: 0.15, duration: 300, maxZoom: FIT_MAX_ZOOM }), 80));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relayoutRequest, nodesInitialized]);
   const lastCursor = useRef(0);
   const pointerDown = useRef(false);
   const pendingIds = useRef<string[] | null>(null); // 마우스를 놓을 때 스토어에 알릴 선택
@@ -158,12 +170,20 @@ export function Canvas({ fitRequest = 0 }: { fitRequest?: number }) {
 
   // 주제영역 탭: 그 영역 테이블(영역 위치) + 영역 밖과 이어진 테이블은 흐린 참조 카드 (버전 비교 중에는 전체)
   const activeArea = useStore((s) => s.activeArea);
-  const areaView = useMemo(() => (activeArea && !compare ? buildAreaView(schema, activeArea) : null), [activeArea, compare, schema]);
+  const [nodes, setNodes] = useState<CanvasNode[]>(() => buildNodes(schema, viewMode, selectedIds));
+  // 화면에서 잰 테이블 크기 (참조 카드 자리·자동 정렬에 씀). 크기가 실제로 바뀔 때만 새 값
+  const sizeKey = useMemo(
+    () => nodes.filter((n) => n.type === 'table' && n.measured?.width).map((n) => `${n.id}:${Math.round(n.measured!.width!)}:${Math.round(n.measured!.height!)}`).join('|'),
+    [nodes],
+  );
+  const measured = useMemo(
+    () => new Map(sizeKey ? sizeKey.split('|').map((s) => { const [id, w, h] = s.split(':'); return [id, { width: Number(w), height: Number(h) }] as const; }) : []),
+    [sizeKey],
+  );
+  const areaView = useMemo(() => (activeArea && !compare ? buildAreaView(schema, activeArea, measured) : null), [activeArea, compare, schema, measured]);
   const viewSchema = areaView?.schema ?? schema;
   // 탭에 놓았을 때처럼 저장하지 않고 원래 자리로 되돌릴 때 다시 그린다
   const [redraw, setRedraw] = useState(0);
-
-  const [nodes, setNodes] = useState<CanvasNode[]>(() => buildNodes(schema, viewMode, selectedIds));
   const compareGraph = useMemo(
     () => (compare ? buildCompareGraph(compare.schema, schema, getDialect((dialectId || 'mysql') as DialectId), viewMode) : null),
     [compare, schema, dialectId, viewMode],

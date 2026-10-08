@@ -131,6 +131,7 @@ export function App() {
 function Editor({ projectId }: { projectId: string }) {
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
+  const [relayoutRequest, setRelayoutRequest] = useState(0);
   const synced = useStore((s) => s.synced);
   const status = useStore((s) => s.status);
   const comparing = useStore((s) => Boolean(s.compare));
@@ -238,7 +239,7 @@ function Editor({ projectId }: { projectId: string }) {
                 <button className="btn" onClick={() => setDialog('help')}>사용 방법 보기</button>
               </div>
             )}
-            <Canvas fitRequest={fitRequest} />
+            <Canvas fitRequest={fitRequest} relayoutRequest={relayoutRequest} />
           </div>
           </div>
           {comparing ? (
@@ -251,7 +252,7 @@ function Editor({ projectId }: { projectId: string }) {
         </main>
         {dialog === 'sql' && <SqlDialog onClose={close} />}
         {dialog === 'versions' && <VersionsDialog onClose={close} />}
-        {dialog === 'dbPull' && <DbPullDialog onClose={close} onDone={() => setFitRequest((n) => n + 1)} />}
+        {dialog === 'dbPull' && <DbPullDialog onClose={close} onDone={(o) => (o?.relayout ? setRelayoutRequest((n) => n + 1) : setFitRequest((n) => n + 1))} />}
         {dialog === 'dbPush' && <DbPushDialog onClose={close} />}
         {dialog === 'definition' && <DefinitionDialog onClose={close} />}
         {dialog === 'ai' && <AiDialog onClose={close} onOpenProposals={() => setDialog('proposals')} />}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addToArea, areaSchema, createColumn, dialectList, getDialect, setAreaPosition, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
+import { addToArea, areaSchema, createColumn, dialectList, getDialect, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
@@ -13,9 +13,9 @@ const DESKTOP_ONLY_TITLE = 'DB 가져오기·내보내기는 설치형 앱에서
 import { sampleSchema } from '../lib/sample';
 import { Dropdown, Icon } from './ui';
 import { authApi } from '../lib/api';
-import { loadModule } from '../lib/appVersion';
 import { DesktopUpdateButton } from './DesktopUpdate';
 import { FIT_MAX_ZOOM, freeSpot } from '../lib/graph';
+import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
@@ -119,7 +119,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const readOnlyTitle = comparing ? '버전 비교 중에는 편집할 수 없습니다 (비교 끝내기 후 편집)' : '보기 권한에서는 ERD를 바꿀 수 없습니다';
   const dbAvailable = useDbAvailable();
   const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const { status: dbStatus, error: dbError } = useDbStatus();
   const dbChanged = (dbStatus?.db ?? 0) + (dbStatus?.conflict ?? 0);
   const erdPending = dbStatus?.erd ?? 0;
@@ -142,18 +142,9 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     const { activeArea, schema } = useStore.getState();
     return activeArea ? schema.areas?.find((a) => a.id === activeArea) ?? null : null;
   };
+  // 자동 정렬: 화면에서 잰 테이블 크기로 (논리명·긴 인덱스가 있어도 겹치지 않게). 영역 탭이면 그 영역만
   const arrange = async () => {
-    const { autoLayout } = await loadModule(() => import('@erd/core/layout'));
-    const area = currentArea();
-    // 영역 탭이면 그 영역 테이블만 정렬하고 영역 위치로 저장한다 (전체 배치는 그대로)
-    const positions = await autoLayout(area ? areaSchema(useStore.getState().schema, area.id).schema : useStore.getState().schema);
-    edit((d) => {
-      if (area) {
-        for (const [id, p] of positions) setAreaPosition(d, area.id, id, p);
-        return;
-      }
-      for (const t of d.tables) t.position = positions.get(t.id) ?? t.position;
-    });
+    await arrangeTables(getNodes());
     setTimeout(() => fitView({ padding: 0.15, duration: 300, maxZoom: FIT_MAX_ZOOM }), 50);
   };
 

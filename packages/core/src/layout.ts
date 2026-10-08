@@ -4,6 +4,8 @@ import { estimateTableSize } from './placement';
 
 export interface LayoutOptions {
   direction?: 'RIGHT' | 'DOWN';
+  /** 화면에서 실제로 잰 테이블 크기 (있으면 어림값 대신 써서 겹치지 않게) */
+  sizes?: Map<string, { width: number; height: number }>;
 }
 
 /**
@@ -23,7 +25,7 @@ export async function autoLayout(schema: Schema, options: LayoutOptions = {}): P
       'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
       'elk.separateConnectedComponents': 'true',
     },
-    children: schema.tables.map((t) => ({ id: t.id, ...estimateTableSize(t) })),
+    children: schema.tables.map((t) => ({ id: t.id, ...(options.sizes?.get(t.id) ?? estimateTableSize(t)) })),
     edges: schema.relations
       .filter((r) => r.fromTableId !== r.toTableId)
       .map((r) => ({ id: r.id, sources: [r.toTableId], targets: [r.fromTableId] })),

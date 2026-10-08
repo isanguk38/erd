@@ -16,7 +16,7 @@ const PULL_GROUPS: Record<'create' | 'alter' | 'drop', GroupLabel> = {
 };
 
 /** DB 구조를 읽어 ERD를 만들거나, 바뀐 부분만 ERD에 반영한다. */
-export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone: (options?: { relayout?: boolean }) => void }) {
   const current = useStore((s) => s.schema);
   const projectId = useStore((s) => s.projectId)!;
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -79,7 +79,8 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
       // 지금 DB 상태를 기준 시점으로 저장 (다음 비교에서 누가 바꿨는지 구분)
       const erd = useStore.getState().schema;
       await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(result.schema, erd, { links, previous: baseline?.schema }));
-      onDone();
+      // 빈 ERD로 가져왔으면 화면에 그린 뒤 실제 크기로 한 번 더 정렬한다 (어림 크기로는 긴 논리명·인덱스가 겹칠 수 있음)
+      onDone({ relayout: isEmpty });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

@@ -1,4 +1,4 @@
-import { diffSchemas, foreignKeyColumnIds, type Dialect, type Schema, type Table } from '@erd/core';
+import { diffSchemas, estimateTableSize, foreignKeyColumnIds, type Dialect, type Schema, type Table } from '@erd/core';
 import type { Peer, ViewMode } from '../store';
 import type { TableNodeType } from '../components/TableNode';
 import type { RelationEdgeType } from '../components/RelationEdge';
@@ -176,13 +176,21 @@ export interface GhostTable {
  * 영역 탭에서 그릴 것: 영역 테이블(영역 위치) + 영역 밖과 관계가 있으면 그 테이블을 참조 카드로.
  * 참조 카드는 이어진 영역 테이블 옆 빈 곳에 놓는다.
  */
-export function buildAreaView(schema: Schema, areaId: string): { schema: Schema; ghosts: GhostTable[]; ghostRelationIds: Set<string> } | null {
+export function buildAreaView(
+  schema: Schema,
+  areaId: string,
+  /** 화면에서 잰 테이블 크기 (없으면 어림값). 큰 테이블 위에 참조 카드가 겹치지 않게 */
+  measured?: ReadonlyMap<string, { width: number; height: number }>,
+): { schema: Schema; ghosts: GhostTable[]; ghostRelationIds: Set<string> } | null {
   const area = schema.areas?.find((a) => a.id === areaId);
   if (!area) return null;
   const inside = new Set(area.tableIds);
   const tables = schema.tables.filter((t) => inside.has(t.id)).map((t) => ({ ...t, position: area.positions?.[t.id] ?? t.position }));
   const byId = new Map(tables.map((t) => [t.id, t]));
-  const size = (t: Table) => ({ w: 260, h: 56 + 22 * t.columns.length });
+  const size = (t: Table) => {
+    const m = measured?.get(t.id) ?? estimateTableSize(t);
+    return { w: m.width, h: m.height };
+  };
   const boxes = tables.map((t) => ({ x: t.position.x, y: t.position.y, ...size(t) }));
   const overlaps = (x: number, y: number, w: number, h: number) => boxes.some((b) => x < b.x + b.w + 30 && b.x < x + w + 30 && y < b.y + b.h + 20 && b.y < y + h + 20);
 

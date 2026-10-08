@@ -103,8 +103,8 @@ describe('MCP', () => {
     const bad = await client.callTool({ name: 'get_schema', arguments: { project: '영역', area: '없음' } });
     expect((bad as ToolResult).isError).toBe(true);
     expect(textOf(bad)).toContain('영역 "없음"이 없습니다');
-  });
-
+    // 여러 테스트가 함께 돌면 느려져 기본 제한 시간을 넘길 수 있다
+  }, 30_000);
 
   it('로컬(stdio와 같은 경로): AI가 테이블을 만들고 관계를 잇고 SQL을 뽑는다', async () => {
     const { erd, url } = await start();

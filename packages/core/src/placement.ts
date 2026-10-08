@@ -1,15 +1,23 @@
-import type { Schema, Table } from './model';
+import { indexLabel, type Schema, type Table } from './model';
 
 const HEADER = 34;
 const ROW = 22;
 const CHAR = 7.2;
 const GAP = 60;
 
-/** 화면에 그려질 테이블 크기를 대략 계산한다 (서버/MCP에서도 배치할 수 있도록 DOM 없이). */
+/** 글자 폭: 한글 등 넓은 글자는 2칸으로 센다 */
+const textWidth = (s: string) => [...s].reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? 2 : 1), 0);
+
+/**
+ * 화면에 그려질 테이블 크기를 대략 계산한다 (서버/MCP에서도 배치할 수 있도록 DOM 없이).
+ * 가장 넓게 보이는 '둘 다' 보기 기준: 컬럼 줄은 물리명 + 논리명 + 타입, 인덱스 줄은 인덱스 정의(식·WHERE 포함).
+ * 화면에서는 실제로 잰 크기를 쓰고(autoLayout의 sizes), 이 값은 잴 수 없을 때만 쓴다.
+ */
 export function estimateTableSize(table: Table): { width: number; height: number } {
   const longest = Math.max(
-    table.name.length + (table.logicalName.length * 2) + 4,
-    ...table.columns.map((c) => c.name.length + c.type.length + c.length.length + 14),
+    textWidth(table.name) + textWidth(table.logicalName) + 4,
+    ...table.columns.map((c) => textWidth(c.name) + (c.logicalName ? textWidth(c.logicalName) + 2 : 0) + textWidth(c.type) + (c.length ? c.length.length + 2 : 0) + 14),
+    ...table.indexes.map((i) => textWidth(indexLabel(table, i)) + 6),
   );
   const width = Math.max(240, Math.round(longest * CHAR) + 40);
   const indexRows = table.indexes.length ? table.indexes.length + 0.6 : 0;
