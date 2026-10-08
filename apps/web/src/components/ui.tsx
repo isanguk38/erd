@@ -25,6 +25,7 @@ const PATHS: Record<string, string> = {
   external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
   area: 'M3 6h7l2 2h9v11H3z',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
+  list: 'M4 6h16M4 12h16M4 18h10',
 };
 
 export function Icon({ name, size = 16 }: { name: keyof typeof PATHS | string; size?: number }) {
