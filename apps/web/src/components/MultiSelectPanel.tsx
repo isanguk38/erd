@@ -3,7 +3,7 @@ import { addToArea, createArea, moveToArea, removeFromArea, removeTable, updateT
 import { selectAreas, useStore } from '../store';
 import { copySelection } from '../lib/tableClipboard';
 import { TemplateApplyMenu } from './TemplatePanels';
-import { TABLE_COLORS } from './Inspector';
+import { ColorPicker } from './ColorPicker';
 import { Dropdown } from './ui';
 
 /** 테이블을 여러 개 골랐을 때 오른쪽 패널: 색상 일괄 변경, 템플릿, 복사, 삭제 */
@@ -35,18 +35,7 @@ export function MultiSelectPanel() {
       </div>
       <div className="multi-section">
         <h4>색상 한 번에 바꾸기</h4>
-        <div className="colors">
-          {TABLE_COLORS.map((c) => (
-            <button
-              key={c || 'default'}
-              className={`color-chip${common === c ? ' active' : ''}`}
-              style={{ background: c || 'var(--accent)' }}
-              title={c ? `${c}로 한 번에 바꾸기` : '기본 색으로'}
-              disabled={readOnly}
-              onClick={() => edit((d) => ids.forEach((id) => updateTable(d, id, { color: c || undefined })))}
-            />
-          ))}
-        </div>
+        <ColorPicker allowDefault disabled={readOnly} value={common === null ? null : common || undefined} onChange={(color) => edit((d) => ids.forEach((id) => updateTable(d, id, { color })))} />
       </div>
       <div className="comments-section multi-comment">
         <h4>댓글 한 번에 달기</h4>

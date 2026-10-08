@@ -33,12 +33,12 @@ import {
 } from '@erd/core';
 import { selectAreas, useStore } from '../store';
 import { Dropdown } from './ui';
+import { ColorPicker } from './ColorPicker';
 import { TemplateApplyMenu } from './TemplatePanels';
 import { TableComments } from './Comments';
 import { useDialect } from '../lib/hooks';
 
 const ACTIONS: ReferentialAction[] = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
-export const TABLE_COLORS = ['', '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#9333ea', '#64748b'];
 
 export function Inspector() {
   const selection = useStore((s) => s.selection);
@@ -177,17 +177,7 @@ function TableEditor({ table }: { table: Table }) {
         <label>영역</label>
         <TableAreas tableId={table.id} />
         <label>색상</label>
-        <div className="colors">
-          {TABLE_COLORS.map((c) => (
-            <button
-              key={c || 'default'}
-              className={`color-chip${(table.color ?? '') === c ? ' active' : ''}`}
-              style={{ background: c || 'var(--accent)' }}
-              title={c ? c : '기본'}
-              onClick={() => setTable({ color: c || undefined })}
-            />
-          ))}
-        </div>
+        <ColorPicker allowDefault value={table.color} onChange={(color) => setTable({ color })} />
       </div>
 
       <div className="inspector__section">

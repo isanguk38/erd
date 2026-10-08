@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AREA_COLORS, createArea, removeArea, updateArea } from '@erd/core';
+import { createArea, removeArea, updateArea } from '@erd/core';
+import { ColorPicker } from './ColorPicker';
 import { selectAreas, useStore } from '../store';
 import { Icon } from './ui';
 
@@ -214,9 +215,7 @@ export function AreaTabs() {
           <div className="area-menu" ref={menuRef} role="menu" style={{ left: menu.x, top: menu.y }}>
             <button role="menuitem" onClick={() => { setMenu(null); setRenaming(a.id); }}>이름 바꾸기</button>
             <div className="area-menu__colors" aria-label="색">
-              {AREA_COLORS.map((c) => (
-                <button key={c} className={`color-chip${a.color === c ? ' active' : ''}`} style={{ background: c }} title={c} onClick={() => edit((d) => void updateArea(d, a.id, { color: c }))} />
-              ))}
+              <ColorPicker value={a.color} onChange={(color) => color && edit((d) => void updateArea(d, a.id, { color }))} />
             </div>
             <button
               role="menuitem"

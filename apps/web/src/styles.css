@@ -236,7 +236,7 @@ body.area-picking .area-tabs__arrow { border-color: var(--accent); color: var(--
 .table-node.hl-changed { box-shadow: 0 0 0 3px var(--alter); }
 .table-node.hl-removed { box-shadow: 0 0 0 3px var(--drop); opacity: 0.6; }
 .table-node__header {
-  background: var(--table-color); color: #fff; padding: 7px 10px; border-radius: 7px 7px 0 0;
+  background: var(--table-color); color: var(--table-text, #fff); padding: 7px 10px; border-radius: 7px 7px 0 0;
   display: flex; align-items: baseline; gap: 8px;
 }
 .table-node__title { font-weight: 700; font-size: 13px; }
@@ -319,9 +319,16 @@ body.area-picking .area-tabs__arrow { border-color: var(--accent); color: var(--
 .inspector__section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .form-grid { display: grid; grid-template-columns: 80px 1fr; gap: 8px; align-items: center; }
 .form-grid label { color: var(--muted); }
-.colors { display: flex; gap: 6px; }
-.color-chip { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
-.color-chip.active { border-color: var(--text); }
+.colors { display: flex; flex-wrap: wrap; gap: 6px; }
+.color-chip { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; flex: none; }
+.color-chip.active { border-color: var(--text); box-shadow: 0 0 0 2px var(--panel) inset; }
+.color-chip:disabled { cursor: default; opacity: 0.5; }
+/* 기본(테마 색): 강조색에 점선 테두리로 "따로 지정 안 함"을 표시 */
+.color-chip--default { background: var(--accent); outline: 1.5px dashed var(--muted); outline-offset: 1px; }
+/* 직접 고르기: 색상환 칩. 안의 색 선택기(input)가 칩 전체를 덮어 누르면 바로 열린다 */
+.color-chip--custom { position: relative; overflow: hidden; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.color-chip--custom input { position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px); opacity: 0; cursor: pointer; border: none; padding: 0; }
+.color-chip--custom.disabled { opacity: 0.4; }
 kbd { border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px; font-size: 11px; }
 
 .column-grid { display: flex; flex-direction: column; gap: 3px; overflow-x: auto; padding-bottom: 4px; }

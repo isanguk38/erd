@@ -3,6 +3,7 @@ import { Handle, Position, useConnection, type Node, type NodeProps } from '@xyf
 import { indexLabel, type Table } from '@erd/core';
 import type { ViewMode } from '../store';
 import { Icon } from './ui';
+import { readableText } from './ColorPicker';
 
 export type TableNodeData = {
   table: Table;
@@ -41,6 +42,8 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
       className={`table-node${selected ? ' selected' : ''}${highlight ? ` hl-${highlight}` : ''}${search ? ` search-${search}` : ''}${focusColumnId === '*' ? ' search-focus' : ''}${remote ? ' remote-changed' : ''}`}
       style={{
         ['--table-color' as string]: table.color || 'var(--accent)',
+        // 직접 고른 밝은 색이면 머리 글자를 진하게
+        ...(readableText(table.color) ? { ['--table-text' as string]: readableText(table.color) } : {}),
         ...(peers.length ? { outline: `2px solid ${peers[0].color}`, outlineOffset: 3 } : {}),
       }}
     >

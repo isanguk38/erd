@@ -4,7 +4,16 @@
 
 import { findTable, newId, type Area, type Schema, type Table } from './model';
 
-export const AREA_COLORS = ['#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#9333ea', '#64748b'];
+/** 테이블·주제영역 색 팔레트 (색상환 순서). 모두 흰 글자가 잘 보이는 진하기 */
+export const COLOR_PALETTE = [
+  '#dc2626', '#e11d48', '#db2777', '#c026d3', '#9333ea', '#7c3aed', '#4f46e5', '#2563eb', '#0284c7', '#0891b2',
+  '#0d9488', '#059669', '#16a34a', '#65a30d', '#ca8a04', '#d97706', '#ea580c', '#92400e', '#64748b', '#334155',
+];
+/** 새 영역에 차례로 주는 색 (옆 영역과 잘 구분되는 순서. 앞 8개는 예전과 같음) */
+export const AREA_COLORS = [
+  '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#9333ea', '#64748b', '#db2777', '#4f46e5',
+  '#0d9488', '#65a30d', '#d97706', '#e11d48', '#7c3aed', '#0284c7', '#92400e', '#c026d3', '#16a34a', '#334155',
+];
 
 const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
