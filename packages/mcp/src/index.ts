@@ -14,7 +14,7 @@ const INSTRUCTIONS = [
   '사람이 무시한 항목(check_design에 나오지 않음)은 고치지 않습니다. 검토 항목을 고쳤으면 resolve_design_review로 해결 표시하고, 사용자에게 오류·경고·참고별로 무엇을 고쳤고 무엇을 남겼는지 알려 줍니다.',
   '주제영역: 큰 ERD는 화면에서 탭(주문·회원·정산 등)으로 나눠 봅니다. 새 기능을 설계하거나 DB를 가져와 테이블이 많아지면 기능별로 edit_schema의 createArea·addToArea·moveToArea로 묶어 주세요. 여러 기능이 함께 쓰는 테이블(예: 회원)은 여러 영역에 넣어도 됩니다.',
   '영역을 새로 묶었으면 영역마다 auto_layout(area)으로 그 탭의 배치를 정리합니다 (안 하면 전체 ERD 위치 그대로라 흩어져 보임). 새 테이블은 createTable의 area로 영역에 바로 넣습니다. 영역 단위로 볼 때는 get_schema·check_design에 area를 줍니다. 영역은 화면 구분일 뿐 SQL·DB에는 영향이 없고, 제안 모드에서도 영역 명령만 있으면 바로 반영됩니다.',
-  '표준 용어 사전: get_schema의 project.dictionary에 사전이 있다고 나오면, 컬럼을 만들거나 이름을 바꾸기 전에 lookup_dictionary(names)로 논리명의 표준 물리명·타입·길이를 찾아 그대로 씁니다. edit_schema 결과의 dictionary에 사전과 다른 컬럼이 나오면 표준대로 고치고, 사전에 없는 용어는 사용자에게 알립니다.',
+  '표준 용어 사전: get_schema의 project.dictionary에 사전이 있다고 나오면, 설계 전에 lookup_dictionary(names)로 논리명의 표준 물리명·타입·길이를 찾아 그대로 쓰고, 사전에 없는 컬럼도 사전과 같은 물리명 표기(snake_case·camelCase 등)로 짓습니다. 사전에 없는 용어는 edit_schema가 반영될 때 사전에 자동으로 추가되고(같은 논리명·물리명이 이미 있으면 추가 안 됨) 결과의 dictionaryAdded에 나옵니다. 결과의 dictionary에 사전과 다른 컬럼·표기가 나오면 고칩니다.',
   '영향도: edit_schema 결과의 impact에 함께 사라진 외래키·인덱스나 타입이 어긋난 FK 컬럼이 나오면, 의도와 다른 것은 이어서 고치고 사용자에게 알려 줍니다. 테이블·컬럼을 지우기 전에는 get_schema의 relations로 참조하는 테이블을 먼저 확인합니다.',
   '메모: 사용자가 설계 설명·주의 사항을 캔버스에 남겨 달라고 하면 edit_notes(add)로 메모를 붙입니다 (영역 탭이면 area). 메모는 SQL·DB에 영향이 없습니다.',
 ].join('\n');

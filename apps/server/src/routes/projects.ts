@@ -27,7 +27,8 @@ import {
   setAreaPosition,
   toScript,
   changeImpact,
-  dictionaryNotes,
+  syncDictionaryForAi,
+  addMissingTerms,
   readDictionary,
   readNotes,
   addNote,
@@ -114,8 +115,23 @@ export function registerProjectRoutes(
 
   function reviewNotes(id: string, before: Schema, after: Schema) {
     const impact = changeImpact(before, after);
-    const dictionary = dictionaryNotes(readDictionary(store.load(id).doc), before, after);
+    const dictionary = syncDictionaryForAi(readDictionary(store.load(id).doc), before, after).notes;
     return { ...(impact.length ? { impact } : {}), ...(dictionary.length ? { dictionary } : {}) };
+  }
+
+  /**
+   * AI가 만든 컬럼 중 사전에 없는 용어를 사전에 넣는다 (사전이 있을 때만).
+   * 같은 논리명·물리명이 이미 있으면 넣지 않고, 사전 표기와 다른 이름은 넣지 않는다. 넣은 용어 "논리명=물리명"
+   */
+  function addAiTerms(id: string, before: Schema, after: Schema): string[] {
+    const { doc } = store.load(id);
+    const { add } = syncDictionaryForAi(readDictionary(doc), before, after);
+    if (!add.length) return [];
+    let added: { logical: string; physical: string }[] = [];
+    doc.transact(() => {
+      added = addMissingTerms(doc, add);
+    }, 'ai');
+    return added.map((t) => `${t.logical}=${t.physical}`);
   }
 
   const modeOf = (id: string, mode: unknown, source: Source): Mode => {
@@ -293,9 +309,12 @@ export function registerProjectRoutes(
       const extra = reviewNotes(id, base, result.schema);
       if (mode === 'propose') {
         const proposal = store.upsertProposal(id, source === 'ai' ? 'ai' : 'api', title, () => ({ schema: result.schema, messages: result.messages }));
+        // 사전에 없는 용어는 사람이 제안을 승인할 때 사전에 넣는다
         return { mode, proposalId: proposal.id, messages: result.messages, pendingChanges: summarize(store.proposalChanges(id, proposal)), ...extra };
       }
-      return { ...change(id, result.schema, { mode, source, title, messages: result.messages }), ...extra };
+      const applied = change(id, result.schema, { mode, source, title, messages: result.messages });
+      const dictionaryAdded = source === 'ai' ? addAiTerms(id, base, result.schema) : [];
+      return { ...applied, ...extra, ...(dictionaryAdded.length ? { dictionaryAdded } : {}) };
     },
   );
 
@@ -398,8 +417,13 @@ export function registerProjectRoutes(
     return { ...p, changes: summarize(store.proposalChanges(req.params.id, p)) };
   });
   app.post<{ Params: { id: string; pid: string }; Body: { selected?: string[] } }>('/api/projects/:id/proposals/:pid/apply', async (req) => {
-    const applied = store.applyProposal(req.params.id, req.params.pid, req.body?.selected);
-    return { ok: true, applied: summarize(applied) };
+    const { id, pid } = req.params;
+    const before = store.schema(id);
+    const fromAi = store.proposals(id).find((p) => p.id === pid)?.source === 'ai';
+    const applied = store.applyProposal(id, pid, req.body?.selected);
+    // AI 제안이면 승인한 컬럼 중 사전에 없는 용어를 사전에 넣는다
+    const dictionaryAdded = fromAi ? addAiTerms(id, before, store.schema(id)) : [];
+    return { ok: true, applied: summarize(applied), ...(dictionaryAdded.length ? { dictionaryAdded } : {}) };
   });
   app.post<{ Params: { id: string; pid: string } }>('/api/projects/:id/proposals/:pid/reject', async (req) => {
     store.rejectProposal(req.params.id, req.params.pid);

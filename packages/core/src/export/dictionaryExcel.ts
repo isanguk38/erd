@@ -156,7 +156,7 @@ export async function dictionaryWorkbook(dict: Dictionary | null, options: { con
     '· 표준용어 시트: 논리명(한글 용어) → 물리명·타입·길이. 컬럼 논리명을 입력하면 이 값으로 채우고, 다르면 설계 검사에서 알려 줍니다.',
     '· 타입 칸에 VARCHAR(20)처럼 길이를 함께 써도 됩니다. 타입을 비우면 타입은 검사하지 않습니다.',
     '· 회사 양식을 그대로 올려도 됩니다: 머리글 이름(용어명·논리명 / 영문약어명·물리명 / 데이터타입 / 길이 / 설명)으로 칸을 찾습니다.',
-    '· 물리명은 회사 표준 그대로 두세요 (예: MBR_NO). camelCase 등 프로젝트에서 쓸 표기는 ERD 화면의 "물리명 표기"에서 고릅니다.',
+    '· 물리명은 한 가지 표기로 맞추세요 (snake_case: mbr_no / SNAKE_CASE: MBR_NO / camelCase: mbrNo). 섞여 있으면 올릴 수 없습니다.',
     '· 이 안내 시트와 "단어"가 들어간 시트는 읽지 않습니다.',
   ].forEach((line, i) => {
     const cell = guide.getCell(i + 1, 1);

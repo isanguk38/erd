@@ -150,6 +150,20 @@ describe('MCP', () => {
     const lint = await call('check_design', { project: '사전' });
     expect(lint.basicChecks.some((i: { rule: string }) => i.rule === '표준 용어와 다름')).toBe(true);
 
+    // 사전에 없는 용어는 사전에 자동으로 (같은 것은 한 번만), 사전 표기와 다르면 넣지 않고 안내
+    const added = await call('edit_schema', {
+      project: '사전',
+      commands: [
+        { op: 'addColumn', table: 'orders', column: { name: 'ORD_AMT', logicalName: '주문금액', type: 'DECIMAL(12,2)' } },
+        { op: 'addColumn', table: 'member', column: { name: 'mbrAge', logicalName: '회원나이', type: 'INT' } },
+      ],
+    });
+    expect(added.dictionaryAdded).toEqual(['주문금액=ORD_AMT']);
+    expect(added.dictionary.join('\n')).toContain('mbrAge: 사전 표기(SNAKE_CASE)와 다릅니다 — MBR_AGE');
+    const again = await call('edit_schema', { project: '사전', commands: [{ op: 'addColumn', table: 'member', column: { name: 'ORD_AMT', logicalName: '주문금액', type: 'DECIMAL(12,2)' } }] });
+    expect(again.dictionaryAdded).toBeUndefined();
+    expect((await call('lookup_dictionary', { project: '사전' })).dictionary).toMatch(/용어 3개, 물리명 표기: SNAKE_CASE/);
+
     // 영향도: 부모 PK 타입만 바꾸면 FK로 이어진 자식 컬럼이 그대로라고 알려 준다
     const typed = await call('edit_schema', { project: '사전', commands: [{ op: 'updateColumn', table: 'member', column: 'member_id', changes: { name: 'MBR_NO', type: 'VARCHAR(20)' } }] });
     expect(typed.impact.join('\n')).toContain('orders.member_id(BIGINT)');

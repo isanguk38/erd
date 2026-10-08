@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { areaSchema, describeMatch, describeSchema, dialects, dictIndex, lookupTerm, requireArea, LINT_RULES, lintSchema, reviewItemState, searchDictionary, splitDictType, unreviewedTables, type AiReview, type DialectId, type Dictionary, type Schema } from '@erd/core';
+import { areaSchema, describeMatch, describeSchema, dialects, dictIndex, dictionaryStyle, lookupTerm, NAME_STYLE_LABEL, requireArea, LINT_RULES, lintSchema, reviewItemState, searchDictionary, splitDictType, unreviewedTables, type AiReview, type DialectId, type Dictionary, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -147,7 +147,9 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     }
   };
   const dictionaryHint = (d: Dictionary | null) =>
-    d ? `표준 용어 사전 있음 (용어 ${d.terms.length}개): 컬럼을 만들거나 이름을 바꿀 때 lookup_dictionary로 논리명의 표준 물리명·타입·길이를 찾아 그대로 쓰세요` : undefined;
+    d
+      ? `표준 용어 사전 있음 (용어 ${d.terms.length}개, 물리명 표기 ${dictionaryStyle(d) ? NAME_STYLE_LABEL[dictionaryStyle(d)!] : '-'}): 컬럼을 만들거나 이름을 바꿀 때 lookup_dictionary로 논리명의 표준 물리명·타입·길이를 찾아 그대로 쓰고, 사전에 없는 컬럼도 같은 표기로 이름을 짓습니다. 사전에 없는 용어는 반영할 때 사전에 자동으로 추가됩니다`
+      : undefined;
 
   server.registerTool(
     'list_projects',
@@ -313,7 +315,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         '관계(addRelation)는 부모의 기본키를 참조하는 FK 컬럼을 자식에 자동으로 만든다. FK 컬럼을 따로 addColumn 하지 않는다.',
         'mode=apply면 화면에 바로 반영되고 사람이 "AI 변경 되돌리기"로 한 번에 되돌릴 수 있다. mode=propose면 제안으로 쌓여 사람이 승인한다.',
         '결과의 impact: 지운 테이블·컬럼 때문에 함께 사라진 외래키·인덱스, 타입을 바꿨는데 FK로 이어진 컬럼은 그대로인 것 — 의도와 다르면 이어서 고친다.',
-        '결과의 dictionary: 표준 용어 사전과 다른 컬럼 — 표준대로 updateColumn 한다 (사전에 없는 용어는 사용자에게 알린다).',
+        '결과의 dictionary: 표준 용어 사전과 다른 컬럼·다른 표기 — 안내대로 updateColumn 한다. dictionaryAdded: 사전에 없어 이번에 사전에 새로 넣은 용어 (같은 논리명·물리명이 이미 있으면 넣지 않음).',
       ].join(' '),
       inputSchema: { project: projectArg, commands: z.array(command).min(1), mode },
     },
@@ -353,7 +355,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       };
       const term = (t: { logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
       return text({
-        dictionary: `용어 ${dict.terms.length}개, 물리명 표기: ${{ asis: '사전 그대로', lower: 'snake_case', upper: 'SNAKE_CASE', camel: 'camelCase' }[dict.case]}`,
+        dictionary: `용어 ${dict.terms.length}개, 물리명 표기: ${index.style ? NAME_STYLE_LABEL[index.style] : '-'} — 사전에 없는 컬럼도 이 표기로 이름을 짓는다`,
         results: names?.length
           ? names.map((n) => {
               const m = lookupTerm(index, n);

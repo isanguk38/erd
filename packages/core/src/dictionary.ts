@@ -1,5 +1,6 @@
 // 표준 용어 사전: 논리명(한글) → 표준 물리명·타입·길이. 예) 회원번호 → MBR_NO VARCHAR(20).
-// 사전에 있는 용어만 쓴다 (단어를 이어 붙여 이름을 만들지 않는다 — 나누는 방법이 여러 가지라 생각과 다른 이름이 나올 수 있다).
+// 사전에 있는 용어만 쓴다 (단어를 이어 붙여 이름을 만들지 않는다).
+// 물리명 표기(snake_case / SNAKE_CASE / camelCase)는 사전 용어들로 판단하고, 한 사전 안에서 섞이지 않게 막는다.
 // ERD 구조(스키마)와 따로 문서의 'dictionary' 맵에 둔다 — SQL·비교·DB 동기화·버전에는 영향이 없다.
 // 사전이 없으면 아무 검사도 하지 않는다.
 
@@ -17,21 +18,71 @@ export interface DictTerm {
   description?: string;
 }
 
-/** 물리명을 채울 때 표기: 사전 그대로 / snake_case (mbr_no) / SNAKE_CASE (MBR_NO) / camelCase (mbrNo) */
-export type DictCase = 'asis' | 'lower' | 'upper' | 'camel';
-
 export interface Dictionary {
   terms: DictTerm[];
-  case: DictCase;
   updatedAt?: string;
-}
-
-export function emptyDictionary(): Dictionary {
-  return { terms: [], case: 'asis' };
 }
 
 /** 같은 용어인지 볼 때 쓰는 키 (띄어쓰기·대소문자 무시) */
 export const dictKey = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+/** 같은 물리명인지 볼 때 쓰는 키 (대소문자 무시) */
+const physicalKey = (name: string) => name.trim().toLowerCase();
+
+// ── 물리명 표기 ──────────────────────────────────────────
+
+/** snake: member_no / SNAKE: MEMBER_NO / camel: memberNo */
+export type NameStyle = 'snake' | 'SNAKE' | 'camel';
+
+export const NAME_STYLE_LABEL: Record<NameStyle, string> = { snake: 'snake_case', SNAKE: 'SNAKE_CASE', camel: 'camelCase' };
+const STYLE_EXAMPLE: Record<NameStyle, (words: string[]) => string> = {
+  snake: (w) => w.join('_').toLowerCase(),
+  SNAKE: (w) => w.join('_').toUpperCase(),
+  camel: (w) => w.map((x, i) => (i ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x.toLowerCase())).join(''),
+};
+const STYLE_RE: Record<NameStyle, RegExp> = {
+  snake: /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/,
+  SNAKE: /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/,
+  camel: /^[a-z][a-z0-9]*([A-Z][a-z0-9]*)*$/,
+};
+
+/** 이 이름이 그 표기에 맞는지. 한 단어(price, PRICE)는 대소문자만 맞으면 된다 */
+export function fitsStyle(name: string, style: NameStyle): boolean {
+  return STYLE_RE[style].test(name.trim());
+}
+
+/** 낱말로 나눠 그 표기로 (memberNo → member_no) */
+export function toStyle(name: string, style: NameStyle): string {
+  const words = name.trim().split(/[_\s-]+/).flatMap((w) => w.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
+  return words.length ? STYLE_EXAMPLE[style](words) : name;
+}
+
+export interface StyleCheck {
+  /** 사전의 표기 (용어가 없거나 판단할 수 없으면 null) */
+  style: NameStyle | null;
+  /** 그 표기와 다른 물리명의 용어 (있으면 섞인 것) */
+  offenders: DictTerm[];
+}
+
+/**
+ * 물리명들로 표기를 판단한다: 가장 많은 용어가 맞는 표기 (같으면 snake → SNAKE → camel).
+ * 한 단어 이름(price)은 어느 쪽에도 맞아 판단에 쓰지 않는다. 그 표기에 안 맞는 용어가 offenders.
+ */
+export function detectStyle(terms: DictTerm[]): StyleCheck {
+  if (!terms.length) return { style: null, offenders: [] };
+  const styles: NameStyle[] = ['snake', 'SNAKE', 'camel'];
+  const fits = styles.map((s) => terms.filter((t) => fitsStyle(t.physical, s)).length);
+  const best = Math.max(...fits);
+  const style = styles[fits.indexOf(best)];
+  return { style, offenders: terms.filter((t) => !fitsStyle(t.physical, style)) };
+}
+
+/** 섞였을 때 사람에게 보일 안내 */
+export function mixedStyleMessage(check: StyleCheck): string {
+  const list = check.offenders.slice(0, 10).map((t) => `${t.logical}=${t.physical}`).join(', ');
+  return `물리명 표기가 섞여 있습니다. 대부분 ${NAME_STYLE_LABEL[check.style!]}인데 다른 표기가 ${check.offenders.length}개 있습니다 (${list}${check.offenders.length > 10 ? ' …' : ''}). snake_case·camelCase 등 한 가지로 맞춰 다시 올려 주세요.`;
+}
+
+// ── 문서에 저장 ──────────────────────────────────────────
 
 function dictMap(doc: Y.Doc): Y.Map<unknown> {
   return doc.getMap('dictionary');
@@ -53,12 +104,7 @@ export function readDictionary(doc: Y.Doc): Dictionary | null {
   const terms = [...(((root.get('terms') as Y.Map<DictTerm> | undefined)?.values()) ?? [])].map((t) => ({ ...t }));
   if (!terms.length) return null;
   terms.sort((a, b) => a.logical.localeCompare(b.logical));
-  return { terms, case: (root.get('case') as DictCase) ?? 'asis', updatedAt: (root.get('updatedAt') as string | undefined) ?? undefined };
-}
-
-/** 물리명 표기 설정 (사전이 비어 있어도 프로젝트에 남는다) */
-export function readDictCase(doc: Y.Doc): DictCase {
-  return (dictMap(doc).get('case') as DictCase | undefined) ?? 'asis';
+  return { terms, updatedAt: (root.get('updatedAt') as string | undefined) ?? undefined };
 }
 
 const cleanTerm = (t: DictTerm): DictTerm | null => {
@@ -72,9 +118,25 @@ const cleanTerm = (t: DictTerm): DictTerm | null => {
   return out;
 };
 
-/** 엑셀 등에서 읽은 용어를 넣는다. replace면 기존 용어를 지우고, merge면 같은 논리명만 덮어쓴다. 넣은 수 */
-export function writeDictionary(doc: Y.Doc, input: { terms: DictTerm[]; case?: DictCase }, mode: 'replace' | 'merge' = 'replace'): number {
+/** 넣은 뒤의 용어 목록 (replace: 새 것만, merge: 같은 논리명은 새 것으로) */
+export function mergedTerms(current: DictTerm[], incoming: DictTerm[], mode: 'replace' | 'merge'): DictTerm[] {
+  const map = new Map(mode === 'merge' ? current.map((t) => [dictKey(t.logical), t] as const) : []);
+  for (const raw of incoming) {
+    const t = cleanTerm(raw);
+    if (t) map.set(dictKey(t.logical), t);
+  }
+  return [...map.values()];
+}
+
+/**
+ * 엑셀 등에서 읽은 용어를 넣는다. replace면 기존 용어를 지우고, merge면 같은 논리명만 덮어쓴다. 넣은 수.
+ * 넣은 뒤 물리명 표기가 섞이면 넣지 않고 오류를 낸다.
+ */
+export function writeDictionary(doc: Y.Doc, input: { terms: DictTerm[] }, mode: 'replace' | 'merge' = 'replace'): number {
   const terms = termsMap(doc);
+  const current = [...(terms.values() as IterableIterator<DictTerm>)];
+  const check = detectStyle(mergedTerms(current, input.terms, mode));
+  if (check.offenders.length) throw new Error(mixedStyleMessage(check));
   if (mode === 'replace') terms.clear();
   let n = 0;
   for (const raw of input.terms) {
@@ -83,16 +145,25 @@ export function writeDictionary(doc: Y.Doc, input: { terms: DictTerm[]; case?: D
     terms.set(dictKey(term.logical), term);
     n++;
   }
-  if (input.case) dictMap(doc).set('case', input.case);
   dictMap(doc).set('updatedAt', new Date().toISOString());
   return n;
 }
 
-/** 용어 하나 넣기(같은 논리명이면 바꾸기). 논리명을 바꿨으면 previous에 옛 논리명 */
+/**
+ * 용어 하나 넣기(같은 논리명이면 바꾸기). 논리명을 바꿨으면 previous에 옛 논리명.
+ * 사전 표기와 다른 물리명, 다른 용어가 이미 쓰는 물리명은 넣지 않는다.
+ */
 export function setDictEntry(doc: Y.Doc, entry: DictTerm, previous?: string): void {
   const clean = cleanTerm(entry);
   if (!clean) throw new Error('논리명과 물리명을 모두 입력하세요');
   const map = termsMap(doc);
+  const others = [...(map.values() as IterableIterator<DictTerm>)].filter((t) => dictKey(t.logical) !== dictKey(previous ?? clean.logical) && dictKey(t.logical) !== dictKey(clean.logical));
+  const { style } = detectStyle(others);
+  if (style && !fitsStyle(clean.physical, style)) {
+    throw new Error(`이 사전은 ${NAME_STYLE_LABEL[style]}입니다. "${clean.physical}" 대신 "${toStyle(clean.physical, style)}"처럼 입력하세요.`);
+  }
+  const same = others.find((t) => physicalKey(t.physical) === physicalKey(clean.physical));
+  if (same) throw new Error(`물리명 ${clean.physical}은(는) 이미 "${same.logical}"(으)로 사전에 있습니다.`);
   if (previous && dictKey(previous) !== dictKey(clean.logical)) map.delete(dictKey(previous));
   map.set(dictKey(clean.logical), clean);
   dictMap(doc).set('updatedAt', new Date().toISOString());
@@ -102,45 +173,31 @@ export function removeDictEntry(doc: Y.Doc, logical: string): void {
   termsMap(doc).delete(dictKey(logical));
 }
 
-export function setDictCase(doc: Y.Doc, value: DictCase): void {
-  dictMap(doc).set('case', value);
-}
-
 export function clearDictionary(doc: Y.Doc): void {
   termsMap(doc).clear();
-  // 예전에 넣은 표준 단어가 남아 있으면 함께 지운다 (지금은 쓰지 않음)
+  // 예전 버전이 남긴 표준 단어·표기 설정도 지운다 (지금은 쓰지 않음)
   dictMap(doc).delete('words');
+  dictMap(doc).delete('case');
   dictMap(doc).delete('updatedAt');
 }
 
 // ── 찾기 ──────────────────────────────────────────
 
 export interface DictMatch {
-  /** 표기 설정을 적용한 물리명 */
   physical: string;
   type?: string;
   length?: string;
   description?: string;
 }
 
-export function applyDictCase(name: string, c: DictCase): string {
-  if (c === 'asis') return name;
-  // 밑줄·공백·대문자 경계로 낱말을 나눈다 (MBR_NO, mbr_no, MbrNo, mbrNo → mbr, no)
-  const parts = name.split(/[_\s-]+/).flatMap((w) => w.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
-  if (c === 'camel') return parts.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase())).join('');
-  const snake = parts.join('_');
-  return c === 'lower' ? snake.toLowerCase() : snake.toUpperCase();
-}
-
-/** 물리명 비교·찾기용 키: 대소문자와 밑줄을 무시 (MBR_NO = mbrNo) */
-const physicalKey = (name: string) => name.trim().toLowerCase().replace(/_/g, '');
-
 /** 큰 사전에서 여러 번 찾을 때 쓰는 색인 (사전이 바뀔 때만 다시 만든다) */
 export interface DictIndex {
   dict: Dictionary;
   terms: Map<string, DictTerm>;
-  /** 물리명(대소문자·밑줄 무시) → 용어 */
+  /** 물리명(대소문자 무시) → 용어 */
   byPhysical: Map<string, DictTerm>;
+  /** 사전의 물리명 표기 */
+  style: NameStyle | null;
 }
 
 const indexCache = new WeakMap<Dictionary, DictIndex>();
@@ -151,19 +208,25 @@ export function dictIndex(dict: Dictionary): DictIndex {
   const terms = new Map(dict.terms.map((t) => [dictKey(t.logical), t]));
   const byPhysical = new Map<string, DictTerm>();
   for (const t of dict.terms) if (!byPhysical.has(physicalKey(t.physical))) byPhysical.set(physicalKey(t.physical), t);
-  const index = { dict, terms, byPhysical };
+  const index = { dict, terms, byPhysical, style: detectStyle(dict.terms).style };
   indexCache.set(dict, index);
   return index;
+}
+
+const asIndex = (dict: Dictionary | DictIndex) => ('byPhysical' in dict ? dict : dictIndex(dict));
+
+/** 사전의 물리명 표기 (용어가 없으면 null) */
+export function dictionaryStyle(dict: Dictionary | DictIndex | null | undefined): NameStyle | null {
+  return dict ? asIndex(dict).style : null;
 }
 
 /** 논리명으로 표준 용어 찾기 (없으면 null) */
 export function lookupTerm(dict: Dictionary | DictIndex | null | undefined, logical: string): DictMatch | null {
   if (!dict || !logical.trim()) return null;
-  const index = 'byPhysical' in dict ? dict : dictIndex(dict);
-  const term = index.terms.get(dictKey(logical));
+  const term = asIndex(dict).terms.get(dictKey(logical));
   if (!term) return null;
   return {
-    physical: applyDictCase(term.physical, index.dict.case),
+    physical: term.physical,
     ...(term.type ? { type: term.type } : {}),
     ...(term.length ? { length: term.length } : {}),
     ...(term.description ? { description: term.description } : {}),
@@ -173,8 +236,7 @@ export function lookupTerm(dict: Dictionary | DictIndex | null | undefined, logi
 /** 물리명으로 용어 찾기 (논리명이 빈 컬럼을 채울 때) */
 export function lookupPhysical(dict: Dictionary | DictIndex | null | undefined, physical: string): DictTerm | null {
   if (!dict || !physical.trim()) return null;
-  const index = 'byPhysical' in dict ? dict : dictIndex(dict);
-  return index.byPhysical.get(physicalKey(physical)) ?? null;
+  return asIndex(dict).byPhysical.get(physicalKey(physical)) ?? null;
 }
 
 /** 사전 안에서 찾기 (논리명·물리명·설명에 글자가 들어 있는 것) */
@@ -188,6 +250,25 @@ export function searchDictionary(entries: DictTerm[], query: string, limit = 200
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/**
+ * 입력하는 동안 보여 줄 후보: 물리명 칸이면 물리명으로, 논리명 칸이면 논리명으로 찾는다.
+ * 앞부분이 맞는 것을 먼저 (mem → member_id, memory_id …), 그다음 중간에 들어 있는 것.
+ */
+export function suggestTerms(dict: Dictionary | null | undefined, query: string, by: 'physical' | 'logical', limit = 8): DictTerm[] {
+  const q = by === 'physical' ? query.trim().toLowerCase() : dictKey(query);
+  if (!dict || !q) return [];
+  const key = (t: DictTerm) => (by === 'physical' ? t.physical.toLowerCase() : dictKey(t.logical));
+  const starts: DictTerm[] = [];
+  const contains: DictTerm[] = [];
+  for (const t of dict.terms) {
+    const k = key(t);
+    if (k === q) continue; // 이미 그대로 입력함
+    if (k.startsWith(q)) starts.push(t);
+    else if (k.includes(q)) contains.push(t);
+  }
+  return [...starts.sort((a, b) => key(a).length - key(b).length), ...contains].slice(0, limit);
 }
 
 const SAME_BASE: Record<string, string> = { INTEGER: 'INT', INT4: 'INT', INT8: 'BIGINT', VARCHAR2: 'VARCHAR', NVARCHAR2: 'NVARCHAR', BOOL: 'BOOLEAN', 'CHARACTER VARYING': 'VARCHAR' };
@@ -220,7 +301,7 @@ export function checkColumnAgainstDictionary(dict: Dictionary | DictIndex | null
   if (!match) return { status: 'unknown', diffs: [] };
   const diffs: string[] = [];
   const patch: Partial<Column> = {};
-  if (match.physical.toLowerCase() !== column.name.trim().toLowerCase()) {
+  if (match.physical !== column.name.trim()) {
     diffs.push(`물리명 ${match.physical}`);
     patch.name = match.physical;
   }
@@ -254,29 +335,77 @@ export function describeMatch(match: DictMatch): string {
   return `${match.physical}${t?.type ? ` ${t.type}${t.length ? `(${t.length})` : ''}` : ''}`;
 }
 
+/** 사전에 없는 컬럼의 이름이 사전 표기와 다르면 바꿀 이름 (맞으면 null) */
+export function styleSuggestion(dict: Dictionary | DictIndex | null | undefined, name: string): { style: NameStyle; suggestion: string } | null {
+  const style = dictionaryStyle(dict);
+  if (!style || !name.trim() || fitsStyle(name, style)) return null;
+  return { style, suggestion: toStyle(name, style) };
+}
+
 /**
- * 이번에 새로 만들거나 고친 컬럼 중 사전과 다른 것 (AI 편집 결과에 붙인다).
- * 사전이 없으면 빈 배열.
+ * AI가 바꾼 뒤 사전과 맞추기: 이번에 새로 만들거나 고친 컬럼 중
+ * - 사전과 다른 것 → 고치라는 안내
+ * - 사전에 없는 용어 → 사전에 넣을 용어 (같은 논리명·물리명이 이미 있거나 이번에 이미 넣은 것은 빼고, 표기가 다르면 넣지 않고 안내)
+ * 사전이 없으면 아무것도 하지 않는다.
  */
-export function dictionaryNotes(dict: Dictionary | null | undefined, before: { tables: { id: string; columns: Column[] }[] }, after: { tables: { id: string; name: string; columns: Column[] }[] }, limit = 30): string[] {
-  if (!dict?.terms.length) return [];
+export function syncDictionaryForAi(
+  dict: Dictionary | null | undefined,
+  before: { tables: { id: string; columns: Column[] }[] },
+  after: { tables: { id: string; name: string; columns: Column[] }[] },
+  limit = 30,
+): { add: DictTerm[]; notes: string[] } {
+  if (!dict?.terms.length) return { add: [], notes: [] };
   const index = dictIndex(dict);
+  const label = index.style ? NAME_STYLE_LABEL[index.style] : '';
   const prev = new Map(before.tables.flatMap((t) => t.columns.map((c) => [c.id, c] as const)));
-  const out: string[] = [];
+  const add: DictTerm[] = [];
+  const notes: string[] = [];
   for (const t of after.tables) {
     for (const c of t.columns) {
       const old = prev.get(c.id);
       if (old && old.name === c.name && old.logicalName === c.logicalName && old.type === c.type && old.length === c.length) continue;
+      const where = `${t.name}.${c.name}`;
       const r = checkColumnAgainstDictionary(index, c);
-      if (!r || r.status === 'ok') continue;
-      out.push(
-        r.status === 'mismatch'
-          ? `${t.name}.${c.name}: "${c.logicalName}"의 표준은 ${describeMatch(r.match!)} — updateColumn으로 맞추세요`
-          : `${t.name}.${c.name}: "${c.logicalName}"은(는) 표준 용어 사전에 없습니다 — lookup_dictionary로 비슷한 표준 용어를 찾거나 사용자에게 확인하세요`,
-      );
+      if (r?.status === 'mismatch') {
+        notes.push(`${where}: "${c.logicalName}"의 표준은 ${describeMatch(r.match!)} — updateColumn으로 맞추세요`);
+        continue;
+      }
+      if (r?.status === 'ok') continue;
+      const style = styleSuggestion(index, c.name);
+      if (style) {
+        notes.push(`${where}: 사전 표기(${label})와 다릅니다 — ${style.suggestion}(으)로 바꾸세요${r ? ' (그래서 사전에 넣지 않았습니다)' : ''}`);
+        continue;
+      }
+      if (!r) continue; // 논리명이 없으면 사전에 넣을 수 없다
+      const owner = lookupPhysical(index, c.name);
+      if (owner) {
+        notes.push(`${where}: 물리명 ${c.name}은(는) 사전에 "${owner.logical}"(으)로 있습니다 — 논리명을 "${owner.logical}"(으)로 쓰거나 다른 물리명을 쓰세요`);
+        continue;
+      }
+      if (add.some((x) => dictKey(x.logical) === dictKey(c.logicalName) || physicalKey(x.physical) === physicalKey(c.name))) continue;
+      add.push({ logical: c.logicalName.trim(), physical: c.name.trim(), ...(c.type ? { type: c.type } : {}), ...(c.length ? { length: c.length } : {}), ...(c.comment.trim() ? { description: c.comment.trim() } : {}) });
     }
   }
-  return out.length > limit ? [...out.slice(0, limit), `… 외 ${out.length - limit}개`] : out;
+  return { add, notes: notes.length > limit ? [...notes.slice(0, limit), `… 외 ${notes.length - limit}개`] : notes };
+}
+
+/** 사전에 용어 여러 개를 더한다 (같은 논리명·물리명이 이미 있으면 건너뜀). 더한 용어 */
+export function addMissingTerms(doc: Y.Doc, terms: DictTerm[]): DictTerm[] {
+  const map = termsMap(doc);
+  const existing = [...(map.values() as IterableIterator<DictTerm>)];
+  const logicals = new Set(existing.map((t) => dictKey(t.logical)));
+  const physicals = new Set(existing.map((t) => physicalKey(t.physical)));
+  const added: DictTerm[] = [];
+  for (const raw of terms) {
+    const t = cleanTerm(raw);
+    if (!t || logicals.has(dictKey(t.logical)) || physicals.has(physicalKey(t.physical))) continue;
+    map.set(dictKey(t.logical), t);
+    logicals.add(dictKey(t.logical));
+    physicals.add(physicalKey(t.physical));
+    added.push(t);
+  }
+  if (added.length) dictMap(doc).set('updatedAt', new Date().toISOString());
+  return added;
 }
 
 // ── ERD에서 사전 만들기 ──────────────────────────────

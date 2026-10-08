@@ -1,18 +1,20 @@
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
-  applyDictCase,
   checkColumnAgainstDictionary,
+  detectStyle,
+  mergedTerms,
+  mixedStyleMessage,
+  NAME_STYLE_LABEL,
+  type StyleCheck,
   clearDictionary,
   dictionaryFromSchema,
   dictIndex,
   removeDictEntry,
   searchDictionary,
-  setDictCase,
   setDictEntry,
   splitDictType,
   updateColumn,
   writeDictionary,
-  type DictCase,
   type DictConflict,
   type DictTerm,
   type Dictionary,
@@ -27,22 +29,17 @@ import { Modal } from './Modal';
 import { Dropdown, Icon } from './ui';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const CASES: { id: DictCase; label: string }[] = [
-  { id: 'asis', label: '사전 그대로' },
-  { id: 'lower', label: 'snake_case' },
-  { id: 'upper', label: 'SNAKE_CASE' },
-  { id: 'camel', label: 'camelCase' },
-];
 
 type Entry = { logical: string; physical: string; type?: string; length?: string; description?: string };
-type Pending = DictionaryImport & { file: string; case?: DictCase };
+type Pending = DictionaryImport & { file: string };
 type Draft = { terms: DictTerm[]; conflicts: DictConflict[]; skipped: number };
 type Source = { id: string; name: string; terms: number };
 
-/** 표기 미리보기: 사전 용어 두 개 (없으면 예시) */
-function casePreview(dict: Dictionary | null, c: DictCase): string[] {
-  const terms = dict?.terms.length ? dict.terms.slice(0, 2) : [{ logical: '회원번호', physical: 'MBR_NO' }, { logical: '주문금액', physical: 'ORD_AMT' }];
-  return terms.map((t) => `${t.logical} → ${applyDictCase(t.physical, c)}`);
+/** 사전 표기 표시: "snake_case (자동 판단)" */
+function StyleBadge({ terms }: { terms: DictTerm[] }) {
+  const { style } = detectStyle(terms);
+  if (!style) return null;
+  return <span className="dict-style-badge" title="사전 용어들의 물리명을 보고 정했습니다. 새 용어도 이 표기로만 넣을 수 있고, 사전에 없는 컬럼이 다른 표기면 설계 검사에서 경고합니다">{NAME_STYLE_LABEL[style]}</span>;
 }
 
 /**
@@ -52,7 +49,6 @@ function casePreview(dict: Dictionary | null, c: DictCase): string[] {
  */
 export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void; onOpenLint: () => void }) {
   const dictionary = useStore((s) => s.dictionary);
-  const dictCase = useStore((s) => s.dictionary?.case ?? s.dictCase);
   const schema = useStore((s) => s.schema);
   const readOnly = useStore((s) => s.role === 'viewer');
   const { editDictionary, edit, showNotice } = useStore.getState();
@@ -109,7 +105,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
       if (!d) return alert('그 프로젝트에는 사전이 없습니다');
       setSources(null);
       setMode('replace');
-      setPending({ terms: d.terms, notes: [`"${source.name}" 프로젝트 사전의 복사본입니다 (원본을 고쳐도 여기는 바뀌지 않음)`], file: `${source.name} 프로젝트`, case: d.case });
+      setPending({ terms: d.terms, notes: [`"${source.name}" 프로젝트 사전의 복사본입니다 (원본을 고쳐도 여기는 바뀌지 않음)`], file: `${source.name} 프로젝트` });
     } catch (e) {
       alert(`사전을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -123,7 +119,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   const downloadDraft = async () => {
     if (!draft) return;
     const { dictionaryWorkbook } = await loadModule(() => import('@erd/core/dictionary-excel'));
-    const buf = await dictionaryWorkbook({ terms: draft.terms, case: 'asis' }, { conflicts: draft.conflicts });
+    const buf = await dictionaryWorkbook({ terms: draft.terms }, { conflicts: draft.conflicts });
     downloadBlob(new Blob([buf], { type: XLSX }), `${safeFileName(projectName)}_사전초안.xlsx`);
   };
   const useDraft = () => {
@@ -140,8 +136,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
     if (!pending) return;
     let count = 0;
     const ok = editDictionary((d) => {
-      // 다른 프로젝트에서 가져오면 표기 설정도 (합치기면 지금 설정 유지)
-      count = writeDictionary(d, { terms: pending.terms, ...(pending.case && (mode === 'replace' || !dictionary) ? { case: pending.case } : {}) }, mode);
+      count = writeDictionary(d, { terms: pending.terms }, mode);
     });
     if (!ok) return;
     setPending(null);
@@ -178,26 +173,9 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
         },
       };
 
-  const caseSetting = (
-    <div className="dict-case">
-      <div className="dict-case__row">
-        <b>물리명 표기</b>
-        <div className="segmented small">
-          {CASES.map((c) => (
-            <button key={c.id} className={dictCase === c.id ? 'active' : ''} disabled={readOnly} onClick={() => editDictionary((d) => setDictCase(d, c.id))}>{c.label}</button>
-          ))}
-        </div>
-      </div>
-      <div className="dict-case__preview">
-        {casePreview(dictionary, dictCase).map((p) => <code key={p}>{p}</code>)}
-        <span className="muted small">사전 엑셀은 회사 표준 그대로 두고, 이 프로젝트에서 쓸 표기만 고릅니다</span>
-      </div>
-    </div>
-  );
-
   let body: ReactNode;
   if (pending) {
-    body = <ImportPreview pending={pending} hasDictionary={Boolean(dictionary)} dictCase={dictCase} mode={mode} onMode={setMode} onApply={applyImport} onCancel={() => setPending(null)} />;
+    body = <ImportPreview pending={pending} current={dictionary?.terms ?? []} mode={mode} onMode={setMode} onApply={applyImport} onCancel={() => setPending(null)} />;
   } else if (draft) {
     body = <DraftView draft={draft} onUse={useDraft} onDownload={() => void downloadDraft()} onBack={() => setDraft(null)} />;
   } else if (sources) {
@@ -233,7 +211,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
             </button>
           )}
         </div>
-        {caseSetting}
+        <p className="muted small dict-style-help">물리명 표기(snake_case·SNAKE_CASE·camelCase)는 올린 용어들로 자동으로 정합니다. 한 사전 안에서 표기가 섞이면 올릴 수 없습니다.</p>
       </>
     );
   } else {
@@ -241,7 +219,7 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
       <>
         <div className="dict-summary">
           <span>
-            표준 용어 <b>{dictionary.terms.length.toLocaleString()}</b>개
+            표준 용어 <b>{dictionary.terms.length.toLocaleString()}</b>개 <StyleBadge terms={dictionary.terms} />
             {dictionary.updatedAt && <span className="muted small"> · {new Date(dictionary.updatedAt).toLocaleString()} 수정</span>}
           </span>
           <span className="spacer" />
@@ -257,7 +235,6 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
             ]}
           />
         </div>
-        {caseSetting}
         <ErdCheck dictionary={dictionary} readOnly={readOnly} onOpenLint={onOpenLint} onFixAll={(n, run) => {
           if (!confirm(`표준과 다른 컬럼 ${n}개의 물리명·타입·길이를 사전대로 바꿀까요?\n\n이미 DB에 있는 컬럼이면 "DB로 내보내기"에서 컬럼 이름·타입 변경(ALTER)이 생깁니다. Ctrl+Z로 한 번에 되돌릴 수 있습니다.`)) return;
           edit(run);
@@ -285,11 +262,14 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   );
 }
 
-/** 올릴 내용 확인: 몇 개인지, 이 프로젝트 표기로 어떻게 채워지는지, 바꾸기/합치기 */
-function ImportPreview({ pending, hasDictionary, dictCase, mode, onMode, onApply, onCancel }: {
-  pending: Pending; hasDictionary: boolean; dictCase: DictCase; mode: 'replace' | 'merge'; onMode: (m: 'replace' | 'merge') => void; onApply: () => void; onCancel: () => void;
+/** 올릴 내용 확인: 몇 개인지, 표기(자동 판단)와 섞임, 바꾸기/합치기 */
+function ImportPreview({ pending, current, mode, onMode, onApply, onCancel }: {
+  pending: Pending; current: DictTerm[]; mode: 'replace' | 'merge'; onMode: (m: 'replace' | 'merge') => void; onApply: () => void; onCancel: () => void;
 }) {
-  const shownCase = pending.case && (mode === 'replace' || !hasDictionary) ? pending.case : dictCase;
+  const hasDictionary = current.length > 0;
+  // 넣은 뒤의 사전 표기 (합치기면 기존 용어까지)
+  const check: StyleCheck = useMemo(() => detectStyle(mergedTerms(current, pending.terms, hasDictionary ? mode : 'replace')), [current, pending, mode, hasDictionary]);
+  const mixed = check.offenders.length > 0;
   return (
     <div className="dict-step">
       <div className="dict-step__head">
@@ -298,25 +278,39 @@ function ImportPreview({ pending, hasDictionary, dictCase, mode, onMode, onApply
       </div>
       <div className="dict-stats">
         <div><b>{pending.terms.length.toLocaleString()}</b><span>표준 용어</span></div>
+        {check.style && <div className={mixed ? 'warn' : ''}><b>{NAME_STYLE_LABEL[check.style]}</b><span>{mixed ? `다른 표기 ${check.offenders.length}개 섞임` : '물리명 표기 (자동 판단)'}</span></div>}
       </div>
       {pending.notes.length > 0 && <ul className="dict-notes">{pending.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
-      {pending.terms.length > 0 && (
-        <table className="dict-table compact">
-          <thead><tr><th>논리명</th><th>사전의 물리명</th><th>이 프로젝트에서 채울 이름</th><th>타입</th></tr></thead>
-          <tbody>
-            {pending.terms.slice(0, 5).map((t) => {
-              const st = splitDictType(t.type, t.length);
-              return (
-                <tr key={t.logical}>
-                  <td>{t.logical}</td>
-                  <td className="mono">{t.physical}</td>
-                  <td className="mono"><b>{applyDictCase(t.physical, shownCase)}</b></td>
-                  <td className="mono">{st.type ? `${st.type}${st.length ? `(${st.length})` : ''}` : ''}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {mixed ? (
+        <div className="safety-box fail">
+          <b>표기가 섞여 있어 올릴 수 없습니다</b>
+          <p className="small">{mixedStyleMessage(check)}</p>
+          <ul className="dict-offenders">
+            {check.offenders.slice(0, 20).map((t) => (
+              <li key={t.logical}><span>{t.logical}</span> <code>{t.physical}</code></li>
+            ))}
+          </ul>
+          {check.offenders.length > 20 && <p className="muted small">… 외 {check.offenders.length - 20}개</p>}
+        </div>
+      ) : (
+        pending.terms.length > 0 && (
+          <table className="dict-table compact">
+            <thead><tr><th>논리명</th><th>물리명</th><th>타입</th><th>설명</th></tr></thead>
+            <tbody>
+              {pending.terms.slice(0, 5).map((t) => {
+                const st = splitDictType(t.type, t.length);
+                return (
+                  <tr key={t.logical}>
+                    <td>{t.logical}</td>
+                    <td className="mono">{t.physical}</td>
+                    <td className="mono">{st.type ? `${st.type}${st.length ? `(${st.length})` : ''}` : ''}</td>
+                    <td className="muted">{t.description}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )
       )}
       {hasDictionary && (
         <div className="dict-mode">
@@ -331,8 +325,8 @@ function ImportPreview({ pending, hasDictionary, dictCase, mode, onMode, onApply
         </div>
       )}
       <div className="btn-row">
-        <button className="btn btn-primary" onClick={onApply}>사전에 넣기</button>
-        <button className="btn" onClick={onCancel}>취소</button>
+        <button className="btn btn-primary" disabled={mixed} onClick={onApply}>사전에 넣기</button>
+        <button className="btn" onClick={onCancel}>{mixed ? '닫고 고쳐서 다시 올리기' : '취소'}</button>
       </div>
     </div>
   );
@@ -340,6 +334,8 @@ function ImportPreview({ pending, hasDictionary, dictCase, mode, onMode, onApply
 
 /** 이 ERD로 만든 초안: 다르게 쓴 곳(충돌)과 두 가지 진행 방법 */
 function DraftView({ draft, onUse, onDownload, onBack }: { draft: Draft; onUse: () => void; onDownload: () => void; onBack: () => void }) {
+  const check = useMemo(() => detectStyle(draft.terms), [draft]);
+  const mixed = check.offenders.length > 0;
   return (
     <div className="dict-step">
       <div className="dict-step__head">
@@ -350,7 +346,14 @@ function DraftView({ draft, onUse, onDownload, onBack }: { draft: Draft; onUse: 
         <div><b>{draft.terms.length.toLocaleString()}</b><span>표준 용어</span></div>
         <div className={draft.conflicts.length ? 'warn' : ''}><b>{draft.conflicts.length}</b><span>다르게 쓴 곳</span></div>
         {draft.skipped > 0 && <div className="muted"><b>{draft.skipped}</b><span>논리명 없어 뺀 컬럼</span></div>}
+        {check.style && <div className={mixed ? 'warn' : ''}><b>{NAME_STYLE_LABEL[check.style]}</b><span>{mixed ? `다른 표기 ${check.offenders.length}개 섞임` : '물리명 표기'}</span></div>}
       </div>
+      {mixed && (
+        <div className="safety-box fail">
+          <b>이 ERD의 컬럼 이름 표기가 섞여 있어 바로 넣을 수 없습니다</b>
+          <p className="small">"엑셀로 받아 고치기"로 받아 표준용어 시트의 물리명을 한 가지 표기로 맞춘 뒤 다시 올려 주세요. 다른 표기: {check.offenders.slice(0, 10).map((t) => t.physical).join(', ')}{check.offenders.length > 10 ? ' …' : ''}</p>
+        </div>
+      )}
       {draft.conflicts.length > 0 ? (
         <>
           <p className="small">같은 논리명인데 이름·타입이 다른 곳입니다. <b>굵은 것</b>(가장 많이 쓰는 것)이 사전에 들어갑니다. 마우스를 올리면 쓰는 곳이 보입니다.</p>
@@ -374,7 +377,7 @@ function DraftView({ draft, onUse, onDownload, onBack }: { draft: Draft; onUse: 
         <p className="muted small">같은 논리명끼리 이름·타입이 모두 같습니다.</p>
       )}
       <div className="dict-choices">
-        <button className="dict-choice primary" onClick={onUse}>
+        <button className="dict-choice primary" disabled={mixed} onClick={onUse}>
           <b>바로 사전에 넣기</b>
           <span>굵게 표시된 이름·타입으로 넣습니다</span>
         </button>

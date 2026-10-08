@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, autoFixColumnPatch, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
+import { addIndex, autoFixColumnPatch, setDictEntry, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
@@ -248,6 +248,18 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                         {issue.fix?.kind === 'patchColumn' && !readOnly && (
                           <button className="btn btn-ghost small" title="이 컬럼을 고칩니다 (Ctrl+Z로 되돌리기)" onClick={() => applyColumnFix(issue)}>
                             {issue.fix.label}
+                          </button>
+                        )}
+                        {issue.fix?.kind === 'addTerm' && !readOnly && (
+                          <button
+                            className="btn btn-ghost small"
+                            title={`이 컬럼의 논리명·물리명·타입을 표준 용어 사전에 새 용어로 넣습니다`}
+                            onClick={() => {
+                              const { term } = issue.fix as Extract<LintIssue['fix'], { kind: 'addTerm' }>;
+                              if (useStore.getState().editDictionary((d) => setDictEntry(d, term))) useStore.getState().showNotice({ text: `용어 사전에 추가했습니다: ${term.logical} = ${term.physical}` });
+                            }}
+                          >
+                            사전에 추가
                           </button>
                         )}
                         {issue.fix?.kind === 'removeRelation' && !readOnly && (

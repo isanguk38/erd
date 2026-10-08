@@ -3,7 +3,7 @@
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
-import { checkColumnAgainstDictionary, describeMatch, dictIndex, type Dictionary } from './dictionary';
+import { checkColumnAgainstDictionary, describeMatch, dictIndex, lookupPhysical, NAME_STYLE_LABEL, styleSuggestion, type DictTerm, type Dictionary } from './dictionary';
 
 export type LintRule =
   | 'no-primary-key'
@@ -18,7 +18,8 @@ export type LintRule =
   | 'type-warning'
   | 'type-ignored'
   | 'dict-mismatch'
-  | 'dict-unknown';
+  | 'dict-unknown'
+  | 'dict-style';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -33,7 +34,11 @@ export interface LintIssue {
   columnName?: string;
   message: string;
   /** 바로 고칠 수 있으면 방법 */
-  fix?: { kind: 'addIndex'; tableId: string; columnIds: string[] } | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> } | { kind: 'removeRelation'; relationId: string };
+  fix?:
+    | { kind: 'addIndex'; tableId: string; columnIds: string[] }
+    | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> }
+    | { kind: 'removeRelation'; relationId: string }
+    | { kind: 'addTerm'; term: DictTerm };
 }
 
 export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverity; description: string }> = {
@@ -48,7 +53,8 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
   'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
-  'dict-unknown': { label: '사전에 없는 용어', severity: 'info', description: '논리명이 표준 용어 사전에 없습니다. 사전에 용어를 추가하거나 사전에 있는 표준 용어로 바꾸세요.' },
+  'dict-unknown': { label: '사전에 없는 용어', severity: 'warning', description: '논리명이 표준 용어 사전에 없습니다. "사전에 추가"로 이 컬럼의 이름·타입을 새 용어로 넣거나, 사전에 있는 표준 용어로 바꾸세요.' },
+  'dict-style': { label: '사전과 다른 표기', severity: 'warning', description: '물리명 표기가 용어 사전(snake_case·camelCase 등)과 다릅니다. 사전과 같은 표기로 바꾸세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
 
@@ -219,9 +225,27 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
     for (const t of schema.tables) {
       for (const c of t.columns) {
         const r = checkColumnAgainstDictionary(index, c);
-        if (!r || r.status === 'ok') continue;
-        if (r.status === 'unknown') {
-          add('dict-unknown', t, `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 표준 용어 사전에 없습니다`, { columnId: c.id, columnName: c.name });
+        if (r?.status === 'ok') continue;
+        // 사전에 없는 컬럼: 표기가 사전과 다르면 경고, 같으면 사전에 추가하라고
+        if (!r || r.status === 'unknown') {
+          const style = styleSuggestion(index, c.name);
+          if (style) {
+            add('dict-style', t, `${t.name}.${c.name}: 사전은 ${NAME_STYLE_LABEL[style.style]}입니다 — ${style.suggestion}(으)로 바꾸세요`, {
+              columnId: c.id,
+              columnName: c.name,
+              fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: `${style.suggestion}(으)로`, patch: { name: style.suggestion } },
+            });
+            continue;
+          }
+          if (!r) continue;
+          const owner = lookupPhysical(index, c.name);
+          add('dict-unknown', t, owner
+            ? `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 사전에 없습니다 (이 물리명은 사전에 "${owner.logical}"(으)로 있음)`
+            : `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 표준 용어 사전에 없습니다 — 사전에 추가해 주세요`, {
+            columnId: c.id,
+            columnName: c.name,
+            fix: owner ? { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: `논리명을 "${owner.logical}"(으)로`, patch: { logicalName: owner.logical } } : { kind: 'addTerm', term: { logical: c.logicalName.trim(), physical: c.name, ...(c.type ? { type: c.type } : {}), ...(c.length ? { length: c.length } : {}), ...(c.comment.trim() ? { description: c.comment.trim() } : {}) } },
+          });
           continue;
         }
         add('dict-mismatch', t, `${t.name}.${c.name}: "${c.logicalName}"의 표준은 ${describeMatch(r.match!)}입니다 (다른 점: ${r.diffs.join(', ')})`, {

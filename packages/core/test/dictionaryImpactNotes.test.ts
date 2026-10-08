@@ -14,10 +14,14 @@ import {
   notesOf,
   propagateColumnType,
   readDictionary,
-  readDictCase,
-  applyDictCase,
-  setDictCase,
   clearDictionary,
+  detectStyle,
+  toStyle,
+  dictionaryStyle,
+  suggestTerms,
+  setDictEntry,
+  syncDictionaryForAi,
+  addMissingTerms,
   readNotes,
   readSchema,
   removeNote,
@@ -31,80 +35,110 @@ import {
 import { dictionaryWorkbook, parseDictionaryWorkbook } from '../src/export/dictionaryExcel';
 
 const dict: Dictionary = {
-  case: 'asis',
   terms: [
-    { logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR', length: '20' },
-    { logical: '등록일시', physical: 'REG_DT', type: 'DATETIME' },
-    { logical: '비고', physical: 'RMK' },
+    { logical: '회원번호', physical: 'mbr_no', type: 'VARCHAR', length: '20' },
+    { logical: '등록일시', physical: 'reg_dt', type: 'DATETIME' },
+    { logical: '비고', physical: 'rmk' },
+    { logical: '회원메모', physical: 'memory_id', type: 'BIGINT' },
   ],
 };
 
 describe('표준 용어 사전', () => {
-  it('용어를 찾는다 (띄어쓰기 무시). 사전에 없으면 만들지 않는다 (단어 조합 없음)', () => {
-    expect(lookupTerm(dict, '회원 번호')).toEqual({ physical: 'MBR_NO', type: 'VARCHAR', length: '20' });
+  it('용어를 찾는다 (띄어쓰기 무시). 사전에 없으면 만들지 않는다', () => {
+    expect(lookupTerm(dict, '회원 번호')).toEqual({ physical: 'mbr_no', type: 'VARCHAR', length: '20' });
     expect(lookupTerm(dict, '회원등록일시')).toBeNull();
-    expect(lookupTerm(dict, '배송지')).toBeNull();
-    expect(lookupTerm({ ...dict, case: 'lower' }, '회원번호')?.physical).toBe('mbr_no');
-    expect(lookupPhysical(dict, 'mbr_no')?.logical).toBe('회원번호');
+    expect(lookupPhysical(dict, 'MBR_NO')?.logical).toBe('회원번호');
   });
 
-  it('camelCase: mbrNo처럼, 검사·물리명 찾기도 같은 것으로 본다', () => {
-    const camel = { ...dict, case: 'camel' as const };
-    expect(lookupTerm(camel, '회원번호')?.physical).toBe('mbrNo');
-    expect(lookupTerm(camel, '등록일시')?.physical).toBe('regDt');
-    expect(checkColumnAgainstDictionary(camel, { name: 'mbrNo', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.status).toBe('ok');
-    // camelCase로 정했으면 MBR_NO는 표기가 달라 표준대로 고치라고 알린다
-    expect(checkColumnAgainstDictionary(camel, { name: 'MBR_NO', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.patch?.name).toBe('mbrNo');
-    expect(lookupPhysical(camel, 'mbrNo')?.logical).toBe('회원번호');
+  it('표기 판단: 가장 많이 맞는 표기, 한 단어는 어느 쪽에도 맞음, 다른 표기는 섞인 것', () => {
+    expect(detectStyle(dict.terms)).toEqual({ style: 'snake', offenders: [] });
+    expect(detectStyle([{ logical: 'a', physical: 'MBR_NO' }, { logical: 'b', physical: 'PRICE' }]).style).toBe('SNAKE');
+    expect(detectStyle([{ logical: 'a', physical: 'mbrNo' }, { logical: 'b', physical: 'price' }]).style).toBe('camel');
+    const mixed = detectStyle([...dict.terms, { logical: '회원나이', physical: 'mbrAge' }]);
+    expect(mixed.style).toBe('snake');
+    expect(mixed.offenders.map((t) => t.physical)).toEqual(['mbrAge']);
+    expect(toStyle('memberAge', 'snake')).toBe('member_age');
+    expect(toStyle('member_age', 'camel')).toBe('memberAge');
+    expect(dictionaryStyle(dict)).toBe('snake');
   });
 
-  it('표기 바꾸기: 낱말로 나눠 snake_case·SNAKE_CASE·camelCase로', () => {
-    expect(['MBR_NO', 'mbr_no', 'MbrNo', 'mbrNo'].map((n) => applyDictCase(n, 'lower'))).toEqual(['mbr_no', 'mbr_no', 'mbr_no', 'mbr_no']);
-    expect(['MBR_NO', 'mbrNo'].map((n) => applyDictCase(n, 'upper'))).toEqual(['MBR_NO', 'MBR_NO']);
-    expect(['MBR_NO', 'mbr_no'].map((n) => applyDictCase(n, 'camel'))).toEqual(['mbrNo', 'mbrNo']);
-    expect(applyDictCase('MbrNo', 'asis')).toBe('MbrNo');
+  it('입력 중 후보: 앞부분이 맞는 것 먼저, 물리명·논리명 양쪽', () => {
+    expect(suggestTerms(dict, 'm', 'physical').map((t) => t.physical)).toEqual(['mbr_no', 'memory_id', 'rmk']);
+    expect(suggestTerms(dict, 'mem', 'physical').map((t) => t.physical)).toEqual(['memory_id']);
+    expect(suggestTerms(dict, '회원', 'logical').map((t) => t.logical)).toEqual(['회원번호', '회원메모']);
+    expect(suggestTerms(dict, 'mbr_no', 'physical')).toEqual([]);
   });
 
-  it('컬럼 검사: 대소문자는 무시하고 물리명·타입·길이를 비교', () => {
+  it('컬럼 검사: 물리명은 사전에 적힌 그대로, 타입·길이도 비교', () => {
     expect(checkColumnAgainstDictionary(dict, { name: 'mbr_no', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.status).toBe('ok');
     const r = checkColumnAgainstDictionary(dict, { name: 'member_id', logicalName: '회원번호', type: 'BIGINT', length: '' });
-    expect(r?.status).toBe('mismatch');
-    expect(r?.patch).toEqual({ name: 'MBR_NO', type: 'VARCHAR', length: '20' });
-    // 타입이 없는 용어는 물리명만 본다
+    expect(r?.patch).toEqual({ name: 'mbr_no', type: 'VARCHAR', length: '20' });
+    expect(checkColumnAgainstDictionary(dict, { name: 'MBR_NO', logicalName: '회원번호', type: 'VARCHAR', length: '20' })?.status).toBe('mismatch');
     expect(checkColumnAgainstDictionary(dict, { name: 'rmk', logicalName: '비고', type: 'TEXT', length: '' })?.status).toBe('ok');
     expect(checkColumnAgainstDictionary(dict, { name: 'x', logicalName: '모르는말', type: 'TEXT', length: '' })?.status).toBe('unknown');
-    expect(checkColumnAgainstDictionary(dict, { name: 'x', logicalName: '', type: 'TEXT', length: '' })).toBeNull();
   });
 
-  it('설계 검사: 사전이 있을 때만 규칙이 돈다', () => {
+  it('설계 검사: 사전에 없는 용어는 경고 + 사전에 추가, 사전과 다른 표기는 경고 + 바꾸기', () => {
     const { schema } = applyCommands(emptySchema(), [
-      { op: 'createTable', name: 'member', columns: [{ name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true }, { name: 'reg_dt', logicalName: '등록일시', type: 'DATETIME' }, { name: 'zip', logicalName: '우편번호', type: 'VARCHAR(5)' }] },
+      { op: 'createTable', name: 'member', columns: [
+        { name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true },
+        { name: 'zip_cd', logicalName: '우편번호', type: 'VARCHAR(5)' },
+        { name: 'memberAge', logicalName: '회원나이', type: 'INT' },
+        { name: 'mbr_no', logicalName: '회원고유번호', type: 'VARCHAR(20)' },
+      ] },
     ]);
-    const without = lintSchema(schema, 'mysql');
-    expect(without.some((i) => i.rule.startsWith('dict-'))).toBe(false);
+    expect(lintSchema(schema, 'mysql').some((i) => i.rule.startsWith('dict-'))).toBe(false);
     const issues = lintSchema(schema, 'mysql', { dictionary: dict });
-    const mismatch = issues.find((i) => i.rule === 'dict-mismatch');
-    expect(mismatch?.columnName).toBe('member_id');
-    expect(mismatch?.fix).toMatchObject({ kind: 'patchColumn', patch: { name: 'MBR_NO', type: 'VARCHAR', length: '20' } });
-    expect(issues.filter((i) => i.rule === 'dict-unknown').map((i) => i.columnName)).toEqual(['zip']);
+    expect(issues.find((i) => i.rule === 'dict-mismatch')?.columnName).toBe('member_id');
+    const unknown = issues.filter((i) => i.rule === 'dict-unknown');
+    expect(unknown.every((i) => i.severity === 'warning')).toBe(true);
+    expect(unknown.find((i) => i.columnName === 'zip_cd')?.fix).toEqual({ kind: 'addTerm', term: { logical: '우편번호', physical: 'zip_cd', type: 'VARCHAR', length: '5' } });
+    // 물리명이 이미 다른 논리명으로 사전에 있으면 사전에 추가하지 않고 논리명을 맞추라고
+    expect(unknown.find((i) => i.columnName === 'mbr_no')?.fix).toMatchObject({ kind: 'patchColumn', patch: { logicalName: '회원번호' } });
+    const style = issues.find((i) => i.rule === 'dict-style');
+    expect(style?.columnName).toBe('memberAge');
+    expect(style?.fix).toMatchObject({ kind: 'patchColumn', patch: { name: 'member_age' } });
   });
 
-  it('Y 문서에 저장: replace·merge, 비우면 null', () => {
+  it('문서에 넣기: 표기가 섞이면 넣지 않고, 같은 물리명·다른 표기 용어는 하나씩 추가도 막는다', () => {
     const doc = new Y.Doc();
     expect(readDictionary(doc)).toBeNull();
+    expect(() => writeDictionary(doc, { terms: [...dict.terms, { logical: '회원나이', physical: 'mbrAge' }] })).toThrow(/섞여/);
+    expect(readDictionary(doc)).toBeNull();
     writeDictionary(doc, { terms: dict.terms });
-    expect(readDictionary(doc)?.terms).toHaveLength(3);
-    writeDictionary(doc, { terms: [{ logical: '회원번호', physical: 'MEMBER_NO' }, { logical: ' ', physical: 'X' }] }, 'merge');
-    const d = readDictionary(doc)!;
-    expect(d.terms).toHaveLength(3);
-    expect(d.terms.find((t) => t.logical === '회원번호')?.physical).toBe('MEMBER_NO');
-    writeDictionary(doc, { terms: [{ logical: '비고', physical: 'RMK' }] }, 'replace');
-    expect(readDictionary(doc)?.terms).toHaveLength(1);
-    // 표기 설정은 사전을 비워도 남는다
-    setDictCase(doc, 'camel');
+    expect(readDictionary(doc)?.terms).toHaveLength(4);
+    // 합치기에서도 기존 용어와 섞이면 막는다
+    expect(() => writeDictionary(doc, { terms: [{ logical: '회원나이', physical: 'MBR_AGE' }] }, 'merge')).toThrow(/섞여/);
+    expect(() => setDictEntry(doc, { logical: '회원나이', physical: 'mbrAge' })).toThrow(/snake_case.*mbr_age/);
+    expect(() => setDictEntry(doc, { logical: '회원고유번호', physical: 'mbr_no' })).toThrow(/이미 "회원번호"/);
+    setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'INT' });
+    // 자기 자신을 고칠 때는 같은 물리명이어도 된다
+    setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'SMALLINT' }, '회원나이');
+    expect(readDictionary(doc)?.terms.find((t) => t.logical === '회원나이')?.type).toBe('SMALLINT');
     clearDictionary(doc);
     expect(readDictionary(doc)).toBeNull();
-    expect(readDictCase(doc)).toBe('camel');
+  });
+
+  it('AI가 만든 컬럼: 사전에 없는 용어는 넣고 (같은 논리명·물리명은 한 번만), 다른 표기·이미 있는 물리명은 넣지 않고 안내', () => {
+    const before = emptySchema();
+    const { schema: after } = applyCommands(before, [
+      { op: 'createTable', name: 'orders', columns: [
+        { name: 'order_no', logicalName: '주문번호', type: 'VARCHAR(20)', primaryKey: true },
+        { name: 'mbr_no', logicalName: '회원번호', type: 'VARCHAR(20)' },
+        { name: 'orderAmt', logicalName: '주문금액', type: 'DECIMAL(12,2)' },
+        { name: 'memory_id', logicalName: '메모번호', type: 'BIGINT' },
+      ] },
+      { op: 'createTable', name: 'order_item', columns: [{ name: 'order_no', logicalName: '주문번호', type: 'VARCHAR(20)' }] },
+    ]);
+    const r = syncDictionaryForAi(dict, before, after);
+    expect(r.add).toEqual([{ logical: '주문번호', physical: 'order_no', type: 'VARCHAR', length: '20' }]);
+    expect(r.notes.join('\n')).toContain('orderAmt: 사전 표기(snake_case)와 다릅니다 — order_amt');
+    expect(r.notes.join('\n')).toContain('memory_id은(는) 사전에 "회원메모"');
+    const doc = new Y.Doc();
+    writeDictionary(doc, { terms: dict.terms });
+    expect(addMissingTerms(doc, [...r.add, ...r.add, { logical: '다른이름', physical: 'order_no' }]).map((t) => t.physical)).toEqual(['order_no']);
+    expect(readDictionary(doc)?.terms).toHaveLength(5);
+    expect(syncDictionaryForAi(null, before, after)).toEqual({ add: [], notes: [] });
   });
 
   it('엑셀: 양식을 다시 읽으면 같은 내용, 회사 양식 머리글도 찾는다', async () => {
@@ -144,7 +178,7 @@ describe('ERD에서 사전 만들기', () => {
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0].variants.map((v) => [v.physical, v.columns.length])).toEqual([['member_id', 2], ['mbr_no', 1]]);
     // 검토용 엑셀: 충돌 시트는 다시 올릴 때 읽지 않는다
-    const buf = await dictionaryWorkbook({ terms, case: 'asis' }, { conflicts });
+    const buf = await dictionaryWorkbook({ terms }, { conflicts });
     const parsed = await parseDictionaryWorkbook(buf);
     expect(parsed.terms).toEqual(terms);
     expect(parsed.notes.join()).not.toContain('충돌');

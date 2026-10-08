@@ -979,3 +979,13 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 @media (max-width: 720px) {
   .dict-alt, .dict-choices { grid-template-columns: 1fr; }
 }
+
+/* 표준 용어 자동완성 (편집 창 컬럼 이름) */
+.term-suggest { position: fixed; z-index: 1000; list-style: none; margin: 0; padding: 4px 0; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 8px 24px rgb(15 23 42 / 0.18); max-height: 280px; overflow: auto; font-size: 12px; }
+.term-suggest li { display: grid; grid-template-columns: minmax(90px, auto) 1fr auto; gap: 10px; padding: 5px 10px; cursor: pointer; align-items: center; }
+.term-suggest li.active { background: var(--accent-soft); }
+.term-suggest .term-suggest__hint { display: block; cursor: default; font-size: 11px; border-top: 1px solid var(--border); margin-top: 2px; padding-top: 5px; }
+.dict-style-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; }
+.dict-style-help { margin: 4px 0 0; }
+.dict-offenders { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.dict-stats > div b { white-space: nowrap; }

@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { requestFocus, takeFocus } from '../lib/focus';
 import {
   addColumn,
@@ -16,6 +16,11 @@ import {
   dictionaryPatch,
   lookupPhysical,
   lookupTerm,
+  NAME_STYLE_LABEL,
+  setDictEntry,
+  styleSuggestion,
+  suggestTerms,
+  type DictTerm,
   propagateColumnType,
   tableDeleteImpact,
   typeMismatches,
@@ -73,36 +78,100 @@ export function Inspector() {
   return readOnly ? <fieldset className="readonly-fieldset" disabled>{content}</fieldset> : content;
 }
 
-/** 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해). */
-function TextInput({ value, onCommit, placeholder, className, list, issue, focusKey, onEnter }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string; issue?: Mark; focusKey?: string; onEnter?: () => void }) {
+/**
+ * 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해).
+ * suggest를 주면 입력하는 동안 아래에 후보(표준 용어)를 보여 주고, 고르면 onPick (↑↓ Enter, 마우스)
+ */
+function TextInput({ value, onCommit, placeholder, className, list, issue, focusKey, onEnter, suggest, onPick }: {
+  value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string; issue?: Mark; focusKey?: string; onEnter?: () => void;
+  suggest?: (query: string) => DictTerm[]; onPick?: (term: DictTerm) => void;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const [closed, setClosed] = useState(false);
+  const inputEl = useRef<HTMLInputElement | null>(null);
+  // 후보를 골랐으면 칸을 떠날 때 입력하던 글자를 저장하지 않는다 (고른 용어가 덮이지 않게)
+  const picked = useRef(false);
   // 방금 만든 테이블·컬럼이면 이름 칸에 커서를 두고 전체 선택 (바로 타이핑해 이름을 바꾸게)
   const ref = useCallback((el: HTMLInputElement | null) => {
+    inputEl.current = el;
     if (el && takeFocus(focusKey)) requestAnimationFrame(() => { el.focus(); el.select(); });
   }, [focusKey]);
   const commit = () => {
-    if (draft !== null && draft !== value) onCommit(draft);
+    if (picked.current) picked.current = false;
+    else if (draft !== null && draft !== value) onCommit(draft);
     setDraft(null);
   };
+  const items = suggest && draft !== null && !closed ? suggest(draft) : [];
+  const pick = (term: DictTerm) => {
+    picked.current = true;
+    setDraft(null);
+    onPick?.(term);
+    inputEl.current?.blur();
+  };
+  const rect = items.length ? inputEl.current?.getBoundingClientRect() : undefined;
   return (
-    <input
-      ref={ref}
-      className={[className, issue?.className].filter(Boolean).join(' ') || undefined}
-      value={draft ?? value}
-      // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다. 타입 문제가 있으면 그 이유도
-      title={[issue?.title, draft ?? value].filter(Boolean).join('\n\n') || undefined}
-      placeholder={placeholder}
-      list={list}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          (e.target as HTMLInputElement).blur();
-          onEnter?.();
-        }
-        if (e.key === 'Escape') setDraft(null);
-      }}
-    />
+    <>
+      <input
+        ref={ref}
+        className={[className, issue?.className].filter(Boolean).join(' ') || undefined}
+        value={draft ?? value}
+        // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다. 타입 문제가 있으면 그 이유도
+        title={[issue?.title, draft ?? value].filter(Boolean).join('\n\n') || undefined}
+        placeholder={placeholder}
+        list={list}
+        autoComplete="off"
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setActive(0);
+          setClosed(false);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (items.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            e.preventDefault();
+            setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
+            return;
+          }
+          if (items.length && e.key === 'Enter') {
+            e.preventDefault();
+            pick(items[Math.min(active, items.length - 1)]);
+            return;
+          }
+          if (e.key === 'Enter') {
+            (e.target as HTMLInputElement).blur();
+            onEnter?.();
+          }
+          if (e.key === 'Escape') {
+            if (items.length) return setClosed(true);
+            setDraft(null);
+          }
+        }}
+      />
+      {rect && (
+        <ul className="term-suggest" style={{ left: rect.left, top: rect.bottom + 2, minWidth: Math.max(rect.width, 280) }} role="listbox">
+          {items.map((t, i) => (
+            <li
+              key={t.logical}
+              role="option"
+              aria-selected={i === active}
+              className={i === active ? 'active' : ''}
+              // 누르는 순간 입력 칸이 포커스를 잃지 않게 (그래야 고른 용어가 들어간다)
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(t);
+              }}
+              onMouseEnter={() => setActive(i)}
+            >
+              <b className="mono">{t.physical}</b>
+              <span>{t.logical}</span>
+              <span className="muted mono">{t.type ? `${t.type}${t.length ? `(${t.length})` : ''}` : ''}</span>
+            </li>
+          ))}
+          <li className="term-suggest__hint muted">표준 용어 사전 · ↑↓ Enter로 고르기 · Esc 닫기</li>
+        </ul>
+      )}
+    </>
   );
 }
 
@@ -147,9 +216,52 @@ function TableEditor({ table }: { table: Table }) {
   // 표준 용어 사전: 논리명을 넣으면 표준 물리명·타입을 채우고(아직 이름을 안 정한 컬럼), 이미 이름이 있으면 바꿀지 묻는다
   const dictionary = useStore((s) => s.dictionary);
   const dict = dictionary ? dictIndex(dictionary) : null;
+  // 사전에 없는 용어·다른 표기면 안내 (사전에 추가 / 표기 바꾸기)
+  const adviseDictionary = (column: Column) => {
+    if (!dict) return;
+    const now = useStore.getState().schema.tables.find((t) => t.id === table.id)?.columns.find((c) => c.id === column.id);
+    if (!now || DEFAULT_COLUMN_NAME.test(now.name)) return; // 물리명을 아직 안 정했으면 다음 입력을 기다린다
+    const style = styleSuggestion(dict, now.name);
+    const r = checkColumnAgainstDictionary(dict, now);
+    if (style && (!r || r.status === 'unknown')) {
+      useStore.getState().showNotice({
+        text: `용어 사전은 ${NAME_STYLE_LABEL[style.style]}입니다 — ${now.name} 대신 ${style.suggestion}`,
+        action: { label: `${style.suggestion}(으)로 바꾸기`, run: () => edit((d) => void updateColumn(d, table.id, now.id, { name: style.suggestion })) },
+      });
+      return;
+    }
+    if (r?.status !== 'unknown') return;
+    const owner = lookupPhysical(dict, now.name);
+    if (owner) {
+      useStore.getState().showNotice({ text: `"${now.logicalName}"은(는) 용어 사전에 없습니다. 물리명 ${now.name}은(는) 사전에 "${owner.logical}"(으)로 있습니다`, action: { label: `논리명을 "${owner.logical}"(으)로`, run: () => edit((d) => void updateColumn(d, table.id, now.id, { logicalName: owner.logical })) } });
+      return;
+    }
+    useStore.getState().showNotice({
+      text: `"${now.logicalName}"(${now.name})은(는) 용어 사전에 없습니다 — 용어 사전에 추가해 주세요`,
+      action: {
+        label: '사전에 추가',
+        run: () => {
+          const term: DictTerm = { logical: now.logicalName.trim(), physical: now.name, ...(now.type ? { type: now.type } : {}), ...(now.length ? { length: now.length } : {}), ...(now.comment.trim() ? { description: now.comment.trim() } : {}) };
+          if (useStore.getState().editDictionary((d) => setDictEntry(d, term))) useStore.getState().showNotice({ text: `용어 사전에 추가했습니다: ${term.logical} = ${term.physical}` });
+        },
+      },
+    });
+  };
+  // 자동완성에서 고른 표준 용어: 물리명·논리명·타입·길이를 한 번에
+  const pickTerm = (column: Column, term: DictTerm) => {
+    const st = dictionaryPatch({ physical: term.physical, type: term.type, length: term.length });
+    setColumn(column, { ...st, logicalName: term.logical });
+    useStore.getState().showNotice({ text: `표준 용어: ${term.logical} → ${describeMatch({ physical: term.physical, type: term.type, length: term.length })} (Ctrl+Z로 되돌리기)` });
+  };
+  const suggestByPhysical = dictionary ? (q: string) => suggestTerms(dictionary, q, 'physical') : undefined;
+  const suggestByLogical = dictionary ? (q: string) => suggestTerms(dictionary, q, 'logical') : undefined;
   const setLogicalName = (column: Column, logicalName: string) => {
     const match = dict ? lookupTerm(dict, logicalName) : null;
-    if (!match) return setColumn(column, { logicalName });
+    if (!match) {
+      setColumn(column, { logicalName });
+      adviseDictionary(column);
+      return;
+    }
     const patch = dictionaryPatch(match);
     if (DEFAULT_COLUMN_NAME.test(column.name) || !column.name.trim()) {
       setColumn(column, { logicalName, ...patch });
@@ -170,13 +282,22 @@ function TableEditor({ table }: { table: Table }) {
     const term = dict && !column.logicalName.trim() ? lookupPhysical(dict, name) : null;
     setColumn(column, term ? { name, logicalName: term.logical } : { name });
     if (term) useStore.getState().showNotice({ text: `표준 용어 사전: ${name} → 논리명 ${term.logical} (Ctrl+Z로 되돌리기)` });
+    else adviseDictionary(column);
   };
   const dictMark = (column: Column): Mark | undefined => {
     const r = checkColumnAgainstDictionary(dict, column);
     if (!r || r.status === 'ok') return undefined;
     return r.status === 'unknown'
-      ? { className: 'dict-unknown', title: '표준 용어 사전에 없는 논리명입니다' }
+      ? { className: 'dict-unknown', title: '표준 용어 사전에 없는 논리명입니다 — 용어 사전에 추가해 주세요' }
       : { className: 'dict-mismatch', title: `표준: ${describeMatch(r.match!)} (다른 점: ${r.diffs.join(', ')}) — 설계 검사에서 "표준대로"로 맞출 수 있습니다` };
+  };
+  // 물리명 칸: 사전에 없는 컬럼인데 표기가 사전과 다르면
+  const styleMark = (column: Column): Mark | undefined => {
+    if (DEFAULT_COLUMN_NAME.test(column.name)) return undefined;
+    const r = checkColumnAgainstDictionary(dict, column);
+    if (r?.status === 'ok' || r?.status === 'mismatch') return undefined;
+    const s = styleSuggestion(dict, column.name);
+    return s ? { className: 'dict-mismatch', title: `용어 사전은 ${NAME_STYLE_LABEL[s.style]}입니다 — ${s.suggestion}(으)로 바꾸세요` } : undefined;
   };
   const setTableLogicalName = (logicalName: string) => {
     const match = dict && DEFAULT_TABLE_NAME.test(table.name) ? lookupTerm(dict, logicalName) : null;
@@ -252,11 +373,6 @@ function TableEditor({ table }: { table: Table }) {
           <h4>컬럼 ({table.columns.length})</h4>
           <button className="btn btn-sm" onClick={addColumnAndFocus} title="컬럼 추가 (마지막 컬럼 이름에서 Enter로도 추가)">+ 컬럼</button>
         </div>
-        {dictionary && (
-          <datalist id="dict-terms">
-            {dictionary.terms.map((t) => <option key={t.logical} value={t.logical}>{t.physical}</option>)}
-          </datalist>
-        )}
         <datalist id="type-suggestions">
           {dialect.typeSuggestions.map((t) => <option key={t} value={t} />)}
         </datalist>
@@ -269,8 +385,8 @@ function TableEditor({ table }: { table: Table }) {
           {table.columns.map((c, i) => (
             <div key={c.id} className="column-grid__row">
               {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
-              <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
-              <TextInput value={c.logicalName} list={dictionary ? 'dict-terms' : undefined} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
+              <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} issue={styleMark(c)} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByPhysical} onPick={(t) => pickTerm(c, t)} />
+              <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />
               <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, { type: type.toUpperCase() })} />
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
