@@ -26,6 +26,8 @@ const PATHS: Record<string, string> = {
   area: 'M3 6h7l2 2h9v11H3z',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   list: 'M4 6h16M4 12h16M4 18h10',
+  note: 'M5 3h14v11l-7 7H5zM12 21v-7h7',
+  book: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z',
 };
 
 export function Icon({ name, size = 16 }: { name: keyof typeof PATHS | string; size?: number }) {

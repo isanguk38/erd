@@ -8,7 +8,17 @@ import {
   addIndex,
   autoFixColumnPatch,
   canAutoIncrement,
+  checkColumnAgainstDictionary,
+  columnDeleteImpact,
   createCheck,
+  describeMatch,
+  dictIndex,
+  dictionaryPatch,
+  lookupPhysical,
+  lookupTerm,
+  propagateColumnType,
+  tableDeleteImpact,
+  typeMismatches,
   findTable,
   foreignKeyColumnIds,
   getDialect,
@@ -37,6 +47,12 @@ import { ColorPicker, usedColors } from './ColorPicker';
 import { TemplateApplyMenu } from './TemplatePanels';
 import { TableComments } from './Comments';
 import { useDialect } from '../lib/hooks';
+import { confirmImpact } from '../lib/impact';
+
+/** 아직 이름을 정하지 않은 새 컬럼·테이블 (표준 용어 사전으로 이름을 채워도 되는 것) */
+const DEFAULT_COLUMN_NAME = /^column(_\d+)?$/;
+const DEFAULT_TABLE_NAME = /^new_table(_\d+)?$/;
+const fullType = (c: { type: string; length: string }) => `${c.type}${c.length ? `(${c.length})` : ''}`;
 
 const ACTIONS: ReferentialAction[] = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
 
@@ -115,7 +131,57 @@ function TableEditor({ table }: { table: Table }) {
   const setColumnFixed = (column: Column, patch: Partial<Column>) => {
     const fixed = autoFixColumnPatch(dialect, column, patch);
     setColumn(column, fixed.patch);
-    if (fixed.notes.length) useStore.getState().showNotice({ text: `함께 고쳤습니다: ${fixed.notes.join(' / ')} (Ctrl+Z로 되돌리기)` });
+    const fixedText = fixed.notes.length ? `함께 고쳤습니다: ${fixed.notes.join(' / ')}. ` : '';
+    // 영향도: 타입·길이를 바꿨는데 FK로 이어진 컬럼은 그대로면 같이 바꿀지 묻는다
+    const off = typeMismatches(useStore.getState().schema, table.id, column.id);
+    if (off.length && (fixed.patch.type !== undefined || fixed.patch.length !== undefined)) {
+      const after = useStore.getState().schema.tables.find((t) => t.id === table.id)?.columns.find((c) => c.id === column.id);
+      useStore.getState().showNotice({
+        text: `${fixedText}${table.name}.${column.name}와 FK로 이어진 ${off.slice(0, 3).map((l) => `${l.table}.${l.column}(${fullType(l)})`).join(', ')}${off.length > 3 ? ` 외 ${off.length - 3}개` : ''}는 타입이 다릅니다`,
+        action: { label: `${off.length}개도 ${after ? fullType(after) : '같은 타입'}으로`, run: () => edit((d) => void propagateColumnType(d, table.id, column.id)) },
+      });
+      return;
+    }
+    if (fixedText) useStore.getState().showNotice({ text: `${fixedText}(Ctrl+Z로 되돌리기)` });
+  };
+  // 표준 용어 사전: 논리명을 넣으면 표준 물리명·타입을 채우고(아직 이름을 안 정한 컬럼), 이미 이름이 있으면 바꿀지 묻는다
+  const dictionary = useStore((s) => s.dictionary);
+  const dict = dictionary ? dictIndex(dictionary) : null;
+  const setLogicalName = (column: Column, logicalName: string) => {
+    const match = dict ? lookupTerm(dict, logicalName) : null;
+    if (!match) return setColumn(column, { logicalName });
+    const patch = dictionaryPatch(match);
+    if (DEFAULT_COLUMN_NAME.test(column.name) || !column.name.trim()) {
+      setColumn(column, { logicalName, ...patch });
+      useStore.getState().showNotice({ text: `표준 용어 사전: ${logicalName} → ${describeMatch(match)} (Ctrl+Z로 되돌리기)` });
+      return;
+    }
+    setColumn(column, { logicalName });
+    const check = checkColumnAgainstDictionary(dict, { ...column, logicalName });
+    if (check?.status === 'mismatch') {
+      useStore.getState().showNotice({
+        text: `표준 용어 사전의 ${logicalName}은(는) ${describeMatch(match)}입니다 (지금: ${column.name} ${fullType(column)})`,
+        action: { label: '표준대로 바꾸기', run: () => edit((d) => void updateColumn(d, table.id, column.id, check.patch!)) },
+      });
+    }
+  };
+  // 물리명만 넣고 논리명이 비어 있으면 사전에서 논리명을 채운다
+  const setPhysicalName = (column: Column, name: string) => {
+    const term = dict && !column.logicalName.trim() ? lookupPhysical(dict, name) : null;
+    setColumn(column, term ? { name, logicalName: term.logical } : { name });
+    if (term) useStore.getState().showNotice({ text: `표준 용어 사전: ${name} → 논리명 ${term.logical} (Ctrl+Z로 되돌리기)` });
+  };
+  const dictMark = (column: Column): Mark | undefined => {
+    const r = checkColumnAgainstDictionary(dict, column);
+    if (!r || r.status === 'ok') return undefined;
+    return r.status === 'unknown'
+      ? { className: 'dict-unknown', title: '표준 용어 사전에 없는 논리명입니다' }
+      : { className: 'dict-mismatch', title: `표준: ${describeMatch(r.match!)} (다른 점: ${r.diffs.join(', ')}) — 설계 검사에서 "표준대로"로 맞출 수 있습니다` };
+  };
+  const setTableLogicalName = (logicalName: string) => {
+    const match = dict && DEFAULT_TABLE_NAME.test(table.name) ? lookupTerm(dict, logicalName) : null;
+    setTable(match ? { logicalName, name: match.physical } : { logicalName });
+    if (match) useStore.getState().showNotice({ text: `표준 용어 사전: ${logicalName} → ${match.physical} (Ctrl+Z로 되돌리기)` });
   };
   const setAutoIncrement = (column: Column, on: boolean) => {
     if (on && !canAutoIncrement(dialect, column)) {
@@ -156,8 +222,9 @@ function TableEditor({ table }: { table: Table }) {
             <button
               className="btn btn-danger btn-sm"
               onClick={() => {
-                const inAreas = (useStore.getState().schema.areas ?? []).some((a) => a.tableIds.includes(table.id));
-                if (!confirm(`${table.name} 테이블을 삭제할까요?${inAreas ? ' 모든 영역에서도 사라집니다.' : ''}`)) return;
+                // 영향도: 이 테이블을 참조하는 다른 테이블의 외래키, 영역
+                const impact = tableDeleteImpact(useStore.getState().schema, table.id);
+                if (!(impact.length ? confirmImpact(`${table.name} 테이블을 삭제하면 함께 바뀝니다:`, impact) : confirm(`${table.name} 테이블을 삭제할까요?`))) return;
                 edit((d) => removeTable(d, table.id));
                 select(null);
               }}
@@ -171,7 +238,7 @@ function TableEditor({ table }: { table: Table }) {
         <label>물리명</label>
         <TextInput value={table.name} onCommit={(name) => setTable({ name })} focusKey={`table:${table.id}`} />
         <label>논리명</label>
-        <TextInput value={table.logicalName} onCommit={(logicalName) => setTable({ logicalName })} placeholder="예: 회원" />
+        <TextInput value={table.logicalName} onCommit={setTableLogicalName} placeholder="예: 회원" />
         <label>설명</label>
         <TextInput value={table.comment} onCommit={(comment) => setTable({ comment })} placeholder="비우면 논리명이 SQL 코멘트가 됩니다" />
         <label>영역</label>
@@ -185,6 +252,11 @@ function TableEditor({ table }: { table: Table }) {
           <h4>컬럼 ({table.columns.length})</h4>
           <button className="btn btn-sm" onClick={addColumnAndFocus} title="컬럼 추가 (마지막 컬럼 이름에서 Enter로도 추가)">+ 컬럼</button>
         </div>
+        {dictionary && (
+          <datalist id="dict-terms">
+            {dictionary.terms.map((t) => <option key={t.logical} value={t.logical}>{t.physical}</option>)}
+          </datalist>
+        )}
         <datalist id="type-suggestions">
           {dialect.typeSuggestions.map((t) => <option key={t} value={t} />)}
         </datalist>
@@ -197,8 +269,8 @@ function TableEditor({ table }: { table: Table }) {
           {table.columns.map((c, i) => (
             <div key={c.id} className="column-grid__row">
               {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
-              <TextInput value={c.name} onCommit={(name) => setColumn(c, { name })} className={fkIds.has(c.id) ? 'is-fk' : ''} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
-              <TextInput value={c.logicalName} onCommit={(logicalName) => setColumn(c, { logicalName })} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
+              <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
+              <TextInput value={c.logicalName} list={dictionary ? 'dict-terms' : undefined} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} />
               <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, { type: type.toUpperCase() })} />
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
@@ -254,7 +326,18 @@ function TableEditor({ table }: { table: Table }) {
               <span className="row-actions">
                 <button className="icon-btn" title="위로" disabled={i === 0} onClick={() => edit((d) => moveColumn(d, table.id, c.id, i - 1))}>↑</button>
                 <button className="icon-btn" title="아래로" disabled={i === table.columns.length - 1} onClick={() => edit((d) => moveColumn(d, table.id, c.id, i + 1))}>↓</button>
-                <button className="icon-btn danger" title="삭제" onClick={() => edit((d) => removeColumn(d, table.id, c.id))}>×</button>
+                <button
+                  className="icon-btn danger"
+                  title="삭제"
+                  onClick={() => {
+                    // 영향도: 이 컬럼을 쓰는 외래키·인덱스·CHECK·계산식이 있으면 확인
+                    const impact = columnDeleteImpact(useStore.getState().schema, table.id, c.id);
+                    if (!confirmImpact(`${table.name}.${c.name} 컬럼을 지우면 함께 바뀝니다:`, impact)) return;
+                    edit((d) => removeColumn(d, table.id, c.id));
+                  }}
+                >
+                  ×
+                </button>
               </span>
             </div>
           ))}

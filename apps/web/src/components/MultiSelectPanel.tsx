@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { addToArea, createArea, moveToArea, removeFromArea, removeTable, updateTable, type CommentKind } from '@erd/core';
+import { addToArea, createArea, moveToArea, removeFromArea, removeTable, tablesDeleteImpact, updateTable, type CommentKind } from '@erd/core';
+import { confirmImpact } from '../lib/impact';
 import { selectAreas, useStore } from '../store';
 import { copySelection } from '../lib/tableClipboard';
 import { TemplateApplyMenu } from './TemplatePanels';
@@ -72,7 +73,9 @@ export function MultiSelectPanel() {
           className="btn btn-danger"
           disabled={readOnly}
           onClick={() => {
-            if (!confirm(`테이블 ${tables.length}개를 지울까요? (Ctrl+Z로 되돌릴 수 있습니다)`)) return;
+            // 영향도: 함께 지우지 않는 테이블의 외래키가 사라지면 그것도 보여 준다
+            const impact = tablesDeleteImpact(useStore.getState().schema, ids);
+            if (!(impact.length ? confirmImpact(`테이블 ${tables.length}개를 지우면 다른 테이블도 바뀝니다:`, impact) : confirm(`테이블 ${tables.length}개를 지울까요? (Ctrl+Z로 되돌릴 수 있습니다)`))) return;
             edit((d) => ids.forEach((id) => removeTable(d, id)));
             select(null);
           }}

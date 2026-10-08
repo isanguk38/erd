@@ -106,6 +106,70 @@ describe('MCP', () => {
     // 여러 테스트가 함께 돌면 느려져 기본 제한 시간을 넘길 수 있다
   }, 30_000);
 
+  it('표준 용어 사전·영향도·메모: AI가 사전을 찾아 쓰고, 편집 결과에서 영향과 사전 위반을 보고, 메모를 붙인다', async () => {
+    const { erd, url } = await start();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await client.callTool({ name, arguments: args });
+      if ((r as ToolResult).isError) throw new Error(textOf(r));
+      const t = textOf(r);
+      return t.startsWith('{') ? JSON.parse(t) : t;
+    };
+    const created = await call('create_project', { name: '사전', dialect: 'mysql' });
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'apply' } });
+
+    // 사전이 없으면 평소대로
+    expect(await call('lookup_dictionary', { project: '사전', names: ['회원번호'] })).toContain('표준 용어 사전이 없습니다');
+    expect((await call('get_schema', { project: '사전' })).project.dictionary).toBeUndefined();
+
+    // 사람이 엑셀로 올린 사전 (화면은 문서에 직접 쓴다)
+    const { doc } = erd.projects.load(created.id);
+    const { writeDictionary } = await import('@erd/core');
+    doc.transact(() => writeDictionary(doc, { terms: [{ logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR(20)' }], words: [{ logical: '회원', physical: 'MBR' }, { logical: '명', physical: 'NM' }] }));
+
+    expect((await call('get_schema', { project: '사전' })).project.dictionary).toContain('용어 1개');
+    const found = await call('lookup_dictionary', { project: '사전', names: ['회원번호', '회원명', '배송지'] });
+    expect(found.results[0]).toMatchObject({ name: 'MBR_NO', type: 'VARCHAR(20)' });
+    expect(found.results[1]).toMatchObject({ name: 'MBR_NM' });
+    expect(found.results[2].standard).toBeNull();
+
+    // 사전과 다르게 만들면 결과에 dictionary로 알려 준다
+    const edited = await call('edit_schema', {
+      project: '사전',
+      commands: [
+        { op: 'createTable', name: 'member', logicalName: '회원', columns: [{ name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true }] },
+        { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'addRelation', parent: 'member', child: 'orders' },
+      ],
+    });
+    expect(edited.dictionary.join('\n')).toContain('MBR_NO VARCHAR(20)');
+    const lint = await call('check_design', { project: '사전' });
+    expect(lint.basicChecks.some((i: { rule: string }) => i.rule === '표준 용어와 다름')).toBe(true);
+
+    // 영향도: 부모 PK 타입만 바꾸면 FK로 이어진 자식 컬럼이 그대로라고 알려 준다
+    const typed = await call('edit_schema', { project: '사전', commands: [{ op: 'updateColumn', table: 'member', column: 'member_id', changes: { name: 'MBR_NO', type: 'VARCHAR(20)' } }] });
+    expect(typed.impact.join('\n')).toContain('orders.member_id(BIGINT)');
+    expect(typed.dictionary).toBeUndefined();
+    const dropped = await call('edit_schema', { project: '사전', commands: [{ op: 'dropTable', table: 'member' }] });
+    expect(dropped.impact.join('\n')).toContain('member 삭제');
+
+    // 메모: 영역 탭·전체 탭에 붙이고 고치고 지운다 (스키마에는 영향 없음)
+    await call('edit_schema', { project: '사전', commands: [{ op: 'createArea', name: '주문', tables: ['orders'] }] });
+    const note = await call('edit_notes', { project: '사전', action: 'add', text: '주문 금액은 VAT 포함', area: '주문', color: 'blue' });
+    expect(note).toMatchObject({ area: '주문', color: '#dbeafe', author: 'AI' });
+    await call('edit_notes', { project: '사전', action: 'update', id: note.id, text: '주문 금액은 VAT 별도' });
+    const list = await call('edit_notes', { project: '사전', action: 'list' });
+    expect(list.notes.map((n: { text: string }) => n.text)).toEqual(['주문 금액은 VAT 별도']);
+    const sql = await call('export_sql', { project: '사전' });
+    expect(sql).not.toContain('VAT');
+    await call('edit_notes', { project: '사전', action: 'delete', id: note.id });
+    expect((await call('edit_notes', { project: '사전', action: 'list' })).notes).toEqual([]);
+  }, 30_000);
+
   it('로컬(stdio와 같은 경로): AI가 테이블을 만들고 관계를 잇고 SQL을 뽑는다', async () => {
     const { erd, url } = await start();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

@@ -223,7 +223,8 @@ export function AreaTabs() {
               className="danger"
               onClick={() => {
                 setMenu(null);
-                if (!confirm(`"${a.name}" 영역을 지울까요? 테이블은 지워지지 않고 전체에 그대로 남습니다.`)) return;
+                const noteCount = useStore.getState().notes.filter((n) => n.areaId === a.id).length;
+                if (!confirm(`"${a.name}" 영역을 지울까요? 테이블은 지워지지 않고 전체에 그대로 남습니다.${noteCount ? `\n이 영역에 붙인 메모 ${noteCount}개는 함께 사라집니다 (Ctrl+Z로 되돌리면 다시 보임).` : ''}`)) return;
                 edit((d) => removeArea(d, a.id));
                 setActiveArea(null);
               }}

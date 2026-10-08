@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { areaSchema, describeSchema, dialects, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { areaSchema, describeMatch, describeSchema, dialects, dictIndex, lookupTerm, requireArea, LINT_RULES, lintSchema, reviewItemState, searchDictionary, splitDictType, unreviewedTables, type AiReview, type DialectId, type Dictionary, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -138,6 +138,16 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     return found;
   };
   const link = (id: string) => (api.webUrl ? `${api.webUrl}/#/p/${id}` : undefined);
+  /** 프로젝트의 표준 용어 사전 (없으면 null) */
+  const dictionaryOf = async (projectId: string): Promise<Dictionary | null> => {
+    try {
+      return (await api.request<{ dictionary: Dictionary | null }>('GET', `/api/projects/${projectId}/dictionary`)).dictionary;
+    } catch {
+      return null;
+    }
+  };
+  const dictionaryHint = (d: Dictionary | null) =>
+    d ? `표준 용어 사전 있음 (용어 ${d.terms.length}개, 단어 ${d.words.length}개): 컬럼을 만들거나 이름을 바꿀 때 lookup_dictionary로 논리명의 표준 물리명·타입·길이를 찾아 그대로 쓰세요` : undefined;
 
   server.registerTool(
     'list_projects',
@@ -172,7 +182,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     safe(async ({ project, area }: { project: string; area?: string }) => {
       const p = await resolveProject(project);
       const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
-      const info = { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id) };
+      const info = { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id), dictionary: dictionaryHint(await dictionaryOf(p.id)) };
       if (!area) return text({ project: info, ...describeSchema(schema) });
       const part = areaSchema(schema, area);
       const { areas: _all, ...described } = describeSchema(part.schema);
@@ -209,7 +219,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       const scope = area ? requireArea(schema, area) : null;
       const scopeNames = scope ? new Set(scope.tableIds.map((id) => schema.tables.find((t) => t.id === id)?.name.toLowerCase())) : null;
       const inScope = (table?: string) => !scopeNames || (table ? scopeNames.has(table.toLowerCase()) : false);
-      const all = lintSchema(schema, String(meta.dialect ?? 'mysql')).filter((i) => inScope(i.tableName));
+      const all = lintSchema(schema, String(meta.dialect ?? 'mysql'), { dictionary: await dictionaryOf(p.id) }).filter((i) => inScope(i.tableName));
       const issues = all.filter((i) => !ignored.has(i.id));
       const review = (meta.aiReview as AiReview | null | undefined) ?? null;
       const reviewOpen = (review?.items ?? []).filter((i) => i.status === 'open' && (!scope || inScope(i.table)));
@@ -302,6 +312,8 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         '테이블·컬럼은 이름(물리명 또는 논리명)으로 가리킨다.',
         '관계(addRelation)는 부모의 기본키를 참조하는 FK 컬럼을 자식에 자동으로 만든다. FK 컬럼을 따로 addColumn 하지 않는다.',
         'mode=apply면 화면에 바로 반영되고 사람이 "AI 변경 되돌리기"로 한 번에 되돌릴 수 있다. mode=propose면 제안으로 쌓여 사람이 승인한다.',
+        '결과의 impact: 지운 테이블·컬럼 때문에 함께 사라진 외래키·인덱스, 타입을 바꿨는데 FK로 이어진 컬럼은 그대로인 것 — 의도와 다르면 이어서 고친다.',
+        '결과의 dictionary: 표준 용어 사전과 다른 컬럼 — 표준대로 updateColumn 한다 (사전에 없는 용어는 사용자에게 알린다).',
       ].join(' '),
       inputSchema: { project: projectArg, commands: z.array(command).min(1), mode },
     },
@@ -311,6 +323,89 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       // 영역(화면 구분)만 바꿨으면 설계가 바뀐 게 아니라 검토 안내를 붙이지 않는다
       const areaOnly = commands.every((c) => /Area$/.test(String((c as { op?: string }).op)));
       return text(areaOnly ? result : { ...result, designReview: await reviewReminder(p.id) });
+    }),
+  );
+
+  server.registerTool(
+    'lookup_dictionary',
+    {
+      title: '표준 용어 사전 찾기',
+      description: [
+        '프로젝트의 표준 용어 사전(사람이 엑셀로 올린 것)에서 논리명의 표준 물리명·타입·길이를 찾는다.',
+        'names에 만들 컬럼의 논리명들(예: ["회원번호","주문금액"])을 주면 각각의 표준을 알려 준다: 용어가 있으면 그대로, 없으면 표준 단어를 이어 붙인 물리명(타입은 직접 정함), 둘 다 없으면 null.',
+        'query로 사전을 검색할 수도 있다 (비슷한 용어 찾기). 사전이 없으면 사전 없이 평소대로 설계한다.',
+      ].join(' '),
+      inputSchema: {
+        project: projectArg,
+        names: z.array(z.string()).optional().describe('찾을 논리명들'),
+        query: z.string().optional().describe('사전 검색어 (논리명·물리명·설명에 들어 있는 것)'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async ({ project, names, query }: { project: string; names?: string[]; query?: string }) => {
+      const p = await resolveProject(project);
+      const dict = await dictionaryOf(p.id);
+      if (!dict) return text('이 프로젝트에는 표준 용어 사전이 없습니다. 사전 없이 평소대로 설계하세요 (사람이 화면의 "용어 사전"에서 엑셀로 올릴 수 있음).');
+      const index = dictIndex(dict);
+      const typeText = (type?: string, length?: string) => {
+        const st = splitDictType(type, length);
+        return st.type ? `${st.type}${st.length ? `(${st.length})` : ''}` : undefined;
+      };
+      const term = (t: { logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
+      return text({
+        dictionary: `용어 ${dict.terms.length}개, 단어 ${dict.words.length}개, 물리명 대소문자: ${{ asis: '사전 그대로', lower: '소문자', upper: '대문자' }[dict.case]}`,
+        results: names?.length
+          ? names.map((n) => {
+              const m = lookupTerm(index, n);
+              if (!m) return { logicalName: n, standard: null, note: '사전에 없고 표준 단어로도 만들 수 없음 — query로 비슷한 용어를 찾거나 사용자에게 확인' };
+              return {
+                logicalName: n,
+                name: m.physical,
+                type: m.source === 'term' ? typeText(m.type, m.length) : undefined,
+                from: m.source === 'term' ? '표준 용어' : `표준 단어 ${m.parts?.join(' + ')} (타입은 직접 정함)`,
+                summary: describeMatch(m),
+              };
+            })
+          : undefined,
+        matches: query?.trim()
+          ? { terms: searchDictionary(dict.terms, query, 50).map(term), words: searchDictionary(dict.words, query, 50).map((w) => ({ word: w.logical, abbr: w.physical })) }
+          : undefined,
+        sample: !names?.length && !query?.trim() ? dict.terms.slice(0, 30).map(term) : undefined,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'edit_notes',
+    {
+      title: '캔버스 메모',
+      description: [
+        'ERD 캔버스에 붙이는 메모(포스트잇)를 읽고 쓴다. 설계 의도·규칙·주의 사항을 사람이 보게 남길 때 쓴다 (예: "결제는 PG사 기준, 환불은 별도 테이블").',
+        '메모는 SQL·DB에는 영향이 없다. area를 주면 그 주제영역 탭에, 없으면 전체 탭에 붙는다. 위치를 안 주면 그 탭 테이블들 오른쪽에 놓는다.',
+        'action: list(목록) / add(text 필수) / update(id, 바꿀 값) / delete(id). 사용자가 요청할 때만 메모를 만든다.',
+      ].join(' '),
+      inputSchema: {
+        project: projectArg,
+        action: z.enum(['list', 'add', 'update', 'delete']),
+        id: z.string().optional().describe('update·delete할 메모 id (list로 확인)'),
+        text: z.string().optional().describe('메모 내용 (여러 줄 가능)'),
+        area: z.string().optional().describe('붙일 주제영역 이름 (add, 생략하면 전체 탭)'),
+        color: z.enum(['yellow', 'blue', 'green', 'pink', 'purple', 'gray']).optional(),
+        x: z.number().optional(),
+        y: z.number().optional(),
+        width: z.number().optional(),
+        height: z.number().optional(),
+      },
+    },
+    safe(async (args: { project: string; action: 'list' | 'add' | 'update' | 'delete'; id?: string; text?: string; area?: string; color?: string; x?: number; y?: number; width?: number; height?: number }) => {
+      const p = await resolveProject(args.project);
+      const COLORS: Record<string, string> = { yellow: '#fef3c7', blue: '#dbeafe', green: '#dcfce7', pink: '#fce7f3', purple: '#ede9fe', gray: '#f1f5f9' };
+      const body = { text: args.text, area: args.area, color: args.color ? COLORS[args.color] : undefined, x: args.x, y: args.y, width: args.width, height: args.height, source: 'ai' };
+      if (args.action === 'list') return text(await api.request('GET', `/api/projects/${p.id}/notes`));
+      if (args.action === 'add') return text(await api.request('POST', `/api/projects/${p.id}/notes`, body));
+      if (!args.id) throw new Error('id가 필요합니다 (list로 확인)');
+      if (args.action === 'update') return text(await api.request('PATCH', `/api/projects/${p.id}/notes/${encodeURIComponent(args.id)}`, body));
+      return text(await api.request('DELETE', `/api/projects/${p.id}/notes/${encodeURIComponent(args.id)}`));
     }),
   );
 

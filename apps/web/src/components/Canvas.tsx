@@ -12,7 +12,7 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { addToArea, connectManyToMany, connectTables, findSameRelation, moveToArea, removeFromArea, removeRelation, removeTable, setAreaPosition } from '@erd/core';
+import { addToArea, connectManyToMany, connectTables, findSameRelation, moveToArea, notesOf, removeFromArea, removeRelation, removeTable, setAreaPosition, tablesDeleteImpact } from '@erd/core';
 
 /** 이만큼 움직이지 않고 누르고 있으면 영역으로 옮기기 모드 */
 const LONG_PRESS_MS = 450;
@@ -22,16 +22,18 @@ import { RelationEdge } from './RelationEdge';
 import { ConnectionLine } from './ConnectionLine';
 import { buildAreaView, buildCompareGraph, buildEdges, buildNodes, FIT_MAX_ZOOM } from '../lib/graph';
 import { GhostNode, type GhostNodeType } from './GhostNode';
+import { NoteNode, type NoteNodeType } from './NoteNode';
 import { arrangeTables } from '../lib/arrange';
 import type { TableNodeType } from './TableNode';
 import { matchIds } from '../lib/search';
 import { addTableWithTemplate } from '../lib/templates';
 import { requestFocus } from '../lib/focus';
+import { confirmImpact } from '../lib/impact';
 import { getDialect, type DialectId } from '@erd/core';
 import { useTheme } from '../lib/theme';
 
-const nodeTypes = { table: TableNode, ghost: GhostNode };
-type CanvasNode = TableNodeType | GhostNodeType;
+const nodeTypes = { table: TableNode, ghost: GhostNode, note: NoteNode };
+type CanvasNode = TableNodeType | GhostNodeType | NoteNodeType;
 
 /** 마우스·터치 이벤트의 화면 좌표 */
 function pointOf(e: MouseEvent | TouchEvent): [number, number] {
@@ -57,6 +59,7 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
   const peers = useStore((s) => s.peers);
   const remoteChanges = useStore((s) => s.remoteChanges);
   const comments = useStore((s) => s.comments);
+  const notes = useStore((s) => s.notes);
   // 테이블별 열린 댓글 수
   const commentMarks = useMemo(() => {
     const m = new Map<string, { open: number; review: number; columnIds: Set<string> }>();
@@ -170,6 +173,7 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
 
   // 주제영역 탭: 그 영역 테이블(영역 위치) + 영역 밖과 이어진 테이블은 흐린 참조 카드 (버전 비교 중에는 전체)
   const activeArea = useStore((s) => s.activeArea);
+  const noteReadOnly = useStore((s) => s.role === 'viewer');
   const [nodes, setNodes] = useState<CanvasNode[]>(() => buildNodes(schema, viewMode, selectedIds));
   // 화면에서 잰 테이블 크기 (참조 카드 자리·자동 정렬에 씀). 크기가 실제로 바뀔 때만 새 값
   const sizeKey = useMemo(
@@ -195,7 +199,21 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
         return compareGraph.nodes.map((n) => ({ ...n, measured: measured.get(n.id) }));
       }
       const tables = prev.filter((n): n is TableNodeType => n.type === 'table');
-      const built: CanvasNode[] = buildNodes(viewSchema, viewMode, pendingIds.current ? new Set(pendingIds.current) : selectedIds, tables, peers, searchMarks, { remote: remoteChanges, comments: commentMarks });
+      // 메모: 지금 탭(전체 또는 이 영역)에 붙인 것. 테이블보다 먼저 넣어 테이블 아래에 그린다
+      const prevNotes = new Map(prev.filter((n) => n.type === 'note').map((n) => [n.id, n]));
+      const noteNodes: CanvasNode[] = notesOf(notes, areaView ? activeArea : null).map((note) => ({
+        id: note.id,
+        type: 'note',
+        position: note.position,
+        width: note.width,
+        height: note.height,
+        selected: prevNotes.get(note.id)?.selected,
+        measured: prevNotes.get(note.id)?.measured,
+        connectable: false,
+        deletable: !noteReadOnly,
+        data: { text: note.text, color: note.color, readOnly: noteReadOnly },
+      }));
+      const built: CanvasNode[] = [...noteNodes, ...buildNodes(viewSchema, viewMode, pendingIds.current ? new Set(pendingIds.current) : selectedIds, tables, peers, searchMarks, { remote: remoteChanges, comments: commentMarks })];
       const ghostMeasured = new Map(prev.filter((n) => n.type === 'ghost').map((n) => [n.id, n.measured]));
       for (const g of areaView?.ghosts ?? []) {
         built.push({
@@ -212,7 +230,7 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
       }
       return built;
     });
-  }, [viewSchema, areaView, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks, redraw]);
+  }, [viewSchema, areaView, viewMode, selectedIds, peers, compareGraph, searchMarks, remoteChanges, commentMarks, redraw, notes, noteReadOnly]);
   const edges = useMemo(
     () => compareGraph?.edges ?? buildEdges(viewSchema, selectedRelation, areaView?.ghostRelationIds),
     [compareGraph, viewSchema, selectedRelation, areaView],
@@ -270,7 +288,8 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
     setNodes((prev) => {
       const next = applyNodeChanges(changes, prev);
       if (picked) {
-        const ids = next.filter((n) => n.selected).map((n) => n.id);
+        // 메모는 캔버스에서만 고른다 (스토어의 선택은 테이블)
+        const ids = next.filter((n) => n.selected && n.type === 'table').map((n) => n.id);
         queueMicrotask(() => {
           if (pointerDown.current) pendingIds.current = ids;
           else commitSelection(ids);
@@ -385,10 +404,23 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
       className={picking ? 'picking' : undefined}
       autoPanOnNodeDrag={!picking}
       // 영역 탭에서 Delete: 테이블은 지우지 않고 그 영역에서만 뺀다 (테이블 삭제는 전체 탭에서)
-      onBeforeDelete={async ({ nodes: toDelete }) => {
+      onBeforeDelete={async ({ nodes: toDelete, edges: edgesToDelete }) => {
+        // 메모는 따로 지운다 (스키마가 아님)
+        const noteIds = toDelete.filter((n) => n.type === 'note').map((n) => n.id);
+        if (noteIds.length) useStore.getState().removeNotes(noteIds);
         const tables = toDelete.filter((n) => n.type === 'table');
+        if (!tables.length && !edgesToDelete.length) return false;
         const area = activeArea ? useStore.getState().schema.areas?.find((a) => a.id === activeArea) : undefined;
-        if (!area || !tables.length) return true;
+        if (!area || !tables.length) {
+          // 영향도: 다른 테이블의 외래키까지 사라지면 확인한다
+          const schemaNow = useStore.getState().schema;
+          const impact = tablesDeleteImpact(schemaNow, tables.map((n) => n.id));
+          if (impact.length) {
+            const name = tables.length > 1 ? `테이블 ${tables.length}개` : schemaNow.tables.find((t) => t.id === tables[0].id)?.name;
+            if (!confirmImpact(`${name}을(를) 지우면 다른 테이블도 바뀝니다:`, impact)) return false;
+          }
+          return { nodes: tables, edges: edgesToDelete };
+        }
         const names = tables.map((n) => useStore.getState().schema.tables.find((t) => t.id === n.id)?.name ?? n.id);
         edit((d) => removeFromArea(d, area.id, tables.map((n) => n.id)));
         useStore.getState().showNotice({ text: `${names.join(', ')}을(를) ${area.name} 영역에서 뺐습니다. 테이블은 전체에 남아 있고, 삭제는 전체 탭에서 합니다 (Ctrl+Z로 되돌리기)` });
@@ -406,12 +438,13 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
       connectionLineComponent={ConnectionLine}
       onNodeClick={(e, node) => {
         if (node.type === 'ghost') return goToTable(node.id);
+        if (node.type !== 'table') return;
         // Ctrl/Shift를 누르고 클릭하면 여러 개 고르기 (캔버스가 처리)
         if (e.ctrlKey || e.metaKey || e.shiftKey) return;
         select({ type: 'table', id: node.id });
       }}
       // 클릭·끌기는 고르기만 하고, 오른쪽 편집 창은 더블클릭할 때 연다 (옮기기만 했는데 창이 열리면 불편하다)
-      onNodeDoubleClick={(_, node) => node.type !== 'ghost' && select({ type: 'table', id: node.id }, true)}
+      onNodeDoubleClick={(_, node) => node.type === 'table' && select({ type: 'table', id: node.id }, true)}
       onEdgeClick={(_, edge) => select({ type: 'relation', id: edge.id })}
       onEdgeDoubleClick={(_, edge) => select({ type: 'relation', id: edge.id }, true)}
       onPaneClick={() => select(null)}
@@ -453,6 +486,9 @@ export function Canvas({ fitRequest = 0, relayoutRequest = 0 }: { fitRequest?: n
           setRedraw((n) => n + 1);
           return;
         }
+        // 메모 위치
+        for (const n of dragged) if (n.type === 'note') useStore.getState().updateNote(n.id, { position: n.position });
+        if (!ids.length) return;
         const moved = new Map(dragged.map((n) => [n.id, n.position]));
         edit((draft) => {
           // 영역 탭에서 옮기면 그 영역에서의 위치만 바뀐다 (전체 ERD 배치는 그대로)

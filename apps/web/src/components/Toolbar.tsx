@@ -19,7 +19,7 @@ import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -164,6 +164,17 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     const visible = area ? areaSchema(schema, area.id).schema : schema;
     return freeSpot(visible, { x: Math.round(c.x - 120), y: Math.round(c.y - 60) });
   };
+  // 메모: 보이는 캔버스 가운데에, 지금 탭(전체 또는 영역)에 붙이고 바로 입력
+  const addNoteAtCenter = () => {
+    const pane = document.querySelector('.react-flow')?.getBoundingClientRect();
+    const c = screenToFlowPosition({ x: (pane?.left ?? 0) + (pane?.width ?? window.innerWidth) / 2, y: (pane?.top ?? 0) + (pane?.height ?? window.innerHeight) / 2 });
+    // 테이블을 가리지 않게 가까운 빈 곳으로
+    const area = currentArea();
+    const { schema } = useStore.getState();
+    const position = freeSpot(area ? areaSchema(schema, area.id).schema : schema, { x: Math.round(c.x - 110), y: Math.round(c.y - 60) });
+    const id = useStore.getState().addNote({ position, areaId: area?.id ?? null });
+    if (id) requestFocus(`note:${id}`);
+  };
   // 템플릿을 고르지 않으면 "새 테이블 기본" 템플릿이 들어간다
   const addTableAtCenter = (template?: ColumnTemplate | null) => {
     edit((d) => {
@@ -201,6 +212,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { light: 'dark', dark: 'light' };
   const THEME_LABEL: Record<ThemeSetting, string> = { light: '라이트', dark: '다크' };
   const commentCount = useOpenCommentCount();
+  const dictionarySize = useStore((s) => (s.dictionary ? `${s.dictionary.terms.length}/${s.dictionary.words.length}` : ''));
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -237,6 +249,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           {lintCount > 0 && <span className="db-badge lint">{lintCount}</span>}
           {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
           {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
+        </button>
+        <button className="btn btn-ghost" onClick={() => onOpen('dictionary')} title={dictionarySize ? `표준 용어 사전: 용어 ${dictionarySize.split('/')[0]}개 · 단어 ${dictionarySize.split('/')[1]}개` : '표준 용어 사전: 엑셀로 올리면 논리명으로 물리명·타입을 채우고 다르면 알려 줍니다'}>
+          <Icon name="book" />
+          <span className="hide-narrow">용어 사전</span>
         </button>
         <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
           <Icon name="comment" />
@@ -290,6 +306,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               ]}
             />
           </div>
+          <button className="btn btn-tool" disabled={!synced || readOnly} onClick={addNoteAtCenter} title="메모 붙이기: 설계 의도·주의 사항을 캔버스에 남깁니다 (SQL·DB에는 영향 없음, 영역 탭이면 그 탭에만)">
+            <Icon name="note" />
+            <span className="hide-narrow">메모</span>
+          </button>
           <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
             {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>관계: {t.label}</option>)}
           </select>

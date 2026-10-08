@@ -26,6 +26,15 @@ import {
   areaSchema,
   setAreaPosition,
   toScript,
+  changeImpact,
+  dictionaryNotes,
+  readDictionary,
+  readNotes,
+  addNote,
+  updateNote,
+  removeNote,
+  areaPosition,
+  estimateTableSize,
   type Change,
   type ChangeCategory,
   type Command,
@@ -103,12 +112,77 @@ export function registerProjectRoutes(
     return { mode: 'apply' as const, messages: options.messages, changes: summarize(changes) };
   }
 
+  function reviewNotes(id: string, before: Schema, after: Schema) {
+    const impact = changeImpact(before, after);
+    const dictionary = dictionaryNotes(readDictionary(store.load(id).doc), before, after);
+    return { ...(impact.length ? { impact } : {}), ...(dictionary.length ? { dictionary } : {}) };
+  }
+
   const modeOf = (id: string, mode: unknown, source: Source): Mode => {
     // 프로젝트가 제안 모드면 AI 변경은 항상 사람 승인을 거친다 (AI가 apply를 요청해도 제안으로 받는다)
     if (source === 'ai' && store.meta(id).aiMode === 'propose') return 'propose';
     if (mode === 'apply' || mode === 'propose') return mode;
     return 'apply';
   };
+
+  // ── 표준 용어 사전 (MCP가 읽는다. 화면은 문서로 직접 읽고 쓴다) ─────────────
+  app.get<{ Params: { id: string } }>('/api/projects/:id/dictionary', async (req) => ({ dictionary: readDictionary(store.load(req.params.id).doc) }));
+
+  // ── 캔버스 메모 (ERD 구조와 따로 저장. SQL·DB에는 영향 없음) ─────────────
+  type NoteBody = { text?: string; area?: string | null; color?: string; x?: number; y?: number; width?: number; height?: number; source?: Source };
+  const noteView = (id: string) => {
+    const schema = store.schema(id);
+    const names = new Map((schema.areas ?? []).map((a) => [a.id, a.name]));
+    return readNotes(store.load(id).doc).map((n) => ({ ...n, area: n.areaId ? names.get(n.areaId) : undefined }));
+  };
+  app.get<{ Params: { id: string } }>('/api/projects/:id/notes', async (req) => ({ notes: noteView(req.params.id) }));
+  app.post<{ Params: { id: string }; Body: NoteBody }>('/api/projects/:id/notes', async (req) => {
+    const { id } = req.params;
+    const body = req.body ?? {};
+    if (!body.text?.trim()) throw badRequest('메모 내용(text)이 필요합니다');
+    const schema = store.schema(id);
+    let areaId: string | undefined;
+    try {
+      areaId = body.area ? requireArea(schema, body.area).id : undefined;
+    } catch (e) {
+      throw badRequest(e instanceof Error ? e.message : String(e));
+    }
+    // 위치를 안 주면 그 탭 테이블들의 오른쪽 위에
+    let position = { x: body.x ?? 0, y: body.y ?? 0 };
+    if (body.x === undefined || body.y === undefined) {
+      const area = areaId ? schema.areas!.find((a) => a.id === areaId) : undefined;
+      const tables = area ? schema.tables.filter((t) => area.tableIds.includes(t.id)) : schema.tables;
+      const boxes = tables.map((t) => ({ p: area ? areaPosition(area, t) : t.position, s: estimateTableSize(t) }));
+      position = boxes.length ? { x: Math.max(...boxes.map((b) => b.p.x + b.s.width)) + 80, y: Math.min(...boxes.map((b) => b.p.y)) } : { x: 0, y: 0 };
+    }
+    const { doc } = store.load(id);
+    let noteId = '';
+    doc.transact(() => {
+      noteId = addNote(doc, { text: body.text!.trim(), position, width: body.width, height: body.height, color: body.color, areaId, author: body.source === 'ai' ? 'AI' : undefined });
+    }, body.source === 'ai' ? 'ai' : 'api');
+    return noteView(id).find((n) => n.id === noteId);
+  });
+  app.patch<{ Params: { id: string; nid: string }; Body: NoteBody }>('/api/projects/:id/notes/:nid', async (req) => {
+    const { id, nid } = req.params;
+    const b = req.body ?? {};
+    const { doc } = store.load(id);
+    const current = readNotes(doc).find((n) => n.id === nid);
+    if (!current) throw Object.assign(new Error('메모를 찾을 수 없습니다'), { statusCode: 404 });
+    doc.transact(() => updateNote(doc, nid, {
+      text: b.text,
+      color: b.color,
+      width: b.width,
+      height: b.height,
+      position: b.x !== undefined || b.y !== undefined ? { x: b.x ?? current.position.x, y: b.y ?? current.position.y } : undefined,
+    }), b.source === 'ai' ? 'ai' : 'api');
+    return noteView(id).find((n) => n.id === nid);
+  });
+  app.delete<{ Params: { id: string; nid: string } }>('/api/projects/:id/notes/:nid', async (req) => {
+    const { doc } = store.load(req.params.id);
+    if (!readNotes(doc).some((n) => n.id === req.params.nid)) throw Object.assign(new Error('메모를 찾을 수 없습니다'), { statusCode: 404 });
+    doc.transact(() => removeNote(doc, req.params.nid), 'api');
+    return { ok: true };
+  });
 
   // ── 프로젝트 ─────────────────────────────
   app.get('/api/projects', async (req) =>
@@ -215,11 +289,13 @@ export function registerProjectRoutes(
         if (e instanceof CommandError) throw badRequest(e.message);
         throw e;
       }
+      // 함께 바뀐 것(영향도)과 표준 용어 사전과 다른 컬럼을 알려 준다 (AI가 바로 이어서 고치게)
+      const extra = reviewNotes(id, base, result.schema);
       if (mode === 'propose') {
         const proposal = store.upsertProposal(id, source === 'ai' ? 'ai' : 'api', title, () => ({ schema: result.schema, messages: result.messages }));
-        return { mode, proposalId: proposal.id, messages: result.messages, pendingChanges: summarize(store.proposalChanges(id, proposal)) };
+        return { mode, proposalId: proposal.id, messages: result.messages, pendingChanges: summarize(store.proposalChanges(id, proposal)), ...extra };
       }
-      return change(id, result.schema, { mode, source, title, messages: result.messages });
+      return { ...change(id, result.schema, { mode, source, title, messages: result.messages }), ...extra };
     },
   );
 

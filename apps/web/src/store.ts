@@ -9,7 +9,14 @@ import {
   deleteComment,
   emptySchema,
   readComments,
+  readDictionary,
   readMeta,
+  readNotes,
+  addNote as addNoteToDoc,
+  updateNote as updateNoteInDoc,
+  removeNote as removeNoteFromDoc,
+  type Dictionary,
+  type Note,
   readSchema,
   replyComment,
   setCommentStatus,
@@ -96,6 +103,16 @@ interface State extends LocalPrefs {
   replyComment: (threadId: string, text: string) => void;
   setCommentStatus: (threadId: string, status: CommentThread['status']) => void;
   deleteComment: (threadId: string) => void;
+  /** 캔버스 메모 (스키마와 따로 저장, Ctrl+Z 대상) */
+  notes: Note[];
+  /** 메모 추가. 만든 메모 id (편집할 수 없으면 null) */
+  addNote: (input: { position: { x: number; y: number }; areaId?: string | null; text?: string; color?: string }) => string | null;
+  updateNote: (id: string, patch: Partial<Pick<Note, 'text' | 'position' | 'width' | 'height' | 'color'>>) => void;
+  removeNotes: (ids: string[]) => void;
+  /** 표준 용어 사전 (없으면 null) */
+  dictionary: Dictionary | null;
+  /** 사전 고치기 (되돌리기 대상 아님) */
+  editDictionary: (fn: (d: Y.Doc) => void) => boolean;
   /** 화면 아래 잠깐 뜨는 안내 (되돌릴 수 있는 작업 등) */
   notice: { text: string; action?: { label: string; run: () => void } } | null;
   showNotice: (notice: State['notice']) => void;
@@ -175,6 +192,20 @@ export const useStore = create<State>()(
         set({ comments: readComments(d) });
       };
 
+      // 메모: 스키마 편집과 같이 Ctrl+Z로 되돌린다
+      const noteEdit = (fn: (d: Y.Doc) => void): boolean => {
+        if (!doc || !get().synced || get().compare || get().role === 'viewer') return false;
+        const d = doc;
+        try {
+          d.transact(() => fn(d), LOCAL);
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+          return false;
+        }
+        set({ notes: readNotes(d) });
+        return true;
+      };
+
       const publishPresence = () => {
         const { userName, userColor, selection } = get();
         provider?.awareness.setLocalStateField('user', { name: userName, color: userColor });
@@ -202,6 +233,8 @@ export const useStore = create<State>()(
         activeArea: null,
         me: null,
         comments: [],
+        notes: [],
+        dictionary: null,
         remoteChanges: {},
         notice: null,
         showNotice: (notice) => set({ notice }),
@@ -226,7 +259,7 @@ export const useStore = create<State>()(
           get().close();
           doc = new Y.Doc();
           provider = new WebsocketProvider(wsUrl(), projectId, doc);
-          undoManager = new Y.UndoManager(doc.getMap('erd'), { trackedOrigins: new Set([LOCAL]), captureTimeout: 400 });
+          undoManager = new Y.UndoManager([doc.getMap('erd'), doc.getMap('notes')], { trackedOrigins: new Set([LOCAL]), captureTimeout: 400 });
           undoManager.on('stack-item-added', refreshUndo);
           undoManager.on('stack-item-popped', refreshUndo);
 
@@ -244,6 +277,9 @@ export const useStore = create<State>()(
               if (!doc) return;
               const next = readSchema(doc);
               const patch: Partial<State> = { schema: next, meta: readMeta(doc), comments: readComments(doc) };
+              // 메모는 바뀌었을 때만 새 목록 (캔버스를 덜 다시 그리게)
+              const notes = readNotes(doc);
+              if (JSON.stringify(notes) !== JSON.stringify(get().notes)) patch.notes = notes;
               if (remote && get().synced) {
                 const changed = changedTables(get().schema, next);
                 if (changed.size) {
@@ -264,8 +300,11 @@ export const useStore = create<State>()(
           provider.on('status', ({ status }: { status: SyncStatus }) => set({ status }));
           provider.on('sync', (synced: boolean) => {
             set({ synced });
-            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc) });
+            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc), notes: readNotes(doc), dictionary: readDictionary(doc) });
           });
+          // 사전은 클 수 있어 사전이 바뀔 때만 다시 읽는다
+          const dictDoc = doc;
+          doc.getMap('dictionary').observeDeep(() => set({ dictionary: readDictionary(dictDoc) }));
           provider.awareness.on('change', () => {
             const me = provider?.awareness.clientID;
             const peers: Peer[] = [];
@@ -275,7 +314,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], notes: [], dictionary: null, remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
           publishPresence();
           authApi
             .project(projectId)
@@ -338,6 +377,33 @@ export const useStore = create<State>()(
         },
         deleteComment(threadId) {
           commentEdit((d) => deleteComment(d, threadId));
+        },
+
+        addNote(input) {
+          let id: string | null = null;
+          const author = get().me?.user?.name || get().userName || undefined;
+          noteEdit((d) => {
+            id = addNoteToDoc(d, { position: input.position, areaId: input.areaId ?? undefined, text: input.text, color: input.color, author });
+          });
+          return id;
+        },
+        updateNote(id, patch) {
+          noteEdit((d) => updateNoteInDoc(d, id, patch));
+        },
+        removeNotes(ids) {
+          if (ids.length) noteEdit((d) => ids.forEach((id) => removeNoteFromDoc(d, id)));
+        },
+        editDictionary(fn) {
+          if (!doc || !get().synced || get().role === 'viewer') return false;
+          const d = doc;
+          try {
+            d.transact(() => fn(d), COMMENT);
+          } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+            return false;
+          }
+          set({ dictionary: readDictionary(d) });
+          return true;
         },
 
         undo() {

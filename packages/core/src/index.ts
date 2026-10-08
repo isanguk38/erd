@@ -19,3 +19,6 @@ export * from './expressionMemory';
 export * from './aiReview';
 export * from './comments';
 export * from './changes';
+export * from './notes';
+export * from './dictionary';
+export * from './impact';

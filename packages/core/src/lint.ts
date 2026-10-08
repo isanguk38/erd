@@ -3,6 +3,7 @@
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
+import { checkColumnAgainstDictionary, describeMatch, dictIndex, type Dictionary } from './dictionary';
 
 export type LintRule =
   | 'no-primary-key'
@@ -15,7 +16,9 @@ export type LintRule =
   | 'duplicate-relation'
   | 'type-error'
   | 'type-warning'
-  | 'type-ignored';
+  | 'type-ignored'
+  | 'dict-mismatch'
+  | 'dict-unknown';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -44,6 +47,8 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'duplicate-relation': { label: '중복 관계', severity: 'error', description: '같은 FK 컬럼으로 같은 테이블을 가리키는 관계가 두 번 있습니다. DB로 내보내면 같은 외래키를 두 번 만들다 실패합니다.' },
   'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
+  'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
+  'dict-unknown': { label: '사전에 없는 용어', severity: 'info', description: '논리명이 표준 용어 사전에 없고 표준 단어로도 만들 수 없습니다. 사전에 용어를 추가하거나 표준 용어로 바꾸세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
 
@@ -61,7 +66,17 @@ const normType = (c: Column) => {
   return typeKey({ ...c, type: c.type.toUpperCase().replace(base, SAME_TYPES[base] ?? base) });
 };
 
-export function lintSchema(schema: Schema, dialect: DialectId | string): LintIssue[] {
+/** FK 타입 비교처럼 같은 타입인지 (INTEGER = INT 등 같은 뜻의 이름은 같게 본다) */
+export function sameColumnType(a: Pick<Column, 'type' | 'length'>, b: Pick<Column, 'type' | 'length'>): boolean {
+  return normType(a as Column) === normType(b as Column);
+}
+
+export interface LintOptions {
+  /** 표준 용어 사전 (있으면 컬럼이 사전을 따르는지도 검사) */
+  dictionary?: Dictionary | null;
+}
+
+export function lintSchema(schema: Schema, dialect: DialectId | string, options: LintOptions = {}): LintIssue[] {
   const issues: LintIssue[] = [];
   const add = (rule: LintRule, table: Table, message: string, extra: Partial<LintIssue> = {}) =>
     issues.push({
@@ -195,6 +210,26 @@ export function lintSchema(schema: Schema, dialect: DialectId | string): LintIss
         message: i.message.startsWith(`${t.name}:`) ? i.message : `${t.name}.${i.message}`,
         fix: i.fix ? { kind: 'patchColumn', tableId: t.id, columnId: i.columnId, label: i.fix.label, patch: i.fix.patch } : undefined,
       });
+    }
+  }
+
+  // 표준 용어 사전 (사전이 있을 때만)
+  if (options.dictionary && (options.dictionary.terms.length || options.dictionary.words.length)) {
+    const index = dictIndex(options.dictionary);
+    for (const t of schema.tables) {
+      for (const c of t.columns) {
+        const r = checkColumnAgainstDictionary(index, c);
+        if (!r || r.status === 'ok') continue;
+        if (r.status === 'unknown') {
+          add('dict-unknown', t, `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 표준 용어 사전에 없습니다`, { columnId: c.id, columnName: c.name });
+          continue;
+        }
+        add('dict-mismatch', t, `${t.name}.${c.name}: "${c.logicalName}"의 표준은 ${describeMatch(r.match!)}입니다 (다른 점: ${r.diffs.join(', ')})`, {
+          columnId: c.id,
+          columnName: c.name,
+          fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: '표준대로', patch: r.patch! },
+        });
+      }
     }
   }
 

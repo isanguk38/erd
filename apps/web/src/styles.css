@@ -853,3 +853,51 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .color-grid__apply { flex: none; height: 26px; padding: 0 8px; }
 .color-grid__hex.invalid { border-color: var(--danger); }
 .color-grid__hint { font-size: 10.5px; line-height: 1.4; }
+
+/* ── 캔버스 메모 (포스트잇) ─────────────────────────── */
+.react-flow__node-note { padding: 0; border: none; background: transparent; }
+.note-node { width: 100%; height: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 4px; color: #1f2937; font-size: 13px; line-height: 1.5; box-shadow: 0 1px 2px rgb(15 23 42 / 0.12), 0 3px 8px rgb(15 23 42 / 0.08); border: 1px solid rgb(15 23 42 / 0.08); overflow: hidden; cursor: grab; }
+.note-node.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note-node__text { height: 100%; overflow: hidden; word-break: break-word; }
+.note-node__line { white-space: pre-wrap; min-height: 1.5em; }
+.note-node__placeholder { color: rgb(31 41 55 / 0.45); font-style: italic; }
+.note-node__input { width: 100%; height: 100%; box-sizing: border-box; border: none; outline: none; resize: none; background: transparent; color: inherit; font: inherit; line-height: inherit; padding: 0; cursor: text; }
+.note-node__resize-line { border-color: var(--accent) !important; }
+.note-node__resize-handle { width: 8px !important; height: 8px !important; border-radius: 2px; background: var(--panel) !important; border: 1.5px solid var(--accent) !important; }
+.note-toolbar { display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.note-toolbar__color { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgb(15 23 42 / 0.2); cursor: pointer; padding: 0; }
+.note-toolbar__color.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note-toolbar__sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; }
+.note-toolbar__btn { border: none; background: transparent; color: var(--text); font-size: 12px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.note-toolbar__btn:hover { background: var(--border); }
+.note-toolbar__btn.danger { color: var(--danger); }
+
+/* ── 표준 용어 사전 ─────────────────────────── */
+.column-grid__row input.dict-mismatch { border-color: var(--warning); border-style: dashed; }
+.column-grid__row input.dict-unknown { text-decoration: underline dotted var(--muted); }
+.dict-intro { margin: 0 0 12px; line-height: 1.6; }
+.dict-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.dict-actions .spacer, .dict-check .spacer { flex: 1; }
+.dict-actions label.btn { cursor: pointer; }
+.dict-actions label.btn.disabled { opacity: 0.6; pointer-events: none; }
+.dict-actions select { margin-left: 6px; }
+.dict-pending { margin-bottom: 12px; }
+.dict-pending ul { margin: 6px 0; padding-left: 18px; }
+.dict-pending .btn-row { margin-top: 8px; }
+.dict-check { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+.dict-check b.warn { color: var(--warning); }
+.dict-tabs { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.dict-search { flex: 1; min-width: 160px; }
+.dict-form { display: grid; grid-template-columns: 1.2fr 1.2fr 0.9fr 0.6fr 2fr auto auto; gap: 6px; margin-bottom: 8px; }
+.dict-form.words { grid-template-columns: 1.2fr 1.2fr 2fr auto auto; }
+.dict-form input { min-width: 0; }
+.dict-table-wrap { max-height: 42vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.dict-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dict-table th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.dict-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.dict-table tbody tr { cursor: pointer; }
+.dict-table tbody tr:hover { background: var(--accent-soft); }
+.dict-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+@media (max-width: 640px) {
+  .dict-form, .dict-form.words { grid-template-columns: 1fr 1fr; }
+}

@@ -16,12 +16,13 @@ export function useLintCount(): number {
   const dialect = useStore((s) => s.meta.dialect);
   const ignored = useStore((s) => s.meta.lintIgnored);
   const review = useStore((s) => s.meta.aiReview);
+  const dictionary = useStore((s) => s.dictionary);
   return useMemo(() => {
     const skip = new Set(ignored ?? []);
-    const basic = lintSchema(schema, dialect).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
+    const basic = lintSchema(schema, dialect, { dictionary }).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
     const ai = openReviewItems(review?.items, schema).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
     return basic + ai;
-  }, [schema, dialect, ignored, review]);
+  }, [schema, dialect, ignored, review, dictionary]);
 }
 
 /** AI 검토 이후 바뀐 테이블 수 (검토를 한 번도 안 한 프로젝트는 0 — AI를 안 쓰는 프로젝트에 계속 뜨지 않게) */
@@ -62,7 +63,8 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
   const projectName = useProjectName();
   const { fitView } = useReactFlow();
   const ignoredIds = useStore((s) => s.meta.lintIgnored);
-  const all = useMemo(() => lintSchema(schema, dialect), [schema, dialect]);
+  const dictionary = useStore((s) => s.dictionary);
+  const all = useMemo(() => lintSchema(schema, dialect, { dictionary }), [schema, dialect, dictionary]);
   // 무시한 항목은 목록·배지에서 빼고 아래 "무시한 항목"에 모은다
   const ignoredSet = useMemo(() => new Set(ignoredIds ?? []), [ignoredIds]);
   const issues = useMemo(() => all.filter((i) => !ignoredSet.has(i.id)), [all, ignoredSet]);

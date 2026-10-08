@@ -349,12 +349,14 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
       <section className="ai-section">
         <h4>이렇게 말해 보세요</h4>
         <ul className="examples">
-          {/* MCP 도구로 실제 할 수 있는 것만 (edit_schema · check_design/save_design_review · diff_versions/export_sql · export_definition_excel · db_pull) */}
+          {/* MCP 도구로 실제 할 수 있는 것만 (edit_schema · check_design/save_design_review · diff_versions/export_sql · export_definition_excel · lookup_dictionary · edit_notes · db_pull) */}
           <li>"{meta.name} 프로젝트에 쿠폰 기능 테이블 설계해줘. 회원과 연결하고 한글 논리명도 넣어줘"</li>
           <li>"{meta.name} 설계 검토해서 오류·경고·참고로 정리해줘"</li>
           <li>"주문 테이블 컬럼 구성을 보고 필요한 인덱스를 추천해서 추가해줘"</li>
           <li>"지난 버전 이후 바뀐 점 알려주고 ALTER SQL 뽑아줘"</li>
           <li>"테이블 정의서 엑셀로 만들어줘"</li>
+          <li>"표준 용어 사전대로 회원 테이블 컬럼 이름이랑 타입 맞춰줘"</li>
+          <li>"주문 영역에 결제 흐름 설명 메모 붙여줘"</li>
           {/* DB 비교는 서버가 DB에 접속하는 환경(로컬·자체 설치)에서만. 웹 서비스는 설치형 앱에서 사람이 한다 */}
           {serverDb && <li>"개발 DB랑 ERD 비교해서 다른 점 알려줘"</li>}
         </ul>

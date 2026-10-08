@@ -27,7 +27,35 @@ function flowMapper(viewportEl: HTMLElement) {
   });
 }
 
-const SKIP = '.react-flow__handle, .peer-tags';
+const SKIP = '.react-flow__handle, .peer-tags, .react-flow__resize-control, .note-node__placeholder';
+
+/** 줄이 바뀐(감싼) 글자를 줄마다 나눈다 (메모처럼 긴 글). 한 줄이면 그대로 */
+function textLines(node: Text): { text: string; rect: DOMRect }[] {
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  if (range.getClientRects().length <= 1) return [{ text: node.textContent ?? '', rect: range.getBoundingClientRect() }];
+  const text = node.textContent ?? '';
+  const lines: { text: string; rect: DOMRect }[] = [];
+  let start = 0;
+  let top: number | null = null;
+  for (let i = 0; i < text.length; i++) {
+    range.setStart(node, i);
+    range.setEnd(node, i + 1);
+    const r = range.getClientRects()[0];
+    if (!r) continue;
+    if (top !== null && Math.abs(r.top - top) > r.height / 2) {
+      range.setStart(node, start);
+      range.setEnd(node, i);
+      lines.push({ text: text.slice(start, i), rect: range.getBoundingClientRect() });
+      start = i;
+    }
+    if (top === null || Math.abs(r.top - top) > r.height / 2) top = r.top;
+  }
+  range.setStart(node, start);
+  range.setEnd(node, text.length);
+  lines.push({ text: text.slice(start), rect: range.getBoundingClientRect() });
+  return lines;
+}
 
 /** 테이블 하나를 SVG 조각으로 */
 function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, clipId: string, id: string): string {
@@ -76,19 +104,19 @@ function nodeToSvg(nodeEl: HTMLElement, toFlow: ReturnType<typeof flowMapper>, c
     }
     for (const child of el.childNodes) {
       if (child.nodeType === 3 /* 글자 */) {
-        const text = child.textContent ?? '';
-        if (!text.trim()) continue;
-        const range = document.createRange();
-        range.selectNodeContents(child);
-        const tr = toFlow(range.getBoundingClientRect());
-        if (tr.w <= 0) continue;
+        if (!(child.textContent ?? '').trim()) continue;
         const fontSize = parseFloat(st.fontSize);
         const family = st.fontFamily.replace(/"/g, "'");
-        // 글자 폭을 화면과 똑같이 맞춰, 다른 PC(다른 글꼴)에서 열어도 칸을 넘치지 않게 한다
-        out.push(
-          `<text x="${num(tr.x)}" y="${num(tr.y + tr.h / 2)}" dominant-baseline="central" font-family="${esc(family)}" font-size="${num(fontSize)}" font-weight="${st.fontWeight}"` +
-            `${st.fontStyle === 'italic' ? ' font-style="italic"' : ''} fill="${st.color}" textLength="${num(tr.w)}" lengthAdjust="spacingAndGlyphs" xml:space="preserve">${esc(text.trim())}</text>`,
-        );
+        for (const line of textLines(child as Text)) {
+          const text = line.text.trim();
+          const tr = toFlow(line.rect);
+          if (!text || tr.w <= 0) continue;
+          // 글자 폭을 화면과 똑같이 맞춰, 다른 PC(다른 글꼴)에서 열어도 칸을 넘치지 않게 한다
+          out.push(
+            `<text x="${num(tr.x)}" y="${num(tr.y + tr.h / 2)}" dominant-baseline="central" font-family="${esc(family)}" font-size="${num(fontSize)}" font-weight="${st.fontWeight}"` +
+              `${st.fontStyle === 'italic' ? ' font-style="italic"' : ''} fill="${st.color}" textLength="${num(tr.w)}" lengthAdjust="spacingAndGlyphs" xml:space="preserve">${esc(text)}</text>`,
+          );
+        }
       } else if (child instanceof HTMLElement) {
         walk(child);
       }
