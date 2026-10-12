@@ -30,7 +30,7 @@ import {
 } from './operations';
 import { addToArea, createArea, moveToArea, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
-import { addEnumType, enumOfType, removeEnumType, requireEnum, typeName, updateEnumType } from './enums';
+import { addEnumType, canonicalEnumColumns, removeEnumType, requireEnum, typeName, updateEnumType } from './enums';
 
 export interface ColumnSpec {
   name: string;
@@ -326,17 +326,7 @@ export function applyCommands(input: Schema, commands: Command[]): CommandResult
   for (const [tableId, areaId] of areaOf) if (findTable(schema, tableId) && schema.areas?.some((a) => a.id === areaId)) byArea.set(areaId, [...(byArea.get(areaId) ?? []), tableId]);
   for (const [areaId, ids] of byArea) addToArea(schema, areaId, ids);
   // ENUM을 쓰는 컬럼의 타입은 ENUM에 적힌 이름 그대로 (대소문자·따옴표가 달라도 같은 타입)
-  if (schema.enums?.length) {
-    for (const t of schema.tables) {
-      for (const c of t.columns) {
-        const e = enumOfType(schema.enums, c.type);
-        if (e && (c.type !== e.name || c.length)) {
-          c.type = e.name;
-          c.length = '';
-        }
-      }
-    }
-  }
+  canonicalEnumColumns(schema);
   return { schema, messages };
 }
 

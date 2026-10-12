@@ -116,6 +116,26 @@ export function sameEnumValues(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+/**
+ * ENUM을 쓰는 컬럼의 타입을 ENUM에 적힌 이름 그대로 맞춘다 ("ApprovalStatus"·APPROVALSTATUS → ApprovalStatus).
+ * 따옴표·대소문자만 다른 같은 타입이라 SQL은 같고, 화면에 한 가지로 보이게 한다. 바꾼 컬럼 수
+ */
+export function canonicalEnumColumns(schema: Pick<Schema, 'tables' | 'enums'>): number {
+  if (!schema.enums?.length) return 0;
+  let n = 0;
+  for (const t of schema.tables) {
+    for (const c of t.columns) {
+      const e = enumOfType(schema.enums, c.type);
+      if (e && (c.type !== e.name || c.length)) {
+        c.type = e.name;
+        c.length = '';
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
 /** 입력한 타입 이름 정리: 따옴표로 감싼 사용자 타입("BillingStatus")은 대소문자를 그대로, 나머지는 대문자로 */
 export function typeName(raw: string): string {
   const t = raw.trim();
@@ -151,6 +171,8 @@ export function addEnumType(schema: Schema, input: { name: string; values: strin
   checkEnumInput(schema, input.name, values);
   const e = createEnum({ name: input.name.trim(), values, ...(input.comment?.trim() ? { comment: input.comment.trim() } : {}) });
   schema.enums = [...(schema.enums ?? []), e];
+  // 이미 이 이름을 타입으로 쓰던 컬럼("Approve")은 새 ENUM 이름으로 맞춘다
+  canonicalEnumColumns(schema);
   return e;
 }
 

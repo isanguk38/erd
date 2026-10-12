@@ -11,6 +11,7 @@ import {
   readComments,
   readDictionary,
   detectTermStyles,
+  canonicalEnumColumns,
   NAME_KIND_LABEL,
   sameNamingSetting,
   type NamingSetting,
@@ -353,6 +354,8 @@ export const useStore = create<State>()(
           const draft = cloneSchema(get().schema);
           try {
             fn(draft);
+            // ENUM을 쓰는 컬럼은 ENUM 이름 그대로 ("ApprovalStatus"·approvalstatus → ApprovalStatus)
+            canonicalEnumColumns(draft);
           } catch (e) {
             alert(e instanceof Error ? e.message : String(e));
             return;

@@ -93,9 +93,10 @@ export function Inspector() {
  * 컬럼 타입 칸 오른쪽 작은 버튼: ENUM이면 그 타입의 값을 보고 고치는 창을 열고,
  * 목록에 없는 사용자 타입("Approve" 같은 따옴표 타입)이면 그 이름으로 타입을 만드는 창을 연다
  */
-function EnumButton({ type, enums }: { type: string; enums: EnumType[] | undefined }) {
+function EnumButton({ type, enums, unknown }: { type: string; enums: EnumType[] | undefined; unknown?: boolean }) {
   const e = enumOfType(enums, type);
-  const custom = !e && /^"[^"]+"$/.test(type.trim());
+  // 따옴표 타입(PostgreSQL 사용자 타입)이거나, 이 DB가 모르는 이름 하나짜리 타입(직접 만든 타입일 수 있음)
+  const custom = !e && (/^"[^"]+"$/.test(type.trim()) || (Boolean(unknown) && /^[A-Za-z_][\w$]*$/.test(type.trim())));
   if (!e && !custom) return null;
   const open = () => useStore.getState().setEnumDialog(e ? { focus: e.name } : { create: type.trim().replace(/"/g, '') });
   return (
@@ -103,7 +104,7 @@ function EnumButton({ type, enums }: { type: string; enums: EnumType[] | undefin
       type="button"
       className={`type-cell__enum${e ? '' : ' missing'}`}
       onClick={open}
-      title={e ? `ENUM ${e.name}: ${e.values.join(', ')}\n누르면 값을 보고 고칩니다` : `${type.trim()}은(는) 타입 목록에 없는 사용자 타입입니다 — 누르면 이 이름으로 ENUM 타입을 만듭니다 (값 입력)`}
+      title={e ? `ENUM ${e.name}: ${e.values.join(', ')}\n누르면 값을 보고 고칩니다` : `${type.trim()}은(는) 타입 목록에 없는 타입입니다 — 직접 만든 타입이면 누르고 값을 넣어 ENUM 타입으로 만드세요`}
       aria-label={e ? `${e.name} 타입 값 보기·고치기` : `${type.trim()} 타입 만들기`}
     >
       {e ? 'ENUM' : '+'}
@@ -467,7 +468,7 @@ function TableEditor({ table }: { table: Table }) {
               <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />
               <div className="type-cell">
                 <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, enumOfType(enums, type) ? { type: canonicalType({ enums }, type), length: '' } : { type: typeName(type) })} />
-                <EnumButton type={c.type} enums={enums} />
+                <EnumButton type={c.type} enums={enums} unknown={typeIssues.some((x) => x.columnId === c.id && x.code === 'unknown-type')} />
               </div>
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />

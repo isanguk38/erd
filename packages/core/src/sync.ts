@@ -8,7 +8,7 @@ import { diffSchemas, normalizeSchema, type Change, type DiffResult } from './di
 import type { Dialect } from './dialects/types';
 import { cloneSchema, findTable, sameExpression, type Column, type Index, type Relation, type Schema, type Table } from './model';
 import { removeColumn, removeTable } from './operations';
-import { enumKey } from './enums';
+import { canonicalEnumColumns, enumKey } from './enums';
 
 const key = (name: string) => name.toLowerCase();
 
@@ -219,6 +219,9 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
     const old = (schema.enums ?? []).find((e) => enumKey(e.name) === k);
     schema.enums = change.kind === 'dropEnum' ? rest : [...rest, { ...structuredClone(target), id: old?.id ?? target.id, ...(old?.comment ? { comment: old.comment } : {}) }];
   }
+
+  // ENUM을 쓰는 컬럼은 ENUM 이름 그대로 ("ApprovalStatus" → ApprovalStatus — DB에서 가져온 타입과 ERD에서 고른 타입이 한 모양으로)
+  canonicalEnumColumns(schema);
 
   for (const change of changes) {
     if (change.kind === 'dropForeignKey') {

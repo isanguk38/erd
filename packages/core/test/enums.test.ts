@@ -123,6 +123,20 @@ describe('사용자 정의 타입 (ENUM)', () => {
     expect(pg.normalizeDefault(`'ISSUED'::"BillingStatus"`)).toBe("'ISSUED'");
   });
 
+  it('ENUM을 쓰는 컬럼은 ENUM 이름 그대로 (따옴표·대소문자만 다른 타입): 타입을 만들 때, DB에서 가져올 때', () => {
+    // 예전에 가져와 "Approve"로 남은 컬럼에 같은 이름의 타입을 만들면
+    const s = applyCommands(emptySchema(), [{ op: 'createTable', name: 'approval', columns: [{ name: 'id', type: 'INT', primaryKey: true }, { name: 'action', type: '"Approve"' }] }]).schema;
+    const withEnum = applyCommands(s, [{ op: 'createEnum', name: 'Approve', values: ['OK', 'NO'] }]).schema;
+    expect(withEnum.tables[0].columns[1].type).toBe('Approve');
+    // DB에서 가져오기: ERD에 "ApprovalStatus"(따옴표)로 남은 컬럼은 타입이 들어오면서 이름도 맞춘다
+    const erd: Schema = { ...applyCommands(emptySchema(), [{ op: 'createTable', name: 'a', columns: [{ name: 'id', type: 'INT', primaryKey: true }, { name: 's', type: '"ApprovalStatus"' }] }]).schema, enums: [] };
+    const db = structuredClone(erd);
+    db.enums = [{ id: 'enum_ApprovalStatus', name: 'ApprovalStatus', values: ['A'] }];
+    db.tables[0].columns[1].type = 'ApprovalStatus';
+    const pulled = applyChanges(erd, diffSchemas(erd, db, pg));
+    expect(pulled.tables[0].columns[1].type).toBe('ApprovalStatus');
+  });
+
   it('DDL 읽기: CREATE TYPE ... AS ENUM, 따옴표 타입', () => {
     const r = parseDdl(`CREATE TYPE "BillingStatus" AS ENUM ('ISSUED', 'PAID');
 CREATE TYPE mood AS ENUM ('ok', 'sad');
