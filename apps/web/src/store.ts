@@ -10,7 +10,10 @@ import {
   emptySchema,
   readComments,
   readDictionary,
-  detectStyle,
+  detectTermStyles,
+  NAME_KIND_LABEL,
+  sameNamingSetting,
+  type NamingSetting,
   NAME_STYLE_LABEL,
   readMeta,
   readNotes,
@@ -29,7 +32,6 @@ import {
   type CommentThread,
   type DialectId,
   type ProjectMeta,
-  type NameStyle,
   type Area,
   type Schema,
 } from '@erd/core';
@@ -146,8 +148,8 @@ interface State extends LocalPrefs {
   setRelationTool: (tool: RelationTool) => void;
   setUserName: (name: string) => void;
   setDialect: (dialect: DialectId) => void;
-  /** 이름 표기 기준 (null이면 자동 — 많이 쓰는 표기) */
-  setNamingStyle: (style: NameStyle | null) => void;
+  /** 이름 표기 기준, 테이블·컬럼 따로 (null인 쪽은 자동 — 사전 표기·많이 쓰는 표기) */
+  setNamingStyle: (setting: NamingSetting | null) => boolean;
   setProjectName: (name: string) => void;
 }
 
@@ -283,7 +285,7 @@ export const useStore = create<State>()(
               const next = readSchema(doc);
               const patch: Partial<State> = { schema: next, meta: readMeta(doc), comments: readComments(doc) };
               // 사전의 표기는 프로젝트 이름 표기 기준을 따르므로 기준이 바뀌면 사전도 다시 읽는다
-              if (patch.meta!.namingStyle !== get().meta.namingStyle) patch.dictionary = readDictionary(doc);
+              if (!sameNamingSetting(patch.meta!.namingStyle, get().meta.namingStyle)) patch.dictionary = readDictionary(doc);
               // 메모는 바뀌었을 때만 새 목록 (캔버스를 덜 다시 그리게)
               const notes = readNotes(doc);
               if (JSON.stringify(notes) !== JSON.stringify(get().notes)) patch.notes = notes;
@@ -467,15 +469,19 @@ export const useStore = create<State>()(
         },
         setNamingStyle(namingStyle) {
           const d = doc;
-          if (!get().synced || get().role === 'viewer') return;
-          // 용어 사전이 있으면 사전 용어도 그 표기여야 한다 (사전과 기준이 어긋나지 않게)
-          const terms = get().dictionary?.terms ?? [];
-          const off = namingStyle ? detectStyle(terms, namingStyle).offenders : [];
-          if (off.length) {
-            alert(`용어 사전에 ${NAME_STYLE_LABEL[namingStyle!]}가 아닌 용어가 ${off.length}개 있어 기준을 바꿀 수 없습니다 (예: ${off.slice(0, 3).map((t) => t.physical).join(', ')}).\n용어 사전의 물리명을 먼저 그 표기로 고치세요.`);
-            return;
+          if (!get().synced || get().role === 'viewer') return false;
+          // 용어 사전이 있으면 사전 용어도 그 표기여야 한다 (사전과 기준이 어긋나지 않게, 테이블·컬럼 따로)
+          const checks = detectTermStyles(get().dictionary?.terms ?? [], namingStyle);
+          for (const kind of ['table', 'column'] as const) {
+            const style = namingStyle?.[kind];
+            const off = style ? checks[kind].offenders : [];
+            if (off.length) {
+              alert(`용어 사전의 ${NAME_KIND_LABEL[kind]} 용어 중 ${NAME_STYLE_LABEL[style!]}가 아닌 것이 ${off.length}개 있어 기준을 바꿀 수 없습니다 (예: ${off.slice(0, 3).map((t) => t.physical).join(', ')}).\n용어 사전의 물리명을 먼저 그 표기로 고치세요.`);
+              return false;
+            }
           }
           d?.transact(() => writeMeta(d, { namingStyle }), LOCAL);
+          return true;
         },
         setProjectName(name) {
           const d = doc;

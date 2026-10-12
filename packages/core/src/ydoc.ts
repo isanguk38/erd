@@ -10,7 +10,7 @@
 
 import * as Y from 'yjs';
 import type { AiReview } from './aiReview';
-import { isNameStyle, type NameStyle } from './naming';
+import { namingSettingValue, readNamingSetting, type NamingSetting } from './naming';
 import type { Area, CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
@@ -228,8 +228,8 @@ export interface ProjectMeta {
   lintIgnored?: string[];
   /** MCP로 연결한 AI의 설계 검토 결과 (aiReview.ts) */
   aiReview?: AiReview | null;
-  /** 이름 표기 기준 (naming.ts). 없으면 지금 이름들로 판단 */
-  namingStyle?: NameStyle | null;
+  /** 이름 표기 기준 (naming.ts) — 테이블·컬럼 따로. 없으면(또는 null인 쪽은) 사전 표기·지금 이름들로 판단 */
+  namingStyle?: NamingSetting | null;
 }
 
 export function readMeta(doc: Y.Doc): ProjectMeta {
@@ -244,11 +244,15 @@ export function readMeta(doc: Y.Doc): ProjectMeta {
     dbConnectionId: (meta.get('dbConnectionId') as string) ?? null,
     lintIgnored: Array.isArray(meta.get('lintIgnored')) ? [...(meta.get('lintIgnored') as string[])] : [],
     aiReview: (meta.get('aiReview') as AiReview | undefined) ?? null,
-    namingStyle: isNameStyle(meta.get('namingStyle')) ? (meta.get('namingStyle') as NameStyle) : null,
+    namingStyle: readNamingSetting(meta.get('namingStyle')),
   };
 }
 
 export function writeMeta(doc: Y.Doc, patch: Partial<ProjectMeta>): void {
   const meta = metaMap(doc);
-  for (const [k, v] of Object.entries(patch)) setIfChanged(meta, k, v === null ? undefined : v);
+  for (const [k, raw] of Object.entries(patch)) {
+    // 표기 기준은 짧게 저장한다 (테이블·컬럼이 같으면 문자열 하나)
+    const v = k === 'namingStyle' ? namingSettingValue(raw as NamingSetting | null) : raw;
+    setIfChanged(meta, k, v === null ? undefined : v);
+  }
 }

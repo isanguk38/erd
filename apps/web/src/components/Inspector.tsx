@@ -24,7 +24,9 @@ import {
   termFromTable,
   type DictTerm,
   fitsStyle,
-  projectNamingStyle,
+  projectNamingStyles,
+  namingRuleText,
+  type NameKind,
   toStyle,
   propagateColumnType,
   tableDeleteImpact,
@@ -223,26 +225,32 @@ function TableEditor({ table }: { table: Table }) {
   const dictionary = useStore((s) => s.dictionary);
   const dict = dictionary ? dictIndex(dictionary) : null;
   // 이름 표기 기준(snake_case 등, 정하지 않았으면 사전 표기): 기준과 다른 이름을 입력하면 바꿀지 안내하고 칸에 표시한다
-  const naming = useStore((s) => projectNamingStyle(s.meta.namingStyle, s.schema, s.dictionary ? dictIndex(s.dictionary).style : null).style);
-  const namingLabel = naming ? NAME_STYLE_LABEL[naming] : '';
-  const offStyle = (name: string) => (naming && name.trim() && !fitsStyle(name, naming) ? toStyle(name, naming) : null);
+  // 테이블·컬럼 기준이 다를 수 있다 (값 하나씩 읽는다 — 객체를 돌려주면 매번 새 값이라 다시 그리기를 반복한다)
+  const tableStyle = useStore((s) => projectNamingStyles(s.meta.namingStyle, s.schema, s.dictionary ? dictIndex(s.dictionary).styles : null).table.style);
+  const columnStyle = useStore((s) => projectNamingStyles(s.meta.namingStyle, s.schema, s.dictionary ? dictIndex(s.dictionary).styles : null).column.style);
+  const naming = { table: tableStyle, column: columnStyle };
+  const offStyle = (name: string, kind: NameKind) => {
+    const st = naming[kind];
+    return st && name.trim() && !fitsStyle(name, st) ? toStyle(name, st) : null;
+  };
   /** 기준과 다르면 안내하고 true */
-  const adviseName = (name: string, rename: (to: string) => void, what: string) => {
-    const to = offStyle(name);
-    if (!to || !naming || !fitsStyle(to, naming)) return false;
-    useStore.getState().showNotice({ text: `이 프로젝트는 ${namingLabel} 기준입니다 — ${what} ${name} 대신 ${to}`, action: { label: `${to}(으)로 바꾸기`, run: () => rename(to) } });
+  const adviseName = (name: string, rename: (to: string) => void, kind: NameKind) => {
+    const to = offStyle(name, kind);
+    const st = naming[kind];
+    if (!to || !st || !fitsStyle(to, st)) return false;
+    useStore.getState().showNotice({ text: `이 프로젝트는 ${namingRuleText(naming, kind)} 기준입니다 — ${kind === 'table' ? '테이블' : '컬럼'} ${name} 대신 ${to}`, action: { label: `${to}(으)로 바꾸기`, run: () => rename(to) } });
     return true;
   };
-  const nameMark = (name: string): Mark | undefined => {
+  const nameMark = (name: string, kind: NameKind): Mark | undefined => {
     if (DEFAULT_COLUMN_NAME.test(name) || DEFAULT_TABLE_NAME.test(name)) return undefined;
-    const to = offStyle(name);
-    return to ? { className: 'naming-off', title: `이 프로젝트는 ${namingLabel} 기준입니다${to !== name ? ` — ${to}(으)로 바꾸세요` : ''}` } : undefined;
+    const to = offStyle(name, kind);
+    return to ? { className: 'naming-off', title: `이 프로젝트는 ${namingRuleText(naming, kind)} 기준입니다${to !== name ? ` — ${to}(으)로 바꾸세요` : ''}` } : undefined;
   };
   // 사전에 없는 용어면 안내 (사전에 추가 / 논리명 맞추기). 표기가 기준과 다르면 표기 안내가 먼저다
   const adviseDictionary = (column: Column) => {
     if (!dict) return;
     const now = useStore.getState().schema.tables.find((t) => t.id === table.id)?.columns.find((c) => c.id === column.id);
-    if (!now || DEFAULT_COLUMN_NAME.test(now.name) || offStyle(now.name)) return; // 물리명을 아직 안 정했으면 다음 입력을 기다린다
+    if (!now || DEFAULT_COLUMN_NAME.test(now.name) || offStyle(now.name, 'column')) return; // 물리명을 아직 안 정했으면 다음 입력을 기다린다
     const r = checkColumnAgainstDictionary(dict, now);
     if (r?.status !== 'unknown') return;
     const owner = lookupPhysical(dict, now.name);
@@ -297,7 +305,7 @@ function TableEditor({ table }: { table: Table }) {
     const term = found?.logical ? found : null;
     setColumn(column, term ? { name, logicalName: term.logical } : { name });
     if (term) useStore.getState().showNotice({ text: `표준 용어 사전: ${name} → 논리명 ${term.logical} (Ctrl+Z로 되돌리기)` });
-    else if (!adviseName(name, (to) => edit((d) => void updateColumn(d, table.id, column.id, { name: to })), '컬럼')) adviseDictionary(column);
+    else if (!adviseName(name, (to) => edit((d) => void updateColumn(d, table.id, column.id, { name: to })), 'column')) adviseDictionary(column);
   };
   const dictMark = (column: Column): Mark | undefined => {
     const r = checkColumnAgainstDictionary(dict, column);
@@ -310,7 +318,7 @@ function TableEditor({ table }: { table: Table }) {
   const adviseTable = () => {
     if (!dict) return;
     const now = useStore.getState().schema.tables.find((t) => t.id === table.id);
-    if (!now || DEFAULT_TABLE_NAME.test(now.name) || offStyle(now.name)) return;
+    if (!now || DEFAULT_TABLE_NAME.test(now.name) || offStyle(now.name, 'table')) return;
     const r = checkTableAgainstDictionary(dict, now);
     const notice = useStore.getState().showNotice;
     if (r?.status === 'mismatch') {
@@ -336,11 +344,11 @@ function TableEditor({ table }: { table: Table }) {
   };
   const setTableName = (patch: { name?: string; logicalName?: string }) => {
     setTable(patch);
-    if (patch.name !== undefined && adviseName(patch.name, (to) => edit((d) => void updateTable(d, table.id, { name: to })), '테이블')) return;
+    if (patch.name !== undefined && adviseName(patch.name, (to) => edit((d) => void updateTable(d, table.id, { name: to })), 'table')) return;
     adviseTable();
   };
   const tableMark = (field: 'name' | 'logical'): Mark | undefined => {
-    if (field === 'name' && nameMark(table.name)) return nameMark(table.name);
+    if (field === 'name' && nameMark(table.name, 'table')) return nameMark(table.name, 'table');
     if (!dict) return undefined;
     const r = checkTableAgainstDictionary(dict, table);
     if (field === 'logical') return r?.status === 'unknown' ? { className: 'dict-unknown', title: '용어 사전에 없는 테이블입니다 — 용어 사전에 추가해 주세요' } : undefined;
@@ -427,7 +435,7 @@ function TableEditor({ table }: { table: Table }) {
           {table.columns.map((c, i) => (
             <div key={c.id} className="column-grid__row">
               {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
-              <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} issue={nameMark(c.name)} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByPhysical} onPick={(t) => pickTerm(c, t)} />
+              <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} issue={nameMark(c.name, 'column')} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByPhysical} onPick={(t) => pickTerm(c, t)} />
               <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />
               <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, { type: type.toUpperCase() })} />
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />

@@ -71,8 +71,8 @@ describe('설계 검사', () => {
     const s = applyCommands(good(), [
       { op: 'createTable', name: 'orderItem', logicalName: '주문상품', columns: [{ name: 'itemId', logicalName: '번호', type: 'BIGINT', primaryKey: true }, { name: 'qty', logicalName: '수량', type: 'INT' }] },
     ]).schema;
-    // 대부분 snake → 테이블 orderItem, 컬럼 itemId (qty·member 같은 한 단어는 상관없음)
-    expect(only(s, 'naming-mixed').map((i) => i.columnName ?? i.tableName)).toEqual(['orderItem', 'itemId']);
+    // 테이블 이름끼리·컬럼 이름끼리 따로 판단: 테이블(member·orders·orderItem)은 모두 camelCase에 맞고, 컬럼은 대부분 snake → itemId만 (qty 같은 한 단어는 상관없음)
+    expect(only(s, 'naming-mixed').map((i) => i.columnName ?? i.tableName)).toEqual(['itemId']);
     // 저장한 기준이 camelCase면 그 기준으로
     expect(only(s, 'naming-mixed').length).toBeGreaterThan(0);
     expect(lintSchema(s, 'mysql', { namingStyle: 'camel' }).filter((i) => i.rule === 'naming-mixed').map((i) => i.columnName)).toContain('member_id');

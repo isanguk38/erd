@@ -3,7 +3,7 @@
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
-import { fitsStyle, NAME_STYLE_LABEL, namingIssues, projectNamingStyle, type NameStyle } from './naming';
+import { fitsStyle, namingIssues, namingRuleText, projectNamingStyles, stylesOf, type NameStyle, type NamingSetting } from './naming';
 import { checkColumnAgainstDictionary, checkTableAgainstDictionary, describeMatch, dictIndex, lookupPhysical, lookupTablePhysical, termFromTable, type DictTerm, type Dictionary } from './dictionary';
 
 export type LintRule =
@@ -47,7 +47,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'no-primary-key': { label: '기본키 없음', severity: 'error', description: '기본키가 없으면 행을 하나로 가리킬 수 없고, 많은 도구(ORM·복제)가 제대로 동작하지 않습니다.' },
   'fk-type-mismatch': { label: 'FK 타입 불일치', severity: 'error', description: '외래키 컬럼과 참조하는 기본키의 타입·길이가 다르면 FK를 만들 수 없거나 비교할 때 느려집니다.' },
   'fk-without-index': { label: 'FK에 인덱스 없음', severity: 'warning', description: '외래키 컬럼에 인덱스가 없으면 조인·부모 삭제가 느려집니다 (MySQL/MariaDB는 자동으로 만들어 검사하지 않습니다).' },
-  'naming-mixed': { label: '이름 표기 기준과 다름', severity: 'warning', description: '프로젝트의 이름 표기 기준(snake_case·camelCase 등)과 다른 테이블·컬럼 이름입니다. 기준은 위쪽 표기 배지에서 정하고, 정하지 않았으면 많이 쓰는 표기를 기준으로 봅니다.' },
+  'naming-mixed': { label: '이름 표기 기준과 다름', severity: 'warning', description: '프로젝트의 이름 표기 기준(snake_case·camelCase 등)과 다른 테이블·컬럼 이름입니다. 기준은 위쪽 표기 배지에서 테이블·컬럼 따로 정할 수 있고, 정하지 않은 쪽은 용어 사전의 표기나 많이 쓰는 표기를 기준으로 봅니다.' },
   'missing-logical-name': { label: '논리명 없음', severity: 'info', description: '논리명(한글 이름)이 없으면 DB comment가 비고, 정의서·다른 사람이 보기 어렵습니다.' },
   'duplicate-index': { label: '중복 인덱스', severity: 'warning', description: '같은 컬럼 조합의 인덱스가 두 개 이상이면 저장 공간과 쓰기 속도만 낭비됩니다.' },
   'varchar-no-length': { label: '문자 길이 없음', severity: 'warning', description: 'VARCHAR/CHAR에 길이가 없으면 DB에 따라 오류가 나거나 의도와 다른 길이가 됩니다.' },
@@ -80,8 +80,8 @@ export function sameColumnType(a: Pick<Column, 'type' | 'length'>, b: Pick<Colum
 }
 
 export interface LintOptions {
-  /** 프로젝트에 저장한 이름 표기 기준 (없으면 사전 표기, 사전도 없으면 지금 이름들로 판단) */
-  namingStyle?: NameStyle | null;
+  /** 프로젝트에 저장한 이름 표기 기준, 테이블·컬럼 따로 (정하지 않은 쪽은 사전 표기, 사전도 없으면 지금 이름들로 판단) */
+  namingStyle?: NamingSetting | NameStyle | null;
   /** 표준 용어 사전 (있으면 컬럼·테이블이 사전을 따르는지도 검사) */
   dictionary?: Dictionary | null;
 }
@@ -133,21 +133,21 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
 
   // 이름 표기 기준: 프로젝트 기준(없으면 많이 쓰는 표기)과 다른 테이블·컬럼 이름
   const dict = options.dictionary?.terms.length ? dictIndex(options.dictionary) : null;
-  const { style } = projectNamingStyle(options.namingStyle, schema, dict?.style);
-  const fitsName = (name: string) => !style || fitsStyle(name, style);
-  if (style) {
-    const label = NAME_STYLE_LABEL[style];
-    for (const i of namingIssues(schema, style)) {
+  const styles = stylesOf(projectNamingStyles(options.namingStyle, schema, dict?.styles));
+  const fitsTable = (name: string) => !styles.table || fitsStyle(name, styles.table);
+  const fitsColumn = (name: string) => !styles.column || fitsStyle(name, styles.column);
+  {
+    for (const i of namingIssues(schema, styles)) {
       const t = schema.tables.find((x) => x.id === i.tableId)!;
       const to = i.suggestion ? ` — ${i.suggestion}(으)로 바꾸세요` : '';
       if (i.columnId) {
-        add('naming-mixed', t, `${t.name}.${i.column}: 이 프로젝트는 ${label} 기준입니다${to}`, {
+        add('naming-mixed', t, `${t.name}.${i.column}: 이 프로젝트는 ${namingRuleText(styles, 'column')} 기준입니다${to}`, {
           columnId: i.columnId,
           columnName: i.column,
           ...(i.suggestion ? { fix: { kind: 'patchColumn' as const, tableId: t.id, columnId: i.columnId, label: `${i.suggestion}(으)로`, patch: { name: i.suggestion } } } : {}),
         });
       } else {
-        add('naming-mixed', t, `${t.name}: 이 프로젝트는 ${label} 기준입니다 (테이블 이름)${to}`, i.suggestion ? { fix: { kind: 'patchTable', tableId: t.id, label: `${i.suggestion}(으)로`, patch: { name: i.suggestion } } } : {});
+        add('naming-mixed', t, `${t.name}: 이 프로젝트는 ${namingRuleText(styles, 'table')} 기준입니다${styles.table === styles.column ? ' (테이블 이름)' : ''}${to}`, i.suggestion ? { fix: { kind: 'patchTable', tableId: t.id, label: `${i.suggestion}(으)로`, patch: { name: i.suggestion } } } : {});
       }
     }
   }
@@ -248,7 +248,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
         add('dict-mismatch', t, `${t.name}: 테이블 "${t.logicalName}"의 표준 물리명은 ${r.physical}입니다`, { fix: { kind: 'patchTable', tableId: t.id, label: '표준대로', patch: { name: r.physical! } } });
         continue;
       }
-      if (style && t.name.trim() && !fitsName(t.name)) continue; // 표기부터 고친다 (이름 표기 기준 경고)
+      if (t.name.trim() && !fitsTable(t.name)) continue; // 표기부터 고친다 (이름 표기 기준 경고)
       const owner = lookupTablePhysical(dict, t.name);
       add('dict-unknown', t, owner
         ? `${t.name}: 테이블 논리명 "${t.logicalName}"이(가) 사전에 없습니다 (이 물리명은 사전에 "${owner.logical}"(으)로 있음)`
@@ -261,7 +261,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
         const r = checkColumnAgainstDictionary(dict, c);
         if (!r || r.status === 'ok') continue;
         if (r.status === 'unknown') {
-          if (style && c.name.trim() && !fitsName(c.name)) continue;
+          if (c.name.trim() && !fitsColumn(c.name)) continue;
           const owner = lookupPhysical(dict, c.name);
           add('dict-unknown', t, owner
             ? `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 사전에 없습니다 (이 물리명은 사전에 "${owner.logical}"(으)로 있음)`

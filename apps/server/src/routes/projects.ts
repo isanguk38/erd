@@ -28,9 +28,9 @@ import {
   toScript,
   changeImpact,
   namingNotes,
-  projectNamingStyle,
-  detectNamingStyle,
-  isNameStyle,
+  projectNamingStyles,
+  stylesOf,
+  describeNaming,
   syncDictionaryForAi,
   addMissingTerms,
   readDictionary,
@@ -122,8 +122,8 @@ export function registerProjectRoutes(
   function reviewNotes(id: string, before: Schema, after: Schema) {
     const impact = changeImpact(before, after);
     const dict = readDictionary(store.load(id).doc);
-    const { style } = projectNamingStyle(store.meta(id).namingStyle, after, dict ? dictIndex(dict).style : null);
-    const naming = namingNotes(before, after, style);
+    const styles = stylesOf(projectNamingStyles(store.meta(id).namingStyle, after, dict ? dictIndex(dict).styles : null));
+    const naming = namingNotes(before, after, styles);
     const dictionary = syncDictionaryForAi(dict, before, after).notes;
     return { ...(impact.length ? { impact } : {}), ...(naming.length ? { naming } : {}), ...(dictionary.length ? { dictionary } : {}) };
   }
@@ -144,17 +144,19 @@ export function registerProjectRoutes(
   }
 
   /**
-   * 표기 기준을 아직 정하지 않았으면, AI가 반영한 뒤의 이름들로 판단해 저장한다
-   * (처음 AI가 snake_case로 만들면 다음 명령부터 snake_case 기준을 따른다). 저장한 기준
+   * 표기 기준을 아직 정하지 않은 쪽(테이블·컬럼 따로)은, AI가 반영한 뒤의 이름들로 판단해 저장한다
+   * (처음 AI가 테이블 camelCase·컬럼 snake_case로 만들면 다음 명령부터 그 기준을 따른다).
+   * 용어 사전에 그 종류의 용어가 있으면 사전 표기가 이미 기준이라 저장하지 않는다. 새로 저장했으면 저장한 기준
    */
   function rememberNamingStyle(id: string): string | undefined {
-    if (isNameStyle(store.meta(id).namingStyle)) return undefined;
-    // 사전이 있으면 사전 표기가 이미 기준이다 (따로 저장하지 않는다)
-    if (readDictionary(store.load(id).doc)) return undefined;
-    const style = detectNamingStyle(store.schema(id));
-    if (!style) return undefined;
-    store.setMeta(id, { namingStyle: style }, 'ai');
-    return style;
+    const dict = readDictionary(store.load(id).doc);
+    const r = projectNamingStyles(store.meta(id).namingStyle, store.schema(id), dict ? dictIndex(dict).styles : null);
+    const pick = (k: 'table' | 'column') => (r[k].from === 'names' ? r[k].style : null);
+    if (!pick('table') && !pick('column')) return undefined;
+    const saved = store.meta(id).namingStyle;
+    const next = { table: saved?.table ?? pick('table'), column: saved?.column ?? pick('column') };
+    store.setMeta(id, { namingStyle: next }, 'ai');
+    return describeNaming(next);
   }
 
   const modeOf = (id: string, mode: unknown, source: Source): Mode => {

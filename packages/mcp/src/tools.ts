@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { areaSchema, describeMatch, describeSchema, dialects, dictIndex, isNameStyle, lookupTerm, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyle, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { areaSchema, describeMatch, describeSchema, dialects, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -152,10 +152,16 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       : undefined;
   /** 프로젝트의 이름 표기 기준 안내 (AI가 같은 표기로 만들게) */
   const namingInfo = (meta: Record<string, unknown>, schema: Schema, dict: Dictionary | null) => {
-    const { style, from } = projectNamingStyle(meta.namingStyle, schema, dict ? dictIndex(dict).style : null);
-    if (!style) return '아직 정해지지 않음 — 처음 만드는 표기(snake_case 권장)가 이 프로젝트의 기준으로 저장됩니다';
-    const why = from === 'dictionary' ? ' — 용어 사전의 표기' : from === 'names' ? ' — 지금 이름들로 판단' : '';
-    return `${NAME_STYLE_LABEL[style]} (예: ${NAME_STYLE_EXAMPLE[style]})${why}. 테이블·컬럼 물리명을 모두 이 표기로 만드세요`;
+    const r = projectNamingStyles(meta.namingStyle, schema, dict ? dictIndex(dict).styles : null);
+    const one = (k: NameKind) => {
+      const { style, from } = r[k];
+      if (!style) return '아직 정해지지 않음 — 처음 만드는 표기(snake_case 권장)가 기준으로 저장됩니다';
+      const why = from === 'dictionary' ? ' — 용어 사전의 표기' : from === 'names' ? ' — 지금 이름들로 판단' : '';
+      return `${NAME_STYLE_LABEL[style]} (예: ${NAME_STYLE_EXAMPLE[style]})${why}`;
+    };
+    if (r.table.style === r.column.style && r.table.from === r.column.from) return `${one('table')}. 테이블·컬럼 물리명을 모두 이 표기로 만드세요`;
+    // 테이블과 컬럼의 기준이 다를 수 있다 (예: 테이블 camelCase, 컬럼 snake_case)
+    return `${NAME_KIND_LABEL.table}: ${one('table')} / ${NAME_KIND_LABEL.column}: ${one('column')}. 테이블 이름과 컬럼 이름을 각자 이 표기로 만드세요`;
   };
 
   server.registerTool(
@@ -229,7 +235,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       const scope = area ? requireArea(schema, area) : null;
       const scopeNames = scope ? new Set(scope.tableIds.map((id) => schema.tables.find((t) => t.id === id)?.name.toLowerCase())) : null;
       const inScope = (table?: string) => !scopeNames || (table ? scopeNames.has(table.toLowerCase()) : false);
-      const all = lintSchema(schema, String(meta.dialect ?? 'mysql'), { namingStyle: isNameStyle(meta.namingStyle) ? meta.namingStyle : null, dictionary: await dictionaryOf(p.id) }).filter((i) => inScope(i.tableName));
+      const all = lintSchema(schema, String(meta.dialect ?? 'mysql'), { namingStyle: readNamingSetting(meta.namingStyle), dictionary: await dictionaryOf(p.id) }).filter((i) => inScope(i.tableName));
       const issues = all.filter((i) => !ignored.has(i.id));
       const review = (meta.aiReview as AiReview | null | undefined) ?? null;
       const reviewOpen = (review?.items ?? []).filter((i) => i.status === 'open' && (!scope || inScope(i.table)));
@@ -323,7 +329,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
         '관계(addRelation)는 부모의 기본키를 참조하는 FK 컬럼을 자식에 자동으로 만든다. FK 컬럼을 따로 addColumn 하지 않는다.',
         'mode=apply면 화면에 바로 반영되고 사람이 "AI 변경 되돌리기"로 한 번에 되돌릴 수 있다. mode=propose면 제안으로 쌓여 사람이 승인한다.',
         '결과의 impact: 지운 테이블·컬럼 때문에 함께 사라진 외래키·인덱스, 타입을 바꿨는데 FK로 이어진 컬럼은 그대로인 것 — 의도와 다르면 이어서 고친다.',
-        '결과의 naming: 이번에 만들거나 바꾼 이름 중 프로젝트 표기 기준(snake_case 등)과 다른 것 — 안내대로 updateTable·updateColumn으로 바로 고친다. namingStyleSaved: 기준이 없던 프로젝트에 이번 이름들로 기준을 저장함 (다음부터 이 기준을 따른다).',
+        '결과의 naming: 이번에 만들거나 바꾼 이름 중 프로젝트 표기 기준(snake_case 등)과 다른 것 — 안내대로 updateTable·updateColumn으로 바로 고친다. namingStyleSaved: 기준이 없던 쪽(테이블·컬럼 따로)에 이번 이름들로 기준을 저장함 (다음부터 이 기준을 따른다).',
         '결과의 dictionary: 표준 용어 사전과 다른 컬럼·테이블 — 안내대로 updateColumn·updateTable 한다. dictionaryAdded: 사전에 없어 이번에 사전에 새로 넣은 용어 (같은 논리명·물리명이 이미 있거나 표기 기준과 다르면 넣지 않음).',
       ].join(' '),
       inputSchema: { project: projectArg, commands: z.array(command).min(1), mode },
@@ -366,7 +372,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       };
       const term = (t: { kind?: string; logical: string; physical: string; type?: string; length?: string; description?: string }) => ({ kind: t.kind === 'table' ? '테이블' : '컬럼', logicalName: t.logical, name: t.physical, type: typeText(t.type, t.length), description: t.description });
       return text({
-        dictionary: `용어 ${dict.terms.length}개 (테이블 ${index.tables.size}), 물리명 표기(프로젝트 기준): ${index.style ? NAME_STYLE_LABEL[index.style] : '-'} — 사전에 없는 테이블·컬럼도 이 표기로 이름을 짓는다`,
+        dictionary: `용어 ${dict.terms.length}개 (테이블 ${index.tables.size}), 물리명 표기(프로젝트 기준): ${describeNaming(index.styles)} — 사전에 없는 테이블·컬럼도 이 표기로 이름을 짓는다`,
         tableResults: tables?.length
           ? tables.map((n) => {
               const t = index.tables.get(n.replace(/\s+/g, '').toLowerCase());

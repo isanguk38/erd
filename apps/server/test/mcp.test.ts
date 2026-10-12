@@ -121,7 +121,7 @@ describe('MCP', () => {
     };
     const created = await call('create_project', { name: '표기', dialect: 'mysql' });
     await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'apply' } });
-    const meta = async () => ((await erd.app.inject({ method: 'GET', url: `/api/projects/${created.id}` })).json() as { meta: { namingStyle?: string | null } }).meta;
+    const meta = async () => ((await erd.app.inject({ method: 'GET', url: `/api/projects/${created.id}` })).json() as { meta: { namingStyle?: { table: string | null; column: string | null } | null } }).meta;
 
     // 빈 프로젝트: 아직 기준 없음 → AI가 처음 snake_case로 만들면 그 기준을 저장
     expect((await call('get_schema', { project: '표기' })).project.namingStyle).toContain('아직 정해지지 않음');
@@ -133,8 +133,8 @@ describe('MCP', () => {
         { op: 'addRelation', parent: 'member', child: 'orders' },
       ],
     });
-    expect(first.namingStyleSaved).toBe('snake');
-    expect((await meta()).namingStyle).toBe('snake');
+    expect(first.namingStyleSaved).toBe('snake_case');
+    expect((await meta()).namingStyle).toEqual({ table: 'snake', column: 'snake' });
     expect((await call('get_schema', { project: '표기' })).project.namingStyle).toMatch(/^snake_case \(예: member_no\)\. /);
 
     // 다음 명령: 기준과 다른 이름은 결과에 naming으로, 설계 검사에도
@@ -145,11 +145,27 @@ describe('MCP', () => {
     expect(lint.basicChecks.filter((i: { rule: string }) => i.rule === '이름 표기 기준과 다름').length).toBe(2);
 
     // 사람이 기준을 camelCase로 바꾸면 AI도 그 기준으로 안내받는다
-    erd.projects.setMeta(created.id, { namingStyle: 'camel' });
+    erd.projects.setMeta(created.id, { namingStyle: { table: 'camel', column: 'camel' } });
     expect((await call('get_schema', { project: '표기' })).project.namingStyle).toMatch(/^camelCase/);
     const third = await call('edit_schema', { project: '표기', commands: [{ op: 'addColumn', table: 'orders', column: { name: 'order_amt', logicalName: '주문금액', type: 'INT' } }] });
     expect(third.naming).toEqual(['orders.order_amt: 이 프로젝트는 camelCase 기준입니다 — orderAmt(으)로 바꾸세요']);
-    erd.projects.setMeta(created.id, { namingStyle: 'snake' });
+    // 테이블 camelCase · 컬럼 snake_case로 따로 정하면 각자 그 기준으로
+    erd.projects.setMeta(created.id, { namingStyle: { table: 'camel', column: 'snake' } });
+    expect((await call('get_schema', { project: '표기' })).project.namingStyle).toMatch(/^테이블: camelCase \(예: memberNo\) \/ 컬럼: snake_case \(예: member_no\)/);
+    const split = await call('edit_schema', { project: '표기', commands: [{ op: 'createTable', name: 'order_memo', logicalName: '주문메모', columns: [{ name: 'memo_id', logicalName: '메모번호', type: 'BIGINT', primaryKey: true }, { name: 'memoText', logicalName: '메모', type: 'TEXT' }] }] });
+    expect(split.naming).toEqual([
+      '테이블 order_memo: 이 프로젝트는 테이블 이름 camelCase 기준입니다 — orderMemo(으)로 바꾸세요',
+      'order_memo.memoText: 이 프로젝트는 컬럼 이름 snake_case 기준입니다 — memo_text(으)로 바꾸세요',
+    ]);
+    await call('edit_schema', { project: '표기', commands: [{ op: 'dropTable', table: 'order_memo' }] });
+    erd.projects.setMeta(created.id, { namingStyle: { table: 'snake', column: 'snake' } });
+
+    // 처음 AI가 테이블 camelCase · 컬럼 snake_case로 만들면 따로 저장된다
+    const other = await call('create_project', { name: '표기2', dialect: 'mysql' });
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${other.id}`, payload: { aiMode: 'apply' } });
+    const made = await call('edit_schema', { project: '표기2', commands: [{ op: 'createTable', name: 'orderItem', logicalName: '주문상품', columns: [{ name: 'order_item_id', logicalName: '주문상품번호', type: 'BIGINT', primaryKey: true }] }] });
+    expect(made.namingStyleSaved).toBe('테이블 camelCase · 컬럼 snake_case');
+    expect(erd.projects.meta(other.id).namingStyle).toEqual({ table: 'camel', column: 'snake' });
 
     // 같은 논리명의 테이블은 만들 수 없다
     const dupTable = await client.callTool({ name: 'edit_schema', arguments: { project: '표기', commands: [{ op: 'createTable', name: 'member2', logicalName: '회원' }] } });

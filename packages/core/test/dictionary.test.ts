@@ -18,9 +18,9 @@ import {
   clearDictionary,
   detectStyle,
   toStyle,
-  dictionaryStyle,
+  dictionaryStyles,
   dictIndex,
-  projectNamingStyle,
+  projectNamingStyles,
   suggestTerms,
   setDictEntry,
   syncDictionaryForAi,
@@ -65,7 +65,7 @@ describe('표준 용어 사전', () => {
     expect(mixed.offenders.map((t) => t.physical)).toEqual(['mbrAge']);
     expect(toStyle('memberAge', 'snake')).toBe('member_age');
     expect(toStyle('member_age', 'camel')).toBe('memberAge');
-    expect(dictionaryStyle(dict)).toBe('snake');
+    expect(dictionaryStyles(dict)).toEqual({ table: null, column: 'snake' });
   });
 
   it('입력 중 후보: 앞부분이 맞는 것 먼저, 물리명·논리명 양쪽', () => {
@@ -112,14 +112,23 @@ describe('표준 용어 사전', () => {
   it('프로젝트 이름 표기 기준: 저장한 기준이 있으면 사전도 그 표기만, 없으면 사전 표기가 프로젝트 기준', () => {
     const doc = new Y.Doc();
     writeDictionary(doc, { terms: dict.terms });
-    expect(projectNamingStyle(undefined, { tables: [] }, dictIndex(readDictionary(doc)!).style)).toEqual({ style: 'snake', auto: true, from: 'dictionary' });
-    writeMeta(doc, { namingStyle: 'camel' });
-    expect(readDictionary(doc)?.namingStyle).toBe('camel');
-    expect(() => setDictEntry(doc, { logical: '회원나이', physical: 'member_age' })).toThrow(/이름 표기 기준은 camelCase/);
+    expect(projectNamingStyles(undefined, { tables: [] }, dictIndex(readDictionary(doc)!).styles).column).toEqual({ style: 'snake', auto: true, from: 'dictionary' });
+    writeMeta(doc, { namingStyle: { table: 'camel', column: 'camel' } });
+    expect(readDictionary(doc)?.namingStyle).toEqual({ table: 'camel', column: 'camel' });
+    expect(() => setDictEntry(doc, { logical: '회원나이', physical: 'member_age' })).toThrow(/컬럼 이름 표기 기준은 camelCase/);
     expect(() => writeDictionary(doc, { terms: [{ logical: '나이', physical: 'age_cnt' }] }, 'merge')).toThrow(/이름 표기 기준은 camelCase/);
-    writeMeta(doc, { namingStyle: 'snake' });
+    writeMeta(doc, { namingStyle: { table: 'snake', column: 'snake' } });
     setDictEntry(doc, { logical: '회원나이', physical: 'member_age' });
     expect(lookupTerm(readDictionary(doc), '회원나이')?.physical).toBe('member_age');
+    // 테이블 camelCase · 컬럼 snake_case: 테이블 용어와 컬럼 용어를 따로 본다
+    writeMeta(doc, { namingStyle: { table: 'camel', column: 'snake' } });
+    setDictEntry(doc, { kind: 'table', logical: '주문상품', physical: 'orderItem' });
+    expect(() => setDictEntry(doc, { kind: 'table', logical: '회원정보', physical: 'member_info' })).toThrow(/테이블 이름 표기 기준은 camelCase/);
+    expect(dictIndex(readDictionary(doc)!).styles).toEqual({ table: 'camel', column: 'snake' });
+    // 기준 없이도 테이블 용어·컬럼 용어가 각자 한 표기면 넣을 수 있다
+    const free = new Y.Doc();
+    writeDictionary(free, { terms: [{ kind: 'table', logical: '주문', physical: 'orderMain' }, { logical: '주문번호', physical: 'order_no' }] });
+    expect(dictIndex(readDictionary(free)!).styles).toEqual({ table: 'camel', column: 'snake' });
   });
 
   it('문서에 넣기: 표기가 섞이면 넣지 않고, 같은 물리명·다른 표기 용어는 하나씩 추가도 막는다', () => {

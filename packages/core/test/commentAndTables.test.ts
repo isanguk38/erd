@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
 import {
   applyCommands,
-  detectNamingStyle,
+  detectNamingStyles,
+  describeNaming,
+  readMeta,
+  writeMeta,
   diffIncoming,
   diffSchemas,
   emptySchema,
@@ -10,7 +14,7 @@ import {
   lintSchema,
   namingIssues,
   namingNotes,
-  projectNamingStyle,
+  projectNamingStyles,
   toStyle,
   updateTable,
 } from '../src';
@@ -73,10 +77,13 @@ describe('이름 표기 기준', () => {
     expect(toStyle('memberAge', 'snake')).toBe('member_age');
     expect(toStyle('MEMBER_AGE', 'camel')).toBe('memberAge');
     expect(toStyle('member_age', 'SNAKE')).toBe('MEMBER_AGE');
-    expect(detectNamingStyle(schema)).toBe('snake');
-    expect(detectNamingStyle(emptySchema())).toBeNull();
-    expect(projectNamingStyle('camel', schema)).toEqual({ style: 'camel', auto: false, from: 'saved' });
-    expect(projectNamingStyle(null, schema)).toEqual({ style: 'snake', auto: true, from: 'names' });
+    expect(detectNamingStyles(schema)).toEqual({ table: 'snake', column: 'snake' });
+    expect(detectNamingStyles(emptySchema())).toEqual({ table: null, column: null });
+    // 예전 값(문자열 하나)은 테이블·컬럼 모두
+    expect(projectNamingStyles('camel', schema).table).toEqual({ style: 'camel', auto: false, from: 'saved' });
+    expect(projectNamingStyles(null, schema).column).toEqual({ style: 'snake', auto: true, from: 'names' });
+    // 한쪽만 정하면 다른 쪽은 판단
+    expect(projectNamingStyles({ table: 'camel', column: null }, schema)).toEqual({ table: { style: 'camel', auto: false, from: 'saved' }, column: { style: 'snake', auto: true, from: 'names' } });
   });
 
   it('기준과 다른 테이블·컬럼 (바꿀 이름이 없으면 고치기 없이)', () => {
@@ -93,6 +100,31 @@ describe('이름 표기 기준', () => {
     expect(auto.find((i) => i.tableName === 'OrderItem' && !i.columnId)?.fix).toMatchObject({ kind: 'patchTable', patch: { name: 'order_item' } });
     const camel = lintSchema(schema, 'mysql', { namingStyle: 'camel' }).filter((i) => i.rule === 'naming-mixed');
     expect(camel.find((i) => i.columnName === 'member_id')?.fix).toMatchObject({ kind: 'patchColumn', patch: { name: 'memberId' } });
+  });
+
+  it('테이블·컬럼 따로: 테이블 camelCase + 컬럼 snake_case', () => {
+    const mixed = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'orderItem', columns: [{ name: 'order_item_id', type: 'BIGINT', primaryKey: true }, { name: 'itemName', type: 'VARCHAR(20)' }] },
+      { op: 'createTable', name: 'member_info', columns: [{ name: 'member_id', type: 'BIGINT', primaryKey: true }] },
+    ]).schema;
+    const setting = { table: 'camel' as const, column: 'snake' as const };
+    const issues = lintSchema(mixed, 'mysql', { namingStyle: setting }).filter((i) => i.rule === 'naming-mixed');
+    expect(issues.map((i) => [i.columnName ?? i.tableName, i.message.split(': ')[1]])).toEqual([
+      ['member_info', '이 프로젝트는 테이블 이름 camelCase 기준입니다 — memberInfo(으)로 바꾸세요'],
+      ['itemName', '이 프로젝트는 컬럼 이름 snake_case 기준입니다 — item_name(으)로 바꾸세요'],
+    ]);
+    // 기준을 안 정하면 테이블 이름끼리·컬럼 이름끼리 따로 판단한다
+    expect(detectNamingStyles(applyCommands(emptySchema(), [{ op: 'createTable', name: 'orderItem', columns: [{ name: 'order_id', type: 'BIGINT' }, { name: 'item_name', type: 'INT' }] }, { op: 'createTable', name: 'memberInfo' }]).schema)).toEqual({ table: 'camel', column: 'snake' });
+    expect(describeNaming(setting)).toBe('테이블 camelCase · 컬럼 snake_case');
+    expect(describeNaming({ table: 'snake', column: 'snake' })).toBe('snake_case');
+    // 저장: 같으면 문자열 하나, 다르면 따로
+    const doc = new Y.Doc();
+    writeMeta(doc, { namingStyle: setting });
+    expect(readMeta(doc).namingStyle).toEqual(setting);
+    writeMeta(doc, { namingStyle: { table: 'snake', column: 'snake' } });
+    expect(readMeta(doc).namingStyle).toEqual({ table: 'snake', column: 'snake' });
+    writeMeta(doc, { namingStyle: null });
+    expect(readMeta(doc).namingStyle).toBeNull();
   });
 
   it('AI 편집 결과: 이번에 만들거나 바꾼 이름만 알린다', () => {

@@ -1013,6 +1013,16 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .dict-table.edit input:disabled { opacity: 0.4; }
 
 /* 이름 표기 기준: 헤더 배지와 기준과 다른 이름 표시 */
-.naming-chip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.naming-chip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid var(--border-strong); cursor: pointer; white-space: nowrap; color: var(--text); }
 .naming-chip.auto { color: var(--muted); }
+.naming-chip:disabled { cursor: default; opacity: 0.6; }
+.naming-badge .naming-panel { left: 0; right: auto; width: 320px; padding: 10px 12px; display: grid; gap: 8px; }
+.naming-panel__title { margin: 0; font-weight: 700; font-size: 13px; }
+.naming-panel__row { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+.naming-panel__row select { width: 100%; font-size: 12px; }
+.naming-panel__quick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.dropdown__menu.naming-panel .naming-panel__quick button { all: unset; cursor: pointer; font-size: 11px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 10px; width: auto; }
+.dropdown__menu.naming-panel .naming-panel__quick button:hover, .dropdown__menu.naming-panel .naming-panel__quick button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.naming-panel__help { margin: 0; line-height: 1.5; }
+@media (max-width: 720px) { .topbar .naming-badge { display: none; } }
 .column-grid__row input.naming-off, .form-grid input.naming-off { border-color: var(--warning); border-style: dashed; }

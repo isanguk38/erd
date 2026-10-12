@@ -6,8 +6,11 @@ import {
   newTableTerms,
   updateTable,
   clearDictionary,
-  detectStyle,
-  isNameStyle,
+  detectTermStyles,
+  NAME_KIND_LABEL,
+  type NameKind,
+  type NamingSetting,
+  type NamingStyles,
   dictIndex,
   dictionaryFromSchema,
   duplicatePhysicals,
@@ -27,7 +30,6 @@ import {
   type DictTerm,
   type DictVariant,
   type Dictionary,
-  type NameStyle,
 } from '@erd/core';
 import { useStore } from '../store';
 import { loadModule } from '../lib/appVersion';
@@ -70,8 +72,8 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   const dictionary = useStore((s) => s.dictionary);
   const schema = useStore((s) => s.schema);
   const readOnly = useStore((s) => s.role === 'viewer');
-  // 프로젝트에 저장한 이름 표기 기준 (있으면 사전도 그 표기만)
-  const savedStyle = useStore((s) => (isNameStyle(s.meta.namingStyle) ? s.meta.namingStyle : null));
+  // 프로젝트에 저장한 이름 표기 기준 (테이블·컬럼 따로. 정한 쪽은 사전도 그 표기만)
+  const savedStyle = useStore((s) => s.meta.namingStyle ?? null);
   const { editDictionary, edit, showNotice } = useStore.getState();
   const projectName = useProjectName();
   const [staged, setStaged] = useState<Staged | null>(null);
@@ -279,11 +281,18 @@ function DuplicateNotice({ terms }: { terms: DictTerm[] }) {
   );
 }
 
-/** 사전 표기 표시: snake_case 등 (용어들로 판단) */
-function StyleBadge({ terms, saved }: { terms: DictTerm[]; saved: NameStyle | null }) {
-  const { style } = detectStyle(terms, saved);
-  if (!style) return null;
-  return <span className="dict-style-badge" title={`${saved ? '프로젝트 이름 표기 기준입니다 (위쪽 표기 배지).' : '기준을 정하지 않아 사전 용어들의 물리명을 보고 정했습니다 — 이 표기가 프로젝트 기준이 됩니다.'} 새 용어도 이 표기로만 넣을 수 있고, 다른 표기의 테이블·컬럼 이름은 설계 검사에서 경고합니다`}>{NAME_STYLE_LABEL[style]}</span>;
+/** 테이블 용어·컬럼 용어의 표기 (같으면 하나로) */
+const stylesText = (styles: NamingStyles) => {
+  if (styles.table && styles.table === styles.column) return NAME_STYLE_LABEL[styles.table];
+  return (['table', 'column'] as NameKind[]).filter((k) => styles[k]).map((k) => `${NAME_KIND_LABEL[k]} ${NAME_STYLE_LABEL[styles[k]!]}`).join(' · ');
+};
+
+/** 사전 표기 표시: snake_case 등 (테이블 용어·컬럼 용어 따로, 기준을 정한 쪽은 그 기준) */
+function StyleBadge({ terms, saved }: { terms: DictTerm[]; saved: NamingSetting | null }) {
+  const checks = detectTermStyles(terms, saved);
+  const text = stylesText({ table: checks.table.style, column: checks.column.style });
+  if (!text) return null;
+  return <span className="dict-style-badge" title={`${saved ? '프로젝트 이름 표기 기준입니다 (위쪽 표기 배지).' : '기준을 정하지 않아 사전 용어들의 물리명을 보고 정했습니다 — 이 표기가 프로젝트 기준이 됩니다.'} 테이블 용어와 컬럼 용어는 따로 봅니다. 새 용어도 이 표기로만 넣을 수 있고, 다른 표기의 테이블·컬럼 이름은 설계 검사에서 경고합니다`}>{text}</span>;
 }
 
 type Filter = 'all' | 'table' | 'variants' | 'noLogical' | 'style' | 'dup';
@@ -293,7 +302,7 @@ type Filter = 'all' | 'table' | 'variants' | 'noLogical' | 'style' | 'dup';
  * 표기가 섞였거나 물리명·논리명이 겹치면 넣을 수 없고, 그 줄을 표시한다 ("모두 ○○로 바꾸기"로 한 번에 맞출 수 있음).
  */
 function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
-  staged: Staged; onChange: (s: Staged) => void; saved: NameStyle | null; current: DictTerm[]; onApply: (terms: DictTerm[], mode: 'replace' | 'merge') => void; onCancel: () => void;
+  staged: Staged; onChange: (s: Staged) => void; saved: NamingSetting | null; current: DictTerm[]; onApply: (terms: DictTerm[], mode: 'replace' | 'merge') => void; onCancel: () => void;
 }) {
   const hasDictionary = current.length > 0;
   // 이미 사전이 있으면 기본은 합치기 (무심코 넣어도 기존 용어가 지워지지 않게)
@@ -308,15 +317,15 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
   // 넣은 뒤의 사전으로 표기·겹침을 본다 (합치기면 기존 용어까지)
   const problems = useMemo(() => {
     const result = mergedTerms(current, terms, hasDictionary ? mode : 'replace');
-    const check = detectStyle(result, saved);
-    const offKeys = new Set(check.offenders.map((t) => termKey(t)));
+    const checks = detectTermStyles(result, saved);
+    const offKeys = new Set([...checks.table.offenders, ...checks.column.offenders].map((t) => termKey(t)));
     const byPhys = new Map<string, number>();
     for (const t of result) byPhys.set(scoped(t, physKey(t.physical)), (byPhys.get(scoped(t, physKey(t.physical))) ?? 0) + 1);
     const logicals = new Map<string, number>();
     for (const r of included) if (r.logical.trim()) logicals.set(scoped(r, dictKey(r.logical)), (logicals.get(scoped(r, dictKey(r.logical))) ?? 0) + 1);
     const styleOff = included.filter((r) => offKeys.has(termKey(r)));
     const dup = included.filter((r) => (byPhys.get(scoped(r, physKey(r.physical))) ?? 0) > 1 || (r.logical.trim() && (logicals.get(scoped(r, dictKey(r.logical))) ?? 0) > 1));
-    return { style: check.style, styleOff: new Set(styleOff.map((r) => r.id)), dup: new Set(dup.map((r) => r.id)) };
+    return { styles: { table: checks.table.style, column: checks.column.style } as NamingStyles, styleOff: new Set(styleOff.map((r) => r.id)), dup: new Set(dup.map((r) => r.id)) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, current, mode, hasDictionary, saved]);
 
@@ -341,7 +350,10 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
   }, [rows, filter, query, problems]);
 
   const update = (id: number, patch: Partial<Row>) => onChange({ ...staged, rows: rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
-  const fixAllStyle = (style: NameStyle) => onChange({ ...staged, rows: rows.map((r) => (problems.styleOff.has(r.id) ? { ...r, physical: toStyle(r.physical, style) } : r)) });
+  const kindOf = (r: Pick<Row, 'kind'>): NameKind => (r.kind === 'table' ? 'table' : 'column');
+  // 다른 표기 줄을 그 종류(테이블·컬럼)의 표기로
+  const fixAllStyle = () => onChange({ ...staged, rows: rows.map((r) => (problems.styleOff.has(r.id) && problems.styles[kindOf(r)] ? { ...r, physical: toStyle(r.physical, problems.styles[kindOf(r)]!) } : r)) });
+  const styleText = stylesText(problems.styles);
   const blocked = counts.style > 0 || counts.dup > 0 || !included.length;
 
   return (
@@ -352,7 +364,7 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
       </div>
       <div className="dict-stats">
         <div><b>{included.length.toLocaleString()}</b><span>넣을 용어 (전체 {rows.length.toLocaleString()})</span></div>
-        {problems.style && <div className={counts.style ? 'warn' : ''}><b>{NAME_STYLE_LABEL[problems.style]}</b><span>{counts.style ? `다른 표기 ${counts.style}개` : saved ? '물리명 표기 (프로젝트 기준)' : '물리명 표기 (자동 판단)'}</span></div>}
+        {styleText && <div className={counts.style ? 'warn' : ''}><b>{styleText}</b><span>{counts.style ? `다른 표기 ${counts.style}개` : saved ? '물리명 표기 (프로젝트 기준)' : '물리명 표기 (자동 판단)'}</span></div>}
         {counts.noLogical > 0 && <div className="muted"><b>{counts.noLogical}</b><span>논리명 없음 (나중에 채워도 됨)</span></div>}
       </div>
       {staged.notes.length > 0 && <ul className="dict-notes">{staged.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
@@ -360,8 +372,8 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
         <div className="safety-box fail">
           {counts.style > 0 && (
             <div>
-              <b>{saved ? '프로젝트 표기 기준과 다릅니다' : '표기가 섞여 있습니다'}</b> — {saved ? `이 프로젝트는 ${NAME_STYLE_LABEL[problems.style!]} 기준인데` : `대부분 ${NAME_STYLE_LABEL[problems.style!]}인데`} 다른 표기가 {counts.style}개 있습니다. 칸에서 고치거나{' '}
-              <button className="btn btn-sm" onClick={() => fixAllStyle(problems.style!)}>모두 {NAME_STYLE_LABEL[problems.style!]}로 바꾸기</button>
+              <b>{saved ? '프로젝트 표기 기준과 다릅니다' : '표기가 섞여 있습니다'}</b> — {saved ? `이 프로젝트는 ${styleText} 기준인데` : `대부분 ${styleText}인데`} 다른 표기가 {counts.style}개 있습니다. 칸에서 고치거나{' '}
+              <button className="btn btn-sm" onClick={fixAllStyle}>모두 {styleText}로 바꾸기</button>
             </div>
           )}
           {counts.dup > 0 && <div><b>같은 물리명·논리명이 {counts.dup}줄에 겹칩니다</b> — 하나만 남기도록 고치거나 체크를 풀어 주세요{hasDictionary && mode === 'merge' ? ' (지금 사전의 용어와 겹치는 것 포함)' : ''}.</div>}
@@ -407,7 +419,7 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
                     <input
                       className="mono"
                       value={r.physical}
-                      title={bad === 'style' ? `사전 표기(${NAME_STYLE_LABEL[problems.style!]})와 다릅니다 → ${toStyle(r.physical, problems.style!)}` : bad === 'dup' ? '다른 줄(또는 지금 사전)과 물리명·논리명이 겹칩니다' : undefined}
+                      title={bad === 'style' && problems.styles[kindOf(r)] ? `${NAME_KIND_LABEL[kindOf(r)]} 표기(${NAME_STYLE_LABEL[problems.styles[kindOf(r)]!]})와 다릅니다 → ${toStyle(r.physical, problems.styles[kindOf(r)]!)}` : bad === 'dup' ? '다른 줄(또는 지금 사전)과 물리명·논리명이 겹칩니다' : undefined}
                       onChange={(e) => update(r.id, { physical: e.target.value })}
                     />
                   </td>
@@ -516,7 +528,7 @@ function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: 
       const r = checkTableAgainstDictionary(index, t);
       if (r?.status === 'ok') ok++;
       else if (r?.status === 'mismatch') tableMismatches.push({ tableId: t.id, name: r.physical! });
-      else if (styleSuggestion(index, t.name)) style++;
+      else if (styleSuggestion(index, t.name, 'table')) style++;
       else if (r?.status === 'unknown') unknown++;
     }
     const missing = [...newTableTerms(index, schema.tables).add, ...newTermsFromColumns(index, schema.tables.flatMap((t) => t.columns.map((column) => ({ table: t.name, column })))).add];

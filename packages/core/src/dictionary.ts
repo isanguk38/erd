@@ -1,7 +1,7 @@
 // 표준 용어 사전: 논리명(한글) → 표준 물리명·타입·길이. 예) 회원번호 → MBR_NO VARCHAR(20).
 // 사전에 있는 용어만 쓴다 (단어를 이어 붙여 이름을 만들지 않는다).
-// 물리명 표기(snake_case / SNAKE_CASE / camelCase)는 프로젝트의 이름 표기 기준(naming.ts)을 따른다.
-// 기준을 정했으면 그 표기만 넣을 수 있고, 정하지 않았으면 사전 용어들로 판단한다 (한 사전 안에서 섞이지 않게 막는다).
+// 물리명 표기(snake_case / SNAKE_CASE / camelCase)는 프로젝트의 이름 표기 기준(naming.ts)을 따른다. 테이블 용어와 컬럼 용어는 따로 본다.
+// 기준을 정했으면 그 표기만 넣을 수 있고, 정하지 않았으면 사전 용어들로 판단한다 (같은 종류 안에서 섞이지 않게 막는다).
 // 논리명이 아직 없는 용어도 둘 수 있다 (ERD에서 만든 초안 등 — 나중에 채운다). 그런 용어는 물리명으로 구분한다.
 // ERD 구조(스키마)와 따로 문서의 'dictionary' 맵에 둔다 — SQL·비교·DB 동기화·버전에는 영향이 없다.
 // 사전이 없으면 아무 검사도 하지 않는다.
@@ -9,7 +9,7 @@
 import * as Y from 'yjs';
 import type { Column } from './model';
 import { readMeta } from './ydoc';
-import { fitsStyle, NAME_STYLE_LABEL, toStyle, type NameStyle } from './naming';
+import { fitsStyle, NAME_KIND_LABEL, NAME_STYLE_LABEL, toStyle, type NameKind, type NameStyle, type NamingSetting, type NamingStyles } from './naming';
 
 export interface DictTerm {
   /** 테이블 용어면 'table' (없으면 컬럼 용어). 테이블 용어는 타입·길이가 없다 */
@@ -27,8 +27,8 @@ export interface DictTerm {
 export interface Dictionary {
   terms: DictTerm[];
   updatedAt?: string;
-  /** 프로젝트에 저장한 이름 표기 기준 (있으면 사전 표기도 이것. 없으면 용어들로 판단) */
-  namingStyle?: NameStyle;
+  /** 프로젝트에 저장한 이름 표기 기준 (테이블·컬럼 따로. 정한 쪽은 사전 표기도 이것, 아니면 용어들로 판단) */
+  namingStyle?: NamingSetting;
 }
 
 /** 같은 용어인지 볼 때 쓰는 키 (띄어쓰기·대소문자 무시) */
@@ -64,12 +64,28 @@ export function detectStyle(terms: Pick<DictTerm, 'logical' | 'physical'>[], req
   return { style, offenders: terms.filter((t) => !fitsStyle(t.physical, style)) as DictTerm[] };
 }
 
+/** 테이블 용어·컬럼 용어를 따로 판단한다 (기준을 정한 쪽은 그 표기로 본다) */
+export function detectTermStyles(terms: DictTerm[], saved?: NamingSetting | null): Record<NameKind, StyleCheck> {
+  return {
+    table: detectStyle(terms.filter(isTable), saved?.table),
+    column: detectStyle(terms.filter((t) => !isTable(t)), saved?.column),
+  };
+}
+
 /** 프로젝트에 저장한 이름 표기 기준 (없으면 null — 사전 용어들로 판단) */
-export function savedNamingStyle(doc: Y.Doc): NameStyle | null {
+export function savedNamingStyle(doc: Y.Doc): NamingSetting | null {
   return readMeta(doc).namingStyle ?? null;
 }
 
 const termLabel = (t: Pick<DictTerm, 'logical' | 'physical' | 'kind'>) => `${isTable(t) ? '[테이블] ' : ''}${t.logical.trim() ? `${t.logical}=${t.physical}` : t.physical}`;
+
+/** 섞였거나 기준과 다를 때 사람에게 보일 안내 (테이블·컬럼 따로) */
+export function termStylesMessage(checks: Record<NameKind, StyleCheck>, saved: NamingSetting | null): string {
+  return (['table', 'column'] as NameKind[])
+    .filter((k) => checks[k].offenders.length)
+    .map((k) => `${NAME_KIND_LABEL[k]} 용어: ${mixedStyleMessage(checks[k], !!saved?.[k])}`)
+    .join('\n');
+}
 
 /** 섞였을 때 사람에게 보일 안내 */
 export function mixedStyleMessage(check: StyleCheck, saved = false): string {
@@ -139,8 +155,8 @@ export function mergedTerms(current: DictTerm[], incoming: DictTerm[], mode: 're
  */
 export function writeDictionary(doc: Y.Doc, input: { terms: DictTerm[] }, mode: 'replace' | 'merge' = 'replace'): number {
   const saved = savedNamingStyle(doc);
-  const check = detectStyle(mergedTerms(allTerms(doc), input.terms, mode), saved);
-  if (check.offenders.length) throw new Error(mixedStyleMessage(check, !!saved));
+  const checks = detectTermStyles(mergedTerms(allTerms(doc), input.terms, mode), saved);
+  if (checks.table.offenders.length || checks.column.offenders.length) throw new Error(termStylesMessage(checks, saved));
   const terms = termsMap(doc);
   if (mode === 'replace') terms.clear();
   let n = 0;
@@ -167,9 +183,10 @@ export function setDictEntry(doc: Y.Doc, entry: DictTerm, previous?: Pick<DictTe
   const prevKey = previous ? termKey(previous) : null;
   const others = allTerms(doc).filter((t) => termKey(t) !== prevKey && termKey(t) !== termKey(clean));
   const saved = savedNamingStyle(doc);
-  const { style } = detectStyle(others, saved);
+  const kind: NameKind = isTable(clean) ? 'table' : 'column';
+  const { style } = detectStyle(others.filter((t) => isTable(t) === isTable(clean)), saved?.[kind]);
   if (style && !fitsStyle(clean.physical, style)) {
-    throw new Error(`${saved ? '이 프로젝트의 이름 표기 기준은' : '이 사전은'} ${NAME_STYLE_LABEL[style]}입니다. "${clean.physical}" 대신 "${toStyle(clean.physical, style)}"처럼 입력하세요.`);
+    throw new Error(`${saved?.[kind] ? `이 프로젝트의 ${NAME_KIND_LABEL[kind]} 이름 표기 기준은` : `이 사전의 ${NAME_KIND_LABEL[kind]} 용어는`} ${NAME_STYLE_LABEL[style]}입니다. "${clean.physical}" 대신 "${toStyle(clean.physical, style)}"처럼 입력하세요.`);
   }
   // 같은 구분(테이블/컬럼) 안에서 겹치면 막는다. 논리명 없던 같은 물리명 용어에 논리명을 채우는 것은 같은 용어로 본다
   const kindName = isTable(clean) ? '테이블' : '컬럼';
@@ -217,11 +234,16 @@ export interface DictIndex {
   /** 테이블 용어: 논리명 → 용어, 물리명 → 용어 */
   tables: Map<string, DictTerm>;
   tablesByPhysical: Map<string, DictTerm>;
-  /** 사전의 물리명 표기 */
-  style: NameStyle | null;
+  /** 사전의 물리명 표기 (테이블 용어·컬럼 용어 따로) */
+  styles: NamingStyles;
 }
 
 const indexCache = new WeakMap<Dictionary, DictIndex>();
+
+const termStyles = (dict: Dictionary): NamingStyles => {
+  const checks = detectTermStyles(dict.terms, dict.namingStyle);
+  return { table: checks.table.style, column: checks.column.style };
+};
 
 export function dictIndex(dict: Dictionary): DictIndex {
   const cached = indexCache.get(dict);
@@ -235,7 +257,7 @@ export function dictIndex(dict: Dictionary): DictIndex {
     for (const t of [...list].sort((a, b) => Number(!a.logical) - Number(!b.logical))) if (!m.has(physicalKey(t.physical))) m.set(physicalKey(t.physical), t);
     return m;
   };
-  const index = { dict, terms: byLogical(columns), byPhysical: byPhys(columns), tables: byLogical(tableTerms), tablesByPhysical: byPhys(tableTerms), style: dict.namingStyle ?? detectStyle(dict.terms).style };
+  const index = { dict, terms: byLogical(columns), byPhysical: byPhys(columns), tables: byLogical(tableTerms), tablesByPhysical: byPhys(tableTerms), styles: termStyles(dict) };
   indexCache.set(dict, index);
   return index;
 }
@@ -243,8 +265,8 @@ export function dictIndex(dict: Dictionary): DictIndex {
 const asIndex = (dict: Dictionary | DictIndex) => ('byPhysical' in dict ? dict : dictIndex(dict));
 
 /** 사전의 물리명 표기 (용어가 없으면 null) */
-export function dictionaryStyle(dict: Dictionary | DictIndex | null | undefined): NameStyle | null {
-  return dict ? asIndex(dict).style : null;
+export function dictionaryStyles(dict: Dictionary | DictIndex | null | undefined): NamingStyles | null {
+  return dict ? asIndex(dict).styles : null;
 }
 
 /** 논리명으로 표준 용어 찾기 (없으면 null) */
@@ -370,8 +392,8 @@ export function describeMatch(match: DictMatch): string {
 }
 
 /** 사전에 없는 컬럼의 이름이 사전 표기와 다르면 바꿀 이름 (맞으면 null) */
-export function styleSuggestion(dict: Dictionary | DictIndex | null | undefined, name: string): { style: NameStyle; suggestion: string } | null {
-  const style = dictionaryStyle(dict);
+export function styleSuggestion(dict: Dictionary | DictIndex | null | undefined, name: string, kind: NameKind = 'column'): { style: NameStyle; suggestion: string } | null {
+  const style = dictionaryStyles(dict)?.[kind];
   if (!style || !name.trim() || fitsStyle(name, style)) return null;
   return { style, suggestion: toStyle(name, style) };
 }
@@ -424,7 +446,7 @@ export function newTableTerms(dict: Dictionary | DictIndex, tables: { name: stri
     const owner = index.tablesByPhysical.get(physicalKey(t.name));
     const fill = owner && !owner.logical;
     if (r?.status !== 'unknown' && !fill) continue;
-    const style = styleSuggestion(index, t.name);
+    const style = styleSuggestion(index, t.name, 'table');
     if (style) {
       skipped.push({ where: `테이블 ${t.name}`, reason: `이름 표기 기준(${NAME_STYLE_LABEL[style.style]})과 다릅니다 — ${style.suggestion}(으)로 바꾸세요` });
       continue;
