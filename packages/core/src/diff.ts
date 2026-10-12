@@ -164,8 +164,9 @@ const joinWarnings = (...parts: (string | undefined)[]) => parts.filter(Boolean)
 
 export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dialect): DiffResult {
   // ENUM을 쓰는 컬럼은 이 DB에서 실제로 만들 타입으로 펼쳐 비교한다 (MySQL: ENUM('a','b'), PostgreSQL: 타입 이름)
-  const base = normalizeSchema(resolveEnumColumns(baseInput, dialect.id));
-  const target = normalizeSchema(resolveEnumColumns(targetInput, dialect.id));
+  // 타입 정보가 없는 쪽(예전 앱이 읽은 DB 등)은 다른 쪽의 타입 목록으로 타입 이름을 푼다 ("BILLINGSTATUS" = BillingStatus)
+  const base = normalizeSchema(resolveEnumColumns(baseInput, dialect.id, baseInput.enums ?? targetInput.enums));
+  const target = normalizeSchema(resolveEnumColumns(targetInput, dialect.id, targetInput.enums ?? baseInput.enums));
   const changes: Change[] = [];
   // 사용자 정의 타입: 양쪽 모두 타입 정보를 가질 때만 비교한다 (enums가 없는 쪽은 모르는 것 — MySQL DB, CREATE TYPE 없는 DDL 등).
   // 타입 객체가 있는 DB(PostgreSQL)는 빈 스키마에서 만들 때도 비교한다 (전체 CREATE SQL, 빈 ERD로 가져오기)

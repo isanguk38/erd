@@ -85,10 +85,10 @@ export function resolveEnumColumn(column: Column, enums: EnumType[] | undefined,
   }
 }
 
-/** 스키마의 ENUM 컬럼을 이 DB의 타입으로 펼친 복사본 (ENUM 목록은 그대로 둔다) */
-export function resolveEnumColumns(schema: Schema, dialect: DialectId | string): Schema {
-  if (!schema.enums?.length) return schema;
-  return { ...schema, tables: schema.tables.map((t) => ({ ...t, columns: t.columns.map((c) => resolveEnumColumn(c, schema.enums, dialect)) })) };
+/** 스키마의 ENUM 컬럼을 이 DB의 타입으로 펼친 복사본 (ENUM 목록은 그대로 둔다). enums: 타입 이름을 풀 때 쓸 목록 (기본은 그 스키마의 것) */
+export function resolveEnumColumns(schema: Schema, dialect: DialectId | string, enums: EnumType[] | undefined = schema.enums): Schema {
+  if (!enums?.length) return schema;
+  return { ...schema, tables: schema.tables.map((t) => ({ ...t, columns: t.columns.map((c) => resolveEnumColumn(c, enums, dialect)) })) };
 }
 
 /** 이 DB에 ENUM 타입 객체가 있는지 (CREATE TYPE으로 따로 만드는지) */

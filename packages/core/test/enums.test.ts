@@ -115,6 +115,10 @@ describe('사용자 정의 타입 (ENUM)', () => {
     broken.tables[0].columns[1].type = '"BILLINGSTATUS"';
     broken.enums = [{ id: 'e1', name: 'BillingStatus', values: ['ISSUED', 'PAID'] }];
     expect(generateCreateSql(broken, pg)).toContain('status "BillingStatus"');
+    // 예전 앱이 읽은 DB(타입 목록 없음, 대문자 타입)와 비교해도 같은 타입으로 본다
+    const fixed = applyCommands(broken, []).schema;
+    const { enums: _x, ...oldDb } = structuredClone(broken);
+    expect(diffSchemas(oldDb, fixed, pg).changes).toEqual([]);
     // 기본값의 타입 캐스트는 비교할 때 뺀다
     expect(pg.normalizeDefault(`'ISSUED'::"BillingStatus"`)).toBe("'ISSUED'");
   });
