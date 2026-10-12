@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { requestFocus, takeFocus } from '../lib/focus';
 import {
   addColumn,
@@ -223,6 +223,24 @@ function markOf(issues: TableTypeIssue[], columnId: string, field: TypeIssueFiel
 
 function TableEditor({ table }: { table: Table }) {
   const schema = useStore((s) => s.schema);
+  // 검색에서 고른 컬럼: 캔버스처럼 편집 창에서도 그 줄을 표시하고 보이는 곳으로 스크롤한다
+  // (이 테이블을 보는 동안 표시는 남는다 — 다른 것을 고르면 지워지고, 다시 검색하면 바뀜)
+  const focusColumnId = useStore((s) => (s.searchFocus?.tableId === table.id ? s.searchFocus.columnId : undefined));
+  const focusAt = useStore((s) => s.searchFocus?.at);
+  const gridRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focusColumnId) return;
+    // 편집 창이 열리는 동안 기다렸다가 스크롤한다
+    const t = setTimeout(() => {
+      const row = gridRef.current?.querySelector<HTMLElement>(`[data-column-id="${CSS.escape(focusColumnId)}"]`);
+      if (!row) return;
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      // 가로로 밀려 있으면 물리명 칸이 보이게 맨 왼쪽으로
+      const scroller = row.closest<HTMLElement>('.column-grid');
+      if (scroller) scroller.scrollLeft = 0;
+    }, 120);
+    return () => clearTimeout(t);
+  }, [focusColumnId, focusAt]);
   const dialect = getDialect(useDialect());
   const { edit, select } = useStore.getState();
   const fkIds = foreignKeyColumnIds(schema, table.id);
@@ -455,14 +473,14 @@ function TableEditor({ table }: { table: Table }) {
           {(enums ?? []).map((e) => <option key={e.id} value={e.name} label={`ENUM ${e.values.join(', ')}`} />)}
           {dialect.typeSuggestions.map((t) => <option key={t} value={t} />)}
         </datalist>
-        <div className="column-grid">
+        <div className="column-grid" ref={gridRef}>
           <div className="column-grid__head">
             <span>물리명</span><span>논리명</span><span>타입</span><span>길이</span>
             <span title="기본키">PK</span><span title="NOT NULL">NN</span><span title="UNIQUE">UQ</span><span title="자동 증가">AI</span>
             <span>기본값</span><span title="ERD에만 저장되는 상세 설명. DB comment에는 논리명이 들어갑니다">설명</span><span />
           </div>
           {table.columns.map((c, i) => (
-            <div key={c.id} className="column-grid__row">
+            <div key={c.id} data-column-id={c.id} className={`column-grid__row${focusColumnId === c.id ? ' search-focus' : ''}`} title={focusColumnId === c.id ? '검색에서 고른 컬럼' : undefined}>
               {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
               <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} issue={nameMark(c.name, 'column')} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByPhysical} onPick={(t) => pickTerm(c, t)} />
               <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />

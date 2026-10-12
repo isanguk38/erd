@@ -452,7 +452,10 @@ export const useStore = create<State>()(
         },
 
         select(selection, open) {
-          set({ selection, selectedTables: selection?.type === 'table' ? [selection.id] : [], inspectorOpen: selection ? Boolean(open) || get().inspectorOpen : false });
+          // 검색에서 고른 컬럼 표시는 그 테이블을 보는 동안만 (다른 것을 고르면 지운다)
+          const focus = get().searchFocus;
+          const keepFocus = focus && selection?.type === 'table' && selection.id === focus.tableId;
+          set({ selection, selectedTables: selection?.type === 'table' ? [selection.id] : [], inspectorOpen: selection ? Boolean(open) || get().inspectorOpen : false, ...(focus && !keepFocus ? { searchFocus: null } : {}) });
           provider?.awareness.setLocalStateField('selection', selection);
         },
 
