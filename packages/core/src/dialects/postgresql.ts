@@ -1,7 +1,8 @@
-import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { quoteExpression, columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
-import type { Dialect } from './types';
+import { indexName, primaryKeyColumns, relationName, type Column, type EnumType, type Table } from '../model';
+import { quoteExpression, columnNames, limitCount, typeWords, literal, numericRegex, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
+import type { Dialect, TypeProfile } from './types';
 import { enumAdditions, pgEnumTypeName } from '../enums';
+import { enumAsTypeObject, standardCheck } from '../features';
 
 const TYPE_MAP: Record<string, string> = {
   DATETIME: 'TIMESTAMP',
@@ -99,10 +100,52 @@ function pkName(table: Table): string {
   return table.primaryKeyName || `${table.name}_pkey`;
 }
 
+/** PostgreSQL 타입 정보 (컬럼 타입 검사가 쓴다) */
+const postgresTypes: TypeProfile = {
+  known: typeWords(
+    'SMALLINT INTEGER INT INT2 INT4 INT8 BIGINT DECIMAL NUMERIC REAL DOUBLE FLOAT FLOAT4 FLOAT8 SMALLSERIAL SERIAL BIGSERIAL SERIAL2 SERIAL4 SERIAL8 MONEY ' +
+      'CHARACTER CHAR VARCHAR BPCHAR TEXT NAME CITEXT BYTEA TIMESTAMP TIMESTAMPTZ DATE TIME TIMETZ INTERVAL BOOLEAN BOOL ' +
+      'POINT LINE LSEG BOX PATH POLYGON CIRCLE CIDR INET MACADDR MACADDR8 BIT VARBIT TSVECTOR TSQUERY UUID XML JSON JSONB HSTORE LTREE ' +
+      'INT4RANGE INT8RANGE NUMRANGE TSRANGE TSTZRANGE DATERANGE OID GEOMETRY GEOGRAPHY VECTOR',
+  ),
+  quotedUserTypes: true,
+  autoIncrement: { label: 'IDENTITY(자동 증가)', integers: typeWords('SMALLINT INTEGER BIGINT'), defaultValue: 'ignored' },
+  // 실패하지 않고 6으로 줄여 만든다 (실제 서버로 확인)
+  fraction: { types: typeWords('TIMESTAMP TIMESTAMPTZ TIME TIMETZ'), over: 'clamp' },
+  reportsIgnoredLength: true,
+  strings: { VARCHAR: { max: 10485760 }, CHAR: { max: 10485760 } },
+  decimal: { types: typeWords('NUMERIC DECIMAL'), p: 1000, s: 1000, sWithinP: false, minS: -1000 },
+  booleanLiteral: true,
+};
+
+/** ENUM 값 바꾸기: 추가만이면 ADD VALUE, 빼거나 순서를 바꾸면 타입을 다시 만들고 컬럼을 옮긴다 */
+function alterEnum(before: EnumType, after: EnumType, usages: { table: string; column: Column }[]): string[] {
+  const name = pgEnumTypeName(after.name);
+  const added = enumAdditions(before.values, after.values);
+  // 값 추가만: ALTER TYPE ... ADD VALUE (위치 지정)
+  if (added) {
+    return added.map((a) => `ALTER TYPE ${name} ADD VALUE ${literal(a.value)}${a.before ? ` BEFORE ${literal(a.before)}` : a.after ? ` AFTER ${literal(a.after)}` : ''}`);
+  }
+  // 값을 빼거나 순서를 바꾸면: 옛 타입 이름을 바꾸고 새로 만든 뒤, 쓰는 컬럼을 새 타입으로 옮기고 옛 타입을 지운다
+  const old = pgEnumTypeName(`${after.name.replace(/"/g, '')}_old`);
+  const statements = [`ALTER TYPE ${name} RENAME TO ${old}`, `CREATE TYPE ${name} AS ENUM (${after.values.map((v) => literal(v)).join(', ')})`];
+  for (const u of usages) {
+    const c = q(u.column.name);
+    const t = q(u.table);
+    const def = u.column.defaultValue?.trim();
+    // 기본값이 옛 타입을 가리키면 타입을 바꿀 수 없어 잠깐 지웠다가 다시 건다
+    if (def) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} DROP DEFAULT`);
+    statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} TYPE ${name} USING ${c}::text::${name}`);
+    if (def) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} SET DEFAULT ${def}`);
+  }
+  statements.push(`DROP TYPE ${old}`);
+  return statements;
+}
+
 export const postgresql: Dialect = {
   id: 'postgresql',
   label: 'PostgreSQL',
-  ddlGrammar: 'postgresql',
+  ddlGrammar: { family: 'postgresql', backslashEscapes: false, hidesFkIndexes: false, keepsPrimaryKeyName: true, quotedTypeNames: true },
   typeSuggestions: [
     'BIGINT', 'INTEGER', 'SMALLINT', 'NUMERIC', 'DOUBLE PRECISION', 'REAL', 'BOOLEAN',
     'VARCHAR', 'CHAR', 'TEXT', 'DATE', 'TIMESTAMP', 'TIMESTAMPTZ', 'TIME',
@@ -177,12 +220,33 @@ export const postgresql: Dialect = {
     return actions.length ? [`ALTER TABLE ${q(after.name)} ${actions.join(', ')}`] : [];
   },
 
-  indexSupport: { expression: true, where: true, methods: ['hash', 'gin', 'gist', 'spgist', 'brin'] },
-  generatedSupport: { stored: true },
+  features: {
+    enum: enumAsTypeObject({
+      typeName: pgEnumTypeName,
+      create: (e) => [`CREATE TYPE ${pgEnumTypeName(e.name)} AS ENUM (${e.values.map((v) => literal(v)).join(', ')})`],
+      drop: (e) => [`DROP TYPE ${pgEnumTypeName(e.name)}`],
+      alter: alterEnum,
+      help: 'CREATE TYPE 이름 AS ENUM (...)으로 따로 만들고, 컬럼은 그 타입을 씁니다. 값 추가는 ALTER TYPE ... ADD VALUE, 값을 빼거나 순서를 바꾸면 타입을 다시 만들어 컬럼을 옮깁니다.',
+    }),
+    check: standardCheck(q),
+    expressionIndex: {
+      example: (col) => `lower(${col})`,
+      hint: "예) lower(email), (metadata ->> 'sitecd'), to_tsvector('simple', body)",
+      warn: (e) => (/->>?\s*'\$/.test(e) ? `식에 MySQL JSON 경로('$.키') 문법이 있어 PostgreSQL에서는 실패할 수 있습니다: ${e}` : undefined),
+    },
+    partialIndex: { placeholder: 'WHERE 뒤 조건 (부분 인덱스). 예) deleted_at IS NULL' },
+    indexMethods: { methods: ['hash', 'gin', 'gist', 'spgist', 'brin'], label: (m) => m },
+    generated: { stored: true },
+    fkOnUpdate: { actions: ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'] },
+  },
+  traits: {},
+  types: postgresTypes,
+  connection: { port: 5432, databaseLabel: '데이터베이스', databasePlaceholder: 'postgres', schemaPlaceholder: 'public', transactional: true },
+  safety: { countUpTo: limitCount, lengthFn: 'char_length', notNumeric: (col, integer) => `${col} IS NOT NULL AND ${col}::text !~ '${numericRegex(integer)}'` },
   createIndex(table, index) {
     // PostgreSQL에 있는 방식만 쓴다 (MySQL의 fulltext 등은 일반 인덱스로 만들고 주의를 단다)
     const m = index.method?.trim().toLowerCase() ?? '';
-    const method = m && (postgresql.indexSupport?.methods ?? []).includes(m) ? ` USING ${m}` : '';
+    const method = m && (postgresql.features.indexMethods?.methods ?? []).includes(m) ? ` USING ${m}` : '';
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)}${method} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },
   dropIndex: (table, index) =>
@@ -202,30 +266,5 @@ export const postgresql: Dialect = {
   dropForeignKey(schema, relation) {
     const { from } = relationTables(schema, relation);
     return [`ALTER TABLE ${q(from.name)} DROP CONSTRAINT ${q(relationName(schema, relation))}`];
-  },
-
-  createEnum: (e) => [`CREATE TYPE ${pgEnumTypeName(e.name)} AS ENUM (${e.values.map((v) => literal(v)).join(', ')})`],
-  dropEnum: (e) => [`DROP TYPE ${pgEnumTypeName(e.name)}`],
-  alterEnum(before, after, usages) {
-    const name = pgEnumTypeName(after.name);
-    const added = enumAdditions(before.values, after.values);
-    // 값 추가만: ALTER TYPE ... ADD VALUE (위치 지정)
-    if (added) {
-      return added.map((a) => `ALTER TYPE ${name} ADD VALUE ${literal(a.value)}${a.before ? ` BEFORE ${literal(a.before)}` : a.after ? ` AFTER ${literal(a.after)}` : ''}`);
-    }
-    // 값을 빼거나 순서를 바꾸면: 옛 타입 이름을 바꾸고 새로 만든 뒤, 쓰는 컬럼을 새 타입으로 옮기고 옛 타입을 지운다
-    const old = pgEnumTypeName(`${after.name.replace(/"/g, '')}_old`);
-    const statements = [`ALTER TYPE ${name} RENAME TO ${old}`, `CREATE TYPE ${name} AS ENUM (${after.values.map((v) => literal(v)).join(', ')})`];
-    for (const u of usages) {
-      const c = q(u.column.name);
-      const t = q(u.table);
-      const def = u.column.defaultValue?.trim();
-      // 기본값이 옛 타입을 가리키면 타입을 바꿀 수 없어 잠깐 지웠다가 다시 건다
-      if (def) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} DROP DEFAULT`);
-      statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} TYPE ${name} USING ${c}::text::${name}`);
-      if (def) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} SET DEFAULT ${def}`);
-    }
-    statements.push(`DROP TYPE ${old}`);
-    return statements;
   },
 };

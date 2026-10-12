@@ -3,11 +3,12 @@ import type { DialectId } from '@erd/core';
 import { api, type Connection, type ConnectionInput } from '../lib/api';
 import { useStore } from '../store';
 import { useDialect } from '../lib/hooks';
-import { DB_INFO, dbLabel } from '../lib/dbInfo';
+import { dbLabel } from '../lib/dbInfo';
+import { getDialect } from '@erd/core';
 
 
 function emptyInput(dialect: DialectId): ConnectionInput {
-  return { name: '', dialect, host: 'localhost', port: DB_INFO[dialect].port, user: '', password: '', database: '', schema: '', ssl: false };
+  return { name: '', dialect, host: 'localhost', port: getDialect(dialect).connection.port, user: '', password: '', database: '', schema: '', ssl: false };
 }
 
 /**
@@ -128,7 +129,8 @@ function ConnectionForm({
   const [input, setInput] = useState<ConnectionInput>(initial);
   const [status, setStatus] = useState<{ kind: 'ok' | 'error' | 'busy'; text: string } | null>(null);
   const set = (patch: Partial<ConnectionInput>) => setInput((prev) => ({ ...prev, ...patch }));
-  const info = DB_INFO[input.dialect];
+  // 연결 입력 안내는 그 DB 파일이 준다 (dialect.connection)
+  const info = getDialect(input.dialect).connection;
 
   const test = async () => {
     setStatus({ kind: 'busy', text: '연결 확인 중…' });

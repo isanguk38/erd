@@ -5,7 +5,7 @@ import { Canvas } from './components/Canvas';
 import { Inspector } from './components/Inspector';
 import { Toolbar, type DialogName } from './components/Toolbar';
 import { DictionaryDialog } from './components/DictionaryDialog';
-import { EnumDialog } from './components/EnumDialog';
+import { Slot } from './features/registry';
 import { SqlDialog } from './components/SqlDialog';
 import { VersionsDialog } from './components/VersionsDialog';
 import { DbPullDialog } from './components/DbPullDialog';
@@ -132,7 +132,6 @@ export function App() {
 
 function Editor({ projectId }: { projectId: string }) {
   const [dialog, setDialog] = useState<DialogName | null>(null);
-  const enumDialog = useStore((s) => s.enumDialog);
   const [fitRequest, setFitRequest] = useState(0);
   const [relayoutRequest, setRelayoutRequest] = useState(0);
   const synced = useStore((s) => s.synced);
@@ -264,7 +263,8 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'help' && <HelpDialog onClose={close} />}
         {dialog === 'image' && <ImageExportDialog onClose={close} />}
         {dialog === 'templates' && <TemplateManagerDialog onClose={close} />}
-        {(dialog === 'enums' || enumDialog) && <EnumDialog focus={enumDialog?.focus} create={enumDialog?.create} onClose={() => { close(); useStore.getState().setEnumDialog(null); }} />}
+        {/* 기능 모듈의 창 (ENUM 타입 창 등 — 프로젝트 DB에 있는 기능만) */}
+        <Slot name="dialogs" />
         {dialog === 'dictionary' && <DictionaryDialog onClose={close} onOpenLint={() => { close(); setSidePanel('lint'); }} />}
         <Notice />
       </div>

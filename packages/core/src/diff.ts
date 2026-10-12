@@ -1,7 +1,7 @@
 import type { ColumnField, Dialect } from './dialects/types';
 import { columnWarnings, indexWarnings, sqlComment } from './dialects/common';
 import { columnTypeIssues, tableTypeIssues, type TypeIssue } from './typeRules';
-import { enumAdditions, enumKey, enumUsages, hasEnumObjects, resolveEnumColumns, sameEnumValues } from './enums';
+import { enumAdditions, enumKey, enumUsages, resolveEnumColumns, sameEnumValues } from './enums';
 import {
   cloneSchema,
   expressionColumns,
@@ -165,13 +165,15 @@ const joinWarnings = (...parts: (string | undefined)[]) => parts.filter(Boolean)
 export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dialect): DiffResult {
   // ENUM을 쓰는 컬럼은 이 DB에서 실제로 만들 타입으로 펼쳐 비교한다 (MySQL: ENUM('a','b'), PostgreSQL: 타입 이름)
   // 타입 정보가 없는 쪽(예전 앱이 읽은 DB 등)은 다른 쪽의 타입 목록으로 타입 이름을 푼다 ("BILLINGSTATUS" = BillingStatus)
-  const base = normalizeSchema(resolveEnumColumns(baseInput, dialect.id, baseInput.enums ?? targetInput.enums));
-  const target = normalizeSchema(resolveEnumColumns(targetInput, dialect.id, targetInput.enums ?? baseInput.enums));
+  const base = normalizeSchema(resolveEnumColumns(baseInput, dialect, baseInput.enums ?? targetInput.enums));
+  const target = normalizeSchema(resolveEnumColumns(targetInput, dialect, targetInput.enums ?? baseInput.enums));
   const changes: Change[] = [];
   // 사용자 정의 타입: 양쪽 모두 타입 정보를 가질 때만 비교한다 (enums가 없는 쪽은 모르는 것 — MySQL DB, CREATE TYPE 없는 DDL 등).
   // 타입 객체가 있는 DB(PostgreSQL)는 빈 스키마에서 만들 때도 비교한다 (전체 CREATE SQL, 빈 ERD로 가져오기)
-  const knows = (s: Schema) => Array.isArray(s.enums) || (hasEnumObjects(dialect.id) && !s.tables.length);
-  if (knows(base) && knows(target)) diffEnums(base, target, changes);
+  // ENUM 모듈이 없는 DB는 타입 정의를 비교하지 않는다
+  const objects = dialect.features.enum?.kind === 'type';
+  const knows = (s: Schema) => Array.isArray(s.enums) || (objects && !s.tables.length);
+  if (dialect.features.enum && knows(base) && knows(target)) diffEnums(base, target, changes);
 
   const baseTables = byId(base.tables);
   const targetTables = byId(target.tables);
@@ -237,7 +239,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     sameList(a.fromColumnIds, b.fromColumnIds) &&
     sameList(a.toColumnIds, b.toColumnIds) &&
     dialect.normalizeAction(a.onDelete) === dialect.normalizeAction(b.onDelete) &&
-    (dialect.supportsOnUpdate === false || dialect.normalizeAction(a.onUpdate) === dialect.normalizeAction(b.onUpdate)) &&
+    (!dialect.features.fkOnUpdate || dialect.normalizeAction(a.onUpdate) === dialect.normalizeAction(b.onUpdate)) &&
     sameName(a.name, b.name);
 
   for (const relation of base.relations) {
@@ -336,12 +338,12 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     }
     const fields: ColumnField[] = [];
     if (old.name !== column.name) fields.push('name');
-    const untypedGenerated = dialect.generatedSupport?.typed === false && Boolean(column.generated?.expression.trim() && old.generated?.expression.trim());
+    const untypedGenerated = dialect.features.generated?.typed === false && Boolean(column.generated?.expression.trim() && old.generated?.expression.trim());
     if (!untypedGenerated && dialect.renderType(old) !== dialect.renderType(column)) fields.push('type');
     if (effectiveNullable(old) !== effectiveNullable(column)) fields.push('nullable');
     if (dialect.normalizeDefault(old.defaultValue) !== dialect.normalizeDefault(column.defaultValue)) fields.push('defaultValue');
     // ON UPDATE CURRENT_TIMESTAMP는 MySQL·MariaDB에만 있다
-    if ((dialect.id === 'mysql' || dialect.id === 'mariadb') && (old.onUpdate?.trim().toUpperCase() ?? '') !== (column.onUpdate?.trim().toUpperCase() ?? '')) fields.push('onUpdate');
+    if (dialect.features.onUpdateTimestamp && (old.onUpdate?.trim().toUpperCase() ?? '') !== (column.onUpdate?.trim().toUpperCase() ?? '')) fields.push('onUpdate');
     if (!sameGenerated(dialect, old, column)) fields.push('generated');
     if (old.autoIncrement !== column.autoIncrement) fields.push('autoIncrement');
     if (sqlComment(old) !== sqlComment(column)) fields.push('comment');
@@ -407,7 +409,7 @@ function sameGenerated(dialect: Dialect, a: Column, b: Column): boolean {
   const ga = a.generated?.expression.trim() ? a.generated : undefined;
   const gb = b.generated?.expression.trim() ? b.generated : undefined;
   if (!ga || !gb) return !ga && !gb;
-  const both = dialect.generatedSupport?.virtual && dialect.generatedSupport?.stored;
+  const both = dialect.features.generated?.virtual && dialect.features.generated?.stored;
   return sameExpression(ga.expression, gb.expression) && (!both || Boolean(ga.stored) === Boolean(gb.stored));
 }
 

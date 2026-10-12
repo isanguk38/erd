@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { areaSchema, describeMatch, describeSchema, dialects, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { areaSchema, describeMatch, describeSchema, dialects, FEATURE_LABEL, getDialect, type FeatureKey, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -166,6 +166,15 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     d
       ? `표준 용어 사전 있음 (용어 ${d.terms.length}개): 테이블·컬럼을 만들거나 이름을 바꿀 때 lookup_dictionary로 논리명의 표준 물리명·타입·길이를 찾아 그대로 씁니다. 사전에 없는 용어는 반영할 때 사전에 자동으로 추가됩니다`
       : undefined;
+  /** 이 프로젝트 DB에 있는 기능·없는 기능 (없는 기능은 명령이 거절된다) */
+  const featuresInfo = (dialectId: string) => {
+    const features = getDialect(dialectId as DialectId).features;
+    const keys = Object.keys(FEATURE_LABEL) as FeatureKey[];
+    return {
+      available: keys.filter((k) => features[k]).map((k) => FEATURE_LABEL[k]),
+      notAvailable: keys.filter((k) => !features[k]).map((k) => FEATURE_LABEL[k]),
+    };
+  };
   /** 프로젝트의 이름 표기 기준 안내 (AI가 같은 표기로 만들게) */
   const namingInfo = (meta: Record<string, unknown>, schema: Schema, dict: Dictionary | null) => {
     const r = projectNamingStyles(meta.namingStyle, schema, dict ? dictIndex(dict).styles : null);
@@ -214,7 +223,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       const p = await resolveProject(project);
       const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
       const dict = await dictionaryOf(p.id);
-      const info = { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id), namingStyle: namingInfo(meta, schema, dict), dictionary: dictionaryHint(dict) };
+      const info = { id: p.id, name: meta.name, dialect: meta.dialect, aiMode: meta.aiMode, url: link(p.id), namingStyle: namingInfo(meta, schema, dict), dictionary: dictionaryHint(dict), features: featuresInfo(String(meta.dialect ?? 'mysql')) };
       if (!area) return text({ project: info, ...describeSchema(schema) });
       const part = areaSchema(schema, area);
       const { areas: _all, ...described } = describeSchema(part.schema);

@@ -1,6 +1,7 @@
 import { checkName, indexName, primaryKeyColumns, relationName, type Column, type Index, type Table } from '../model';
-import { columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, splitTopLevel } from './common';
-import type { Dialect } from './types';
+import { columnNames, limitCount, typeWords, literal, normalizeDefaultCommon, numericRegex, relationTables, sqlComment, typeWithLength, indexKeys, splitTopLevel } from './common';
+import type { Dialect, TypeProfile } from './types';
+import { enumInColumn, standardCheck } from '../features';
 
 const TYPE_MAP: Record<string, string> = {
   BOOL: 'TINYINT',
@@ -62,10 +63,70 @@ function autoIncrementKey(table: Table): Index | undefined {
   return candidates.find((i) => i.unique) ?? candidates[0];
 }
 
+/** MySQL이 아는 타입 이름 (MariaDB도 이것을 바탕으로 쓴다) */
+export const MYSQL_KNOWN = 'TINYINT SMALLINT MEDIUMINT MIDDLEINT INT INTEGER BIGINT INT1 INT2 INT3 INT4 INT8 DECIMAL DEC NUMERIC FIXED FLOAT DOUBLE REAL BIT BOOL BOOLEAN SERIAL ' +
+  'DATE DATETIME TIMESTAMP TIME YEAR CHAR CHARACTER VARCHAR NCHAR NVARCHAR NATIONAL BINARY VARBINARY TINYBLOB BLOB MEDIUMBLOB LONGBLOB ' +
+  'TINYTEXT TEXT MEDIUMTEXT LONGTEXT LONG ENUM SET JSON GEOMETRY POINT LINESTRING POLYGON MULTIPOINT MULTILINESTRING MULTIPOLYGON GEOMETRYCOLLECTION GEOMCOLLECTION';
+const MYSQL_LOB = /^(TINY|MEDIUM|LONG)?(TEXT|BLOB)$|^JSON$|^GEOMETRY$/;
+
+/** MySQL 한 행 크기(바이트) 어림값. TEXT·BLOB은 행 밖에 저장되어 몇 바이트만 센다 (utf8mb4: 한 글자 4바이트) */
+export function mysqlRowBytes(columns: Column[]): { bytes: number; widest?: Column } {
+  const FIXED: Record<string, number> = { TINYINT: 1, SMALLINT: 2, MEDIUMINT: 3, INT: 4, INTEGER: 4, BIGINT: 8, FLOAT: 4, DOUBLE: 8, DATE: 3, TIME: 6, DATETIME: 8, TIMESTAMP: 7, YEAR: 1, BOOLEAN: 1, BOOL: 1 };
+  let bytes = Math.ceil(columns.filter((c) => c.nullable && !c.primaryKey).length / 8);
+  let widest: Column | undefined;
+  let widestBytes = 0;
+  for (const c of columns) {
+    if (c.generated?.expression.trim() && !c.generated.stored) continue;
+    const m = renderType(c).toUpperCase().match(/^([A-Z ]+?)\s*(?:\(([^)]*)\))?(?:\s.*)?$/);
+    const base = (m?.[1] ?? '').trim();
+    const n = Number.parseInt(m?.[2] ?? '', 10) || 0;
+    let size: number;
+    if (base === 'VARCHAR') size = n * 4 + (n * 4 > 255 ? 2 : 1);
+    else if (base === 'CHAR') size = n * 4;
+    else if (base === 'VARBINARY') size = n + (n > 255 ? 2 : 1);
+    else if (base === 'BINARY') size = n;
+    else if (base === 'DECIMAL' || base === 'NUMERIC') size = Math.ceil((n || 10) / 2) + 1;
+    else if (MYSQL_LOB.test(base)) size = 12;
+    else size = FIXED[base] ?? 8;
+    bytes += size;
+    if ((base === 'VARCHAR' || base === 'CHAR') && size > widestBytes) {
+      widest = c;
+      widestBytes = size;
+    }
+  }
+  return { bytes, widest };
+}
+
+/** MySQL 타입 정보 (컬럼 타입 검사가 쓴다) */
+export const mysqlTypes: TypeProfile = {
+  known: typeWords(MYSQL_KNOWN),
+  autoIncrement: {
+    label: 'AUTO_INCREMENT',
+    integers: typeWords('TINYINT SMALLINT MEDIUMINT INT INTEGER BIGINT'),
+    floatDeprecated: true,
+    defaultValue: 'error',
+    single: true,
+    mustBeKey: true,
+  },
+  fraction: { types: typeWords('DATETIME TIMESTAMP TIME'), over: 'error' },
+  noLength: typeWords('DATE JSON TINYTEXT MEDIUMTEXT LONGTEXT TINYBLOB MEDIUMBLOB LONGBLOB GEOMETRY POINT LINESTRING POLYGON'),
+  lengthRequired: typeWords('VARCHAR VARBINARY'),
+  // utf8mb4 기준 (한 글자 최대 4바이트, 행 최대 65535바이트)
+  strings: { VARCHAR: { max: 16383 }, CHAR: { max: 255 }, VARBINARY: { max: 65535 }, BINARY: { max: 255 } },
+  tooLongToText: true,
+  integerDisplayWidth: true,
+  decimal: { types: typeWords('DECIMAL NUMERIC'), p: 65, s: 30, sWithinP: true },
+  onUpdatePrecisionStrict: true,
+  defaultTimeStrict: { types: typeWords('DATETIME TIMESTAMP') },
+  // MySQL 8.0.13 이상: TEXT·BLOB·JSON 기본값은 괄호 식만
+  lobNoLiteralDefault: MYSQL_LOB,
+  rowSize: { max: 65535, bytes: mysqlRowBytes },
+};
+
 export const mysql: Dialect = {
   id: 'mysql',
   label: 'MySQL',
-  ddlGrammar: 'mysql',
+  ddlGrammar: { family: 'mysql', backslashEscapes: true, hidesFkIndexes: true, keepsPrimaryKeyName: false, quotedTypeNames: false },
   typeSuggestions: [
     'BIGINT', 'INT', 'SMALLINT', 'TINYINT', 'DECIMAL', 'DOUBLE', 'FLOAT', 'BOOLEAN',
     'VARCHAR', 'CHAR', 'TEXT', 'MEDIUMTEXT', 'LONGTEXT',
@@ -119,10 +180,24 @@ export const mysql: Dialect = {
     return actions.length ? [`ALTER TABLE ${q(after.name)} ${actions.join(', ')}`] : [];
   },
 
-  indexSupport: { expression: true, methods: ['fulltext', 'spatial'] },
-  generatedSupport: { virtual: true, stored: true },
-  // MySQL 8.0.16+: CHECK 삭제는 DROP CHECK
-  dropCheck: (table, check) => [`ALTER TABLE ${q(table.name)} DROP CHECK ${q(checkName(table, check))}`],
+  features: {
+    enum: enumInColumn,
+    // MySQL 8.0.16+: CHECK 삭제는 DROP CHECK
+    check: standardCheck(q, { drop: (table, check) => [`ALTER TABLE ${q(table.name)} DROP CHECK ${q(checkName(table, check))}`] }),
+    expressionIndex: {
+      example: (col) => `(lower(\`${col}\`))`,
+      hint: '예) (lower(`email`)) — MySQL 8.0.13 이상, 식마다 괄호를 한 번 더 감쌉니다',
+      warn: (e) => (/::|\bto_tsvector\b|\bto_tsquery\b|\bjsonb_/i.test(e) ? `식에 PostgreSQL 전용 문법이 있어 MySQL에서는 실패할 수 있습니다: ${e}` : undefined),
+    },
+    indexMethods: { methods: ['fulltext', 'spatial'], label: (m) => m.toUpperCase() },
+    generated: { virtual: true, stored: true },
+    onUpdateTimestamp: { types: /^(TIMESTAMP|DATETIME)/i },
+    fkOnUpdate: { actions: ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'] },
+  },
+  traits: { fkAutoIndex: true, fkNeedsIndex: true, noJsonColumnIndex: true, varcharLengthIsTypeError: true },
+  types: mysqlTypes,
+  connection: { port: 3306, databaseLabel: '스키마(DB)', databasePlaceholder: 'shop', transactional: false },
+  safety: { countUpTo: limitCount, lengthFn: 'CHAR_LENGTH', notNumeric: (col, integer) => `${col} IS NOT NULL AND ${col} NOT REGEXP '${numericRegex(integer)}'` },
   createIndex(table: Table, index) {
     // MySQL은 식마다 괄호를 한 번 더 감싸야 한다: lower(email) → (lower(email))
     const keys = index.expression?.trim() ? mysqlKeyParts(index.expression) : indexKeys(table, index, q);
@@ -135,7 +210,6 @@ export const mysql: Dialect = {
     const key = autoIncrementKey(table);
     return key ? [key.id] : [];
   },
-  fkNeedsIndex: true,
   dropIndex(table, index, keepForFk = []) {
     if (!keepForFk.length) return [`DROP INDEX ${q(indexName(table, index))} ON ${q(table.name)}`];
     // FK가 이 인덱스를 쓰고 있으면 같은 문장에서 FK 이름의 인덱스를 만든다 (MySQL이 FK용으로 자동으로 만드는 것과 같은 모양 → ERD에는 안 보임)

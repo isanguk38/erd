@@ -1,13 +1,10 @@
 // 사용자 정의 타입 (ENUM): 허용 값 목록에 이름을 붙여 두고 컬럼 타입으로 쓴다. 예) order_status = ('READY', 'PAID', 'CANCELED')
 //
 // 컬럼은 타입 칸에 ENUM 이름을 적어 참조한다 (대소문자·따옴표·스키마 접두어는 무시하고 찾는다).
-// DB별로 만드는 방법이 다르다:
-// - PostgreSQL: CREATE TYPE 이름 AS ENUM (...) 을 따로 만들고 컬럼은 그 타입을 쓴다 (값 추가는 ALTER TYPE ... ADD VALUE)
-// - MySQL·MariaDB: 타입 객체가 없어 컬럼마다 ENUM('값', ...) 으로 펼친다
-// - Oracle·SQL Server: ENUM이 없어 VARCHAR(가장 긴 값 길이)로 만든다 (허용 값은 CHECK 제약으로 걸 수 있음)
+// DB별로 만드는 방법은 그 DB의 ENUM 모듈(features/enum.ts)이 정한다. ENUM 모듈이 없는 DB(Oracle·SQL Server)에는 ENUM이 없다.
 // SQL·DB 비교는 diffSchemas가 이 파일의 resolveEnumColumns로 DB에 맞게 펼친 뒤 비교한다.
 
-import type { DialectId } from './dialects/types';
+import type { Dialect } from './dialects/types';
 import { newId, type Column, type EnumType, type Schema } from './model';
 
 /** ENUM 이름 비교용 키: 스키마 접두어·따옴표를 빼고 소문자로 ("public"."OrderStatus" → orderstatus) */
@@ -67,32 +64,18 @@ export function enumUsages(schema: Pick<Schema, 'tables' | 'enums'>, e: EnumType
   );
 }
 
-/** ENUM을 쓰는 컬럼을 이 DB에서 실제로 만들 타입으로 바꾼 컬럼 (ENUM을 안 쓰면 그대로) */
-export function resolveEnumColumn(column: Column, enums: EnumType[] | undefined, dialect: DialectId | string): Column {
+/** ENUM을 쓰는 컬럼을 이 DB에서 실제로 만들 타입으로 바꾼 컬럼 (ENUM을 안 쓰거나 이 DB에 ENUM 모듈이 없으면 그대로) */
+export function resolveEnumColumn(column: Column, enums: EnumType[] | undefined, dialect: Pick<Dialect, 'features'>): Column {
   const e = enumOfType(enums, column.type);
-  if (!e) return column;
-  switch (dialect) {
-    case 'postgresql':
-      return { ...column, type: pgEnumTypeName(e.name), length: '' };
-    case 'mysql':
-    case 'mariadb':
-      return { ...column, type: 'ENUM', length: enumValueList(e.values) };
-    default: {
-      // ENUM이 없는 DB: 가장 긴 값이 들어가는 VARCHAR
-      const longest = Math.max(1, ...e.values.map((v) => v.length));
-      return { ...column, type: 'VARCHAR', length: String(longest) };
-    }
-  }
+  const feature = dialect.features.enum;
+  return e && feature ? feature.resolveColumn(column, e) : column;
 }
 
 /** 스키마의 ENUM 컬럼을 이 DB의 타입으로 펼친 복사본 (ENUM 목록은 그대로 둔다). enums: 타입 이름을 풀 때 쓸 목록 (기본은 그 스키마의 것) */
-export function resolveEnumColumns(schema: Schema, dialect: DialectId | string, enums: EnumType[] | undefined = schema.enums): Schema {
-  if (!enums?.length) return schema;
+export function resolveEnumColumns(schema: Schema, dialect: Pick<Dialect, 'features'>, enums: EnumType[] | undefined = schema.enums): Schema {
+  if (!enums?.length || !dialect.features.enum) return schema;
   return { ...schema, tables: schema.tables.map((t) => ({ ...t, columns: t.columns.map((c) => resolveEnumColumn(c, enums, dialect)) })) };
 }
-
-/** 이 DB에 ENUM 타입 객체가 있는지 (CREATE TYPE으로 따로 만드는지) */
-export const hasEnumObjects = (dialect: DialectId | string) => dialect === 'postgresql';
 
 /**
  * 값 목록 변경이 "추가만"인지: 원래 값이 모두 같은 순서로 남아 있으면 추가할 값과 위치를 돌려준다.

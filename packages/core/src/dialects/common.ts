@@ -56,20 +56,18 @@ export function splitTopLevel(text: string): string[] {
 
 /** 이 DB에서 지원하지 않는 인덱스 기능이 있으면 주의 문구 (SQL 미리보기·내보내기에 "-- 주의:"로 붙는다) */
 export function indexWarnings(dialect: Dialect, table: Table, index: Index): string | undefined {
-  const support = dialect.indexSupport ?? {};
-  const label = dialect.label;
+  const { features, label } = dialect;
   const messages: string[] = [];
   const expression = index.expression?.trim();
-  if (expression && !support.expression) messages.push(`${label}는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)`);
-  else if (expression && dialect.id !== 'postgresql' && /::|\bto_tsvector\b|\bto_tsquery\b|\bjsonb_/i.test(expression)) {
-    messages.push(`식에 PostgreSQL 전용 문법이 있어 ${label}에서는 실패할 수 있습니다: ${expression}`);
-  } else if (expression && dialect.id !== 'mysql' && dialect.id !== 'mariadb' && /->>?\s*'\$/.test(expression)) {
-    messages.push(`식에 MySQL JSON 경로('$.키') 문법이 있어 ${label}에서는 실패할 수 있습니다: ${expression}`);
+  if (expression && !features.expressionIndex) messages.push(`${label}는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)`);
+  else if (expression) {
+    const warn = features.expressionIndex?.warn?.(expression);
+    if (warn) messages.push(warn);
   }
-  if (index.where?.trim() && !support.where) messages.push(`${label}는 부분 인덱스를 지원하지 않아 조건(WHERE ${index.where.trim()})을 빼고 만듭니다`);
+  if (index.where?.trim() && !features.partialIndex) messages.push(`${label}는 부분 인덱스를 지원하지 않아 조건(WHERE ${index.where.trim()})을 빼고 만듭니다`);
   const method = index.method?.trim().toLowerCase();
-  if (method && method !== 'btree' && !(support.methods ?? []).includes(method)) messages.push(`${label}에는 ${method} 방식이 없어 일반 인덱스로 만듭니다`);
-  if ((dialect.id === 'mysql' || dialect.id === 'mariadb') && !expression) {
+  if (method && method !== 'btree' && !(features.indexMethods?.methods ?? []).includes(method)) messages.push(`${label}에는 ${method} 방식이 없어 일반 인덱스로 만듭니다`);
+  if (dialect.traits.noJsonColumnIndex && !expression) {
     const json = index.columnIds.map((id) => findColumn(table, id)).filter((c) => c && /^JSONB?$/i.test(c.type.trim()));
     if (json.length) messages.push(`${label}는 JSON 컬럼(${json.map((c) => c!.name).join(', ')})에 일반 인덱스를 만들 수 없습니다`);
   }
@@ -80,16 +78,20 @@ export function indexWarnings(dialect: Dialect, table: Table, index: Index): str
 export function columnWarnings(dialect: Dialect, column: Column): string | undefined {
   const g = column.generated;
   if (!g?.expression.trim()) return undefined;
-  const support = dialect.generatedSupport ?? {};
+  const support = dialect.features.generated ?? {};
   if (g.stored && !support.stored) return `${dialect.label}는 저장형(STORED) 계산 컬럼이 없어 VIRTUAL로 만듭니다: ${column.name}`;
   if (!g.stored && !support.virtual) return `${dialect.label}는 VIRTUAL 계산 컬럼이 없어 STORED(값 저장)로 만듭니다: ${column.name}`;
   return undefined;
 }
 
-/** CHECK 제약 기본 문장 */
-export function addCheckSql(q: (name: string) => string, table: Table, check: CheckConstraint): string {
-  return `ALTER TABLE ${q(table.name)} ADD CONSTRAINT ${q(checkName(table, check))} CHECK (${quoteExpression(check.expression.trim(), q)})`;
-}
+
+/** 타입 이름 목록 문자열 → Set (공백으로 나눈 단어) */
+export const typeWords = (s: string) => new Set(s.trim().split(/\s+/));
+
+/** 안전 검사 SQL: LIMIT으로 세는 DB (MySQL·MariaDB·PostgreSQL) */
+export const limitCount = (inner: string, n: number) => `SELECT COUNT(*) AS n FROM (SELECT 1 AS x ${inner} LIMIT ${n}) t`;
+/** 숫자 모양 정규식 (공백·부호·소수점 허용) */
+export const numericRegex = (integer: boolean) => `^[[:space:]]*-?[0-9]+${integer ? '' : '([.][0-9]+)?'}[[:space:]]*$`;
 
 /** 부분 인덱스 조건 ( WHERE ...) */
 export function indexWhere(index: Index): string {

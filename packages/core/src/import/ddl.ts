@@ -3,6 +3,7 @@
 // 나머지 문장(INSERT, SET, DROP 등)은 건너뛰고 warnings에 남긴다.
 
 import type { DialectId } from '../dialects/types';
+import { getDialect } from '../dialects';
 import {
   createColumn,
   createCheck,
@@ -143,6 +144,8 @@ export function detectDialect(sql: string): DialectId {
 
 export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImportResult {
   const dialect = !options.dialect || options.dialect === 'auto' ? detectDialect(sql) : options.dialect;
+  // 읽는 문법 (MySQL·MariaDB 문법 / PostgreSQL 문법)
+  const grammar = getDialect(dialect).ddlGrammar ?? getDialect('mysql').ddlGrammar!;
   const commentAs = options.commentAs ?? 'logicalName';
   const schema = emptySchema();
   const warnings: string[] = [];
@@ -164,7 +167,7 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
     else item.comment = value;
   };
 
-  const statements = splitStatements(tokenize(sql, dialect === 'mysql'));
+  const statements = splitStatements(tokenize(sql, grammar.backslashEscapes));
   for (const tokens of statements) {
     const c = new Cursor(tokens, sql);
     const preview = sql.slice(tokens[0].start, Math.min(tokens[0].start + 60, tokens[tokens.length - 1].end)).replace(/\s+/g, ' ');
@@ -237,7 +240,7 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
   }
 
   // MySQL이 외래키를 위해 자동으로 만든 인덱스(이름이 FK와 같고 컬럼도 같음)는 DB에서 읽을 때처럼 ERD에 그리지 않는다
-  if (dialect === 'mysql' || dialect === 'mariadb') {
+  if (grammar.hidesFkIndexes) {
     for (const table of schema.tables) {
       const fks = schema.relations.filter((r) => r.fromTableId === table.id);
       table.indexes = table.indexes.filter(
@@ -296,7 +299,7 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
         const col = columnOf(table, n);
         if (col) { col.primaryKey = true; col.nullable = false; }
       }
-      if (constraintName && dialect === 'postgresql') table.primaryKeyName = constraintName;
+      if (constraintName && grammar.keepsPrimaryKeyName) table.primaryKeyName = constraintName;
       c.skipItem();
       return;
     }
@@ -402,7 +405,7 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
   function readType(c: Cursor, column: Column) {
     const first = c.next();
     // PostgreSQL: 따옴표로 감싼 타입("BillingStatus")은 대소문자를 구분하므로 그대로 둔다
-    let type = first.type === 'quoted' && dialect === 'postgresql' && /[^a-z0-9_]/.test(first.value) ? `"${first.value}"` : first.value.toUpperCase();
+    let type = first.type === 'quoted' && grammar.quotedTypeNames && /[^a-z0-9_]/.test(first.value) ? `"${first.value}"` : first.value.toUpperCase();
     const two = (a: string, b: string) => type === a && c.is(b);
     if (two('DOUBLE', 'PRECISION') || two('CHARACTER', 'VARYING') || two('CHAR', 'VARYING') || two('BIT', 'VARYING')) {
       type += ' ' + c.next().value.toUpperCase();

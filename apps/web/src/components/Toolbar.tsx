@@ -5,6 +5,7 @@ import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
 import { NamingBadge } from './NamingBadge';
+import { Slot } from '../features/registry';
 import { setThemeSetting, useTheme, type ThemeSetting } from '../lib/theme';
 import { useStore, type RelationTool, type ViewMode } from '../store';
 import { useDbAvailable, useDbStatus, useDialect, useProjectName } from '../lib/hooks';
@@ -20,7 +21,7 @@ import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary' | 'enums';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -195,7 +196,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const THEME_LABEL: Record<ThemeSetting, string> = { light: '라이트', dark: '다크' };
   const commentCount = useOpenCommentCount();
   const dictionarySize = useStore((s) => s.dictionary?.terms.length ?? 0);
-  const enumCount = useStore((s) => s.schema.enums?.length ?? 0);
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -295,10 +295,8 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
             <Icon name="note" />
             <span className="hide-narrow">메모</span>
           </button>
-          <button className="btn btn-tool" onClick={() => onOpen('enums')} title="사용자 정의 타입(ENUM): 상태·구분처럼 값이 정해진 컬럼의 타입을 만들고 고칩니다">
-            <Icon name="tag" />
-            <span className="hide-narrow">타입{enumCount ? ` ${enumCount}` : ''}</span>
-          </button>
+          {/* 기능 모듈 버튼 (ENUM 타입 등 — 프로젝트 DB에 있는 기능만) */}
+          <Slot name="toolstrip" />
           <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
             {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>관계: {t.label}</option>)}
           </select>

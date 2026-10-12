@@ -121,25 +121,8 @@ export function safetyChecks(changes: Change[], db: Schema): SafetyCheck[] {
   return checks;
 }
 
-const LENGTH_FN: Record<string, string> = { mysql: 'CHAR_LENGTH', mariadb: 'CHAR_LENGTH', postgresql: 'char_length', oracle: 'LENGTH', mssql: 'LEN' };
-
-/** 조건에 맞는 행을 SAFETY_CAP + 1개까지만 세는 SQL */
-function capped(dialect: Dialect, from: string, where: string): string {
-  const n = SAFETY_CAP + 1;
-  if (dialect.id === 'oracle') return `SELECT COUNT(*) AS n FROM (SELECT 1 AS x FROM ${from} WHERE (${where}) AND ROWNUM <= ${n})`;
-  if (dialect.id === 'mssql') return `SELECT COUNT(*) AS n FROM (SELECT TOP ${n} 1 AS x FROM ${from} WHERE ${where}) t`;
-  return `SELECT COUNT(*) AS n FROM (SELECT 1 AS x FROM ${from} WHERE ${where} LIMIT ${n}) t`;
-}
-
-function numericPattern(dialect: Dialect, col: string, integer: boolean): string {
-  const re = `^[[:space:]]*-?[0-9]+${integer ? '' : '([.][0-9]+)?'}[[:space:]]*$`;
-  switch (dialect.id) {
-    case 'postgresql': return `${col} IS NOT NULL AND ${col}::text !~ '${re}'`;
-    case 'oracle': return `${col} IS NOT NULL AND NOT REGEXP_LIKE(${col}, '${re}')`;
-    case 'mssql': return `${col} IS NOT NULL AND TRY_CAST(${col} AS ${integer ? 'BIGINT' : 'DECIMAL(38,10)'}) IS NULL`;
-    default: return `${col} IS NOT NULL AND ${col} NOT REGEXP '${re}'`;
-  }
-}
+/** 조건에 맞는 행을 SAFETY_CAP + 1개까지만 세는 SQL (세는 문법은 DB마다 dialect.safety에) */
+const capped = (dialect: Dialect, from: string, where: string) => dialect.safety.countUpTo(`FROM ${from} WHERE ${where}`, SAFETY_CAP + 1);
 
 /** 검사 하나를 SELECT COUNT 문장으로 (이름은 DB 종류에 맞게 따옴표로 감싼다) */
 export function safetySql(dialect: Dialect, check: SafetyCheck): string {
@@ -149,8 +132,8 @@ export function safetySql(dialect: Dialect, check: SafetyCheck): string {
     case 'rows': return capped(dialect, from, '1 = 1');
     case 'values': return capped(dialect, from, `${q(check.column)} IS NOT NULL`);
     case 'nulls': return capped(dialect, from, `${q(check.column)} IS NULL`);
-    case 'tooLong': return capped(dialect, from, `${LENGTH_FN[dialect.id] ?? 'LENGTH'}(${q(check.column)}) > ${Math.floor(check.length)}`);
-    case 'notNumeric': return capped(dialect, from, numericPattern(dialect, q(check.column), check.integer));
+    case 'tooLong': return capped(dialect, from, `${dialect.safety.lengthFn}(${q(check.column)}) > ${Math.floor(check.length)}`);
+    case 'notNumeric': return capped(dialect, from, dialect.safety.notNumeric(q(check.column), check.integer));
     case 'check': {
       if (check.expression.includes(';')) throw new Error('CHECK 식에 ;를 쓸 수 없습니다');
       return capped(dialect, from, `NOT (${check.expression})`);
@@ -162,11 +145,8 @@ export function safetySql(dialect: Dialect, check: SafetyCheck): string {
     }
     case 'duplicates': {
       const cols = check.columns.map(q);
-      const n = SAFETY_CAP + 1;
       const inner = `FROM ${from} WHERE ${cols.map((c) => `${c} IS NOT NULL`).join(' AND ')} GROUP BY ${cols.join(', ')} HAVING COUNT(*) > 1`;
-      if (dialect.id === 'oracle') return `SELECT COUNT(*) AS n FROM (SELECT x FROM (SELECT 1 AS x ${inner}) WHERE ROWNUM <= ${n})`;
-      if (dialect.id === 'mssql') return `SELECT COUNT(*) AS n FROM (SELECT TOP ${n} 1 AS x ${inner}) t`;
-      return `SELECT COUNT(*) AS n FROM (SELECT 1 AS x ${inner} LIMIT ${n}) t`;
+      return dialect.safety.countUpTo(inner, SAFETY_CAP + 1);
     }
   }
 }

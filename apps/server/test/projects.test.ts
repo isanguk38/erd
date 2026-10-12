@@ -114,12 +114,24 @@ describe('AI 바로 적용 + 되돌리기', () => {
 
   it('인덱스 추가 결과 문구에 방식·조건이 보인다', async () => {
     const { app } = setup();
-    const { id } = await createProject(app);
+    // gin 방식·부분 인덱스는 PostgreSQL에 있는 기능
+    const { id } = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '쇼핑몰PG', dialect: 'postgresql' } })).json() as { id: string };
     const r = (await app.inject({
       method: 'POST', url: `/api/projects/${id}/commands`,
       payload: { source: 'ai', commands: [member, { op: 'addIndex', table: 'member', columns: ['email'], method: 'gin', where: 'email IS NOT NULL' }] },
     })).json();
     expect(r.messages[1]).toBe('member 인덱스 추가 (gin email WHERE email IS NOT NULL)');
+  });
+
+  it('프로젝트 DB에 없는 기능을 쓰는 명령은 거절한다 (MySQL에 부분 인덱스, Oracle에 ENUM)', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app);
+    const r = await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source: 'ai', commands: [member, { op: 'addIndex', table: 'member', columns: ['email'], where: 'email IS NOT NULL' }] } });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain('MySQL에는 부분 인덱스(WHERE)이(가) 없습니다');
+    const ora = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '오라클', dialect: 'oracle' } })).json() as { id: string };
+    const e = await app.inject({ method: 'POST', url: `/api/projects/${ora.id}/commands`, payload: { commands: [{ op: 'createEnum', name: 'status', values: ['A'] }] } });
+    expect(e.json().error).toContain('Oracle에는 사용자 정의 타입(ENUM)이(가) 없습니다');
   });
 
   it('잘못된 명령은 아무것도 바꾸지 않고 이유를 돌려준다', async () => {

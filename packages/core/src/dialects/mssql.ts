@@ -1,6 +1,7 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { quoteExpression, columnNames, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
-import type { Dialect } from './types';
+import { quoteExpression, columnNames, normalizeDefaultCommon, typeWords, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
+import type { Dialect, TypeProfile } from './types';
+import { standardCheck } from '../features';
 
 // SQL Server 2016 이상. 이름은 [대괄호], 코멘트는 확장 속성(MS_Description),
 // 기본값은 이름이 정해지지 않은 제약조건이라 바꾸거나 지울 때 이름을 찾아 지운다.
@@ -102,6 +103,19 @@ function description(table: Table, column: Column | null): string {
 const pkName = (table: Table) => table.primaryKeyName || `PK_${table.name}`;
 const fail = (message: string) => `RAISERROR(${nstr(message)}, 16, 1)`;
 
+/** SQL Server 타입 정보 (컬럼 타입 검사가 쓴다) */
+const mssqlTypes: TypeProfile = {
+  known: typeWords(
+    'BIGINT INT INTEGER SMALLINT TINYINT BIT DECIMAL DEC NUMERIC MONEY SMALLMONEY FLOAT REAL DOUBLE DATE DATETIME DATETIME2 SMALLDATETIME DATETIMEOFFSET TIME ' +
+      'CHAR CHARACTER VARCHAR TEXT NCHAR NVARCHAR NTEXT NATIONAL BINARY VARBINARY IMAGE UNIQUEIDENTIFIER XML SQL_VARIANT ROWVERSION TIMESTAMP HIERARCHYID GEOMETRY GEOGRAPHY JSON SYSNAME VECTOR',
+  ),
+  // DECIMAL(p,0)·NUMERIC(p,0)도 IDENTITY로 만들 수 있다
+  autoIncrement: { label: 'IDENTITY', integers: typeWords('TINYINT SMALLINT INT BIGINT'), also: (base, scale) => (base === 'DECIMAL' || base === 'NUMERIC') && scale === 0, defaultValue: 'ignored', single: true },
+  reportsIgnoredLength: true,
+  strings: { VARCHAR: { max: 8000, useMax: true }, VARBINARY: { max: 8000, useMax: true }, NVARCHAR: { max: 4000, useMax: true }, CHAR: { max: 8000 }, BINARY: { max: 8000 }, NCHAR: { max: 4000 } },
+  decimal: { types: typeWords('DECIMAL NUMERIC'), p: 38, s: 38, sWithinP: true },
+};
+
 export const mssql: Dialect = {
   id: 'mssql',
   label: 'SQL Server',
@@ -177,8 +191,21 @@ export const mssql: Dialect = {
     return statements;
   },
 
-  indexSupport: { where: true },
-  generatedSupport: { virtual: true, stored: true, typed: false },
+  // ENUM·식 인덱스·인덱스 방식은 없다 (모듈을 넣지 않는다)
+  features: {
+    check: standardCheck(q),
+    partialIndex: { placeholder: 'WHERE 뒤 조건 (필터 인덱스). 예) deleted_at IS NULL' },
+    generated: { virtual: true, stored: true, typed: false },
+    fkOnUpdate: { actions: ['NO ACTION', 'CASCADE', 'SET NULL', 'SET DEFAULT'] },
+  },
+  traits: {},
+  types: mssqlTypes,
+  connection: { port: 1433, databaseLabel: '데이터베이스', databasePlaceholder: 'shop', schemaPlaceholder: 'dbo', transactional: true },
+  safety: {
+    countUpTo: (inner, n) => `SELECT COUNT(*) AS n FROM (SELECT TOP ${n} 1 AS x ${inner}) t`,
+    lengthFn: 'LEN',
+    notNumeric: (col, integer) => `${col} IS NOT NULL AND TRY_CAST(${col} AS ${integer ? 'BIGINT' : 'DECIMAL(38,10)'}) IS NULL`,
+  },
   createIndex(table, index) {
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})${indexWhere(index)}`];
   },

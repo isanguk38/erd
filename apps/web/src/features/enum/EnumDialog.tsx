@@ -1,24 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { addEnumType, enumKey, enumUsages, removeEnumType, updateEnumType, type EnumType } from '@erd/core';
-import { useStore } from '../store';
-import { Modal } from './Modal';
+import { useStore } from '../../store';
+import { Modal } from '../../components/Modal';
 
-/** DB별로 어떻게 만들어지는지 */
-const HOW: Record<string, string> = {
-  postgresql: 'PostgreSQL: CREATE TYPE 이름 AS ENUM (...)으로 따로 만들고, 컬럼은 그 타입을 씁니다. 값 추가는 ALTER TYPE ... ADD VALUE, 값을 빼거나 순서를 바꾸면 타입을 다시 만들어 컬럼을 옮깁니다.',
-  mysql: 'MySQL: 타입 객체가 없어 이 타입을 쓰는 컬럼마다 ENUM(\'값\', ...)으로 만듭니다. 값을 바꾸면 그 컬럼들의 타입이 바뀝니다.',
-  mariadb: 'MariaDB: 타입 객체가 없어 이 타입을 쓰는 컬럼마다 ENUM(\'값\', ...)으로 만듭니다. 값을 바꾸면 그 컬럼들의 타입이 바뀝니다.',
-  oracle: 'Oracle: ENUM이 없어 VARCHAR(가장 긴 값 길이)로 만듭니다. 허용 값을 DB에서 막으려면 CHECK 제약을 함께 거세요.',
-  mssql: 'SQL Server: ENUM이 없어 VARCHAR(가장 긴 값 길이)로 만듭니다. 허용 값을 DB에서 막으려면 CHECK 제약을 함께 거세요.',
-};
 
 const lines = (text: string) => text.split('\n').map((v) => v.trim()).filter(Boolean);
 
 /** 사용자 정의 타입(ENUM) 관리: 만들기·이름·값 고치기·지우기. 컬럼 타입 칸에 이름을 적어 쓴다 */
-export function EnumDialog({ onClose, focus, create: createName }: { onClose: () => void; focus?: string; create?: string }) {
+export function EnumDialog({ onClose, focus, create: createName, help }: { onClose: () => void; focus?: string; create?: string; help: string }) {
   const enums = useStore((s) => s.schema.enums);
   const schema = useStore((s) => s.schema);
-  const dialect = useStore((s) => s.meta.dialect);
   const readOnly = useStore((s) => s.role === 'viewer' || Boolean(s.compare));
   const { edit, showNotice } = useStore.getState();
   // 컬럼 타입 칸에서 "타입으로 만들기"로 열면 이름을 채워 둔다
@@ -37,7 +28,7 @@ export function EnumDialog({ onClose, focus, create: createName }: { onClose: ()
   return (
     <Modal title="사용자 정의 타입 (ENUM)" onClose={onClose} wide>
       <p className="muted small enum-help">
-        상태·구분처럼 값이 정해진 컬럼에 씁니다. 타입을 만든 뒤 컬럼의 타입 칸에 이름을 적으세요. {HOW[dialect] ?? ''}
+        상태·구분처럼 값이 정해진 컬럼에 씁니다. 타입을 만든 뒤 컬럼의 타입 칸에 이름을 적으세요. {help}
       </p>
       {!readOnly && (
         <div className="enum-new">

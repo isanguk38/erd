@@ -1,5 +1,4 @@
 import type { Change, ChangeCategory, ChangeKind, DiffResult } from './diff';
-import { addCheckSql } from './dialects/common';
 import { checkName } from './model';
 import { diffSchemas } from './diff';
 import type { Dialect } from './dialects/types';
@@ -67,14 +66,14 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect, chose
     case 'primaryKey': return dialect.changePrimaryKey(change.before, change.after);
     case 'addIndex': return dialect.createIndex(change.table, change.index);
     case 'dropIndex':
-      return dialect.dropIndex(change.table, change.index, dialect.fkNeedsIndex ? fkIndexesToKeep(change.table, change.index, diff, chosen) : undefined);
+      return dialect.dropIndex(change.table, change.index, dialect.traits.fkNeedsIndex ? fkIndexesToKeep(change.table, change.index, diff, chosen) : undefined);
     case 'addForeignKey': return dialect.addForeignKey(diff.target, change.relation);
     case 'dropForeignKey': return dialect.dropForeignKey(diff.base, change.relation);
-    case 'addCheck': return dialect.addCheck ? dialect.addCheck(change.table, change.check) : [addCheckSql(dialect.quote, change.table, change.check)];
-    case 'dropCheck': return dialect.dropCheck ? dialect.dropCheck(change.table, change.check) : [`ALTER TABLE ${dialect.quote(change.table.name)} DROP CONSTRAINT ${dialect.quote(checkName(change.table, change.check))}`];
-    case 'createEnum': return dialect.createEnum?.(change.enumType) ?? [];
-    case 'dropEnum': return dialect.dropEnum?.(change.enumType) ?? [];
-    case 'alterEnum': return dialect.alterEnum?.(change.before, change.after, change.usages) ?? [];
+    case 'addCheck': return dialect.features.check?.add(change.table, change.check) ?? [];
+    case 'dropCheck': return dialect.features.check?.drop(change.table, change.check) ?? [];
+    case 'createEnum': return dialect.features.enum?.create?.(change.enumType) ?? [];
+    case 'dropEnum': return dialect.features.enum?.drop?.(change.enumType) ?? [];
+    case 'alterEnum': return dialect.features.enum?.alter?.(change.before, change.after, change.usages) ?? [];
   }
 }
 

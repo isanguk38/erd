@@ -1,5 +1,7 @@
-// 컬럼 타입 검사: DB에 실행하면 실패하거나 의도와 다르게 만들어지는 타입·길이·자동 증가·기본값 조합을 DB별로 찾는다.
-// 규칙은 아래 RULES 표에 한 줄씩 있다. 새 규칙은 표에 추가하면 설계 검사·편집 창·DB 내보내기 경고에 함께 쓰인다.
+// 컬럼 타입 검사: DB에 실행하면 실패하거나 의도와 다르게 만들어지는 타입·길이·자동 증가·기본값 조합을 찾는다.
+// 검사 규칙(아래 RULES)은 공통이고, 규칙이 보는 값(아는 타입, 최대 길이, 자동 증가 타입 등)은 각 DB가 dialect.types로 준다.
+// DB 이름으로 나누지 않는다 — 그 DB의 타입 정보에 칸이 없으면 그 규칙은 그 DB에 없다.
+// 새 규칙은 RULES에 한 줄 추가하면 설계 검사·편집 창·DB 내보내기 경고에 함께 쓰인다.
 
 import { getDialect, type Dialect, type DialectId } from './dialects';
 import type { Column, EnumType, Table } from './model';
@@ -26,7 +28,7 @@ export interface TableTypeIssue extends TypeIssue {
 
 /** 규칙이 보는 컬럼 정보. 타입은 이 DB로 실제 만들어지는 형태(renderType)로 본다 */
 interface Ctx {
-  dialect: DialectId;
+  dialect: Dialect;
   column: Column;
   /** 괄호 앞 타입 이름 (예: DATETIME, NVARCHAR, NUMBER) */
   base: string;
@@ -38,83 +40,16 @@ interface Ctx {
 
 interface Rule {
   code: string;
-  dialects: DialectId[] | 'all';
   /** 타입·길이를 바꿀 때 편집 창이 이 규칙의 fix를 자동으로 적용한다 */
   autoFix?: boolean;
   check(ctx: Ctx): Omit<TypeIssue, 'code'> | undefined;
 }
 
-const MY: DialectId[] = ['mysql', 'mariadb'];
 const ENUM_LIKE = new Set(['ENUM', 'SET']);
-
-const INTEGER_TYPES: Record<DialectId, Set<string>> = {
-  mysql: new Set(['TINYINT', 'SMALLINT', 'MEDIUMINT', 'INT', 'INTEGER', 'BIGINT']),
-  mariadb: new Set(['TINYINT', 'SMALLINT', 'MEDIUMINT', 'INT', 'INTEGER', 'BIGINT']),
-  postgresql: new Set(['SMALLINT', 'INTEGER', 'BIGINT']),
-  mssql: new Set(['TINYINT', 'SMALLINT', 'INT', 'BIGINT']),
-  oracle: new Set(['INTEGER']),
-};
 const NUMERIC_TYPES = new Set([
   'TINYINT', 'SMALLINT', 'MEDIUMINT', 'INT', 'INTEGER', 'BIGINT', 'DECIMAL', 'NUMERIC', 'NUMBER',
   'FLOAT', 'DOUBLE', 'REAL', 'DOUBLE PRECISION', 'BINARY_DOUBLE', 'BINARY_FLOAT', 'MONEY',
 ]);
-/** 소수 초 자릿수(0~6)를 괄호에 쓰는 날짜·시간 타입 */
-const FRACTION_TYPES: Partial<Record<DialectId, Set<string>>> = {
-  mysql: new Set(['DATETIME', 'TIMESTAMP', 'TIME']),
-  mariadb: new Set(['DATETIME', 'TIMESTAMP', 'TIME']),
-  postgresql: new Set(['TIMESTAMP', 'TIMESTAMPTZ', 'TIME', 'TIMETZ']),
-};
-/** 괄호(길이)를 쓰면 문법 오류인 MySQL 타입 */
-const MYSQL_NO_LENGTH = new Set(['DATE', 'JSON', 'TINYTEXT', 'MEDIUMTEXT', 'LONGTEXT', 'TINYBLOB', 'MEDIUMBLOB', 'LONGBLOB', 'GEOMETRY', 'POINT', 'LINESTRING', 'POLYGON']);
-const MYSQL_LOB = /^(TINY|MEDIUM|LONG)?(TEXT|BLOB)$|^JSON$|^GEOMETRY$/;
-
-/** 문자·바이너리 타입별 최대 길이. max가 'MAX'면 그보다 길면 MAX로 바꾸게 한다 */
-const STRING_LIMITS: Record<DialectId, Record<string, { max: number; soft?: number; useMax?: boolean }>> = {
-  // utf8mb4 기준 (한 글자 최대 4바이트, 행 최대 65535바이트)
-  mysql: { VARCHAR: { max: 16383 }, CHAR: { max: 255 }, VARBINARY: { max: 65535 }, BINARY: { max: 255 } },
-  mariadb: { VARCHAR: { max: 16383 }, CHAR: { max: 255 }, VARBINARY: { max: 65535 }, BINARY: { max: 255 } },
-  postgresql: { VARCHAR: { max: 10485760 }, CHAR: { max: 10485760 } },
-  // 기본 설정은 4000바이트, MAX_STRING_SIZE=EXTENDED면 32767바이트
-  oracle: { VARCHAR2: { max: 32767, soft: 4000 }, NVARCHAR2: { max: 16383, soft: 2000 }, CHAR: { max: 2000 }, NCHAR: { max: 1000 }, RAW: { max: 32767, soft: 2000 } },
-  mssql: { VARCHAR: { max: 8000, useMax: true }, VARBINARY: { max: 8000, useMax: true }, NVARCHAR: { max: 4000, useMax: true }, CHAR: { max: 8000 }, BINARY: { max: 8000 }, NCHAR: { max: 4000 } },
-};
-/** DECIMAL 계열 최대 자릿수(p)·소수 자릿수(s) */
-const DECIMAL_LIMITS: Partial<Record<DialectId, { types: Set<string>; p: number; s: number; sWithinP: boolean; minS?: number }>> = {
-  mysql: { types: new Set(['DECIMAL', 'NUMERIC']), p: 65, s: 30, sWithinP: true },
-  mariadb: { types: new Set(['DECIMAL', 'NUMERIC']), p: 65, s: 38, sWithinP: true },
-  postgresql: { types: new Set(['NUMERIC', 'DECIMAL']), p: 1000, s: 1000, sWithinP: false, minS: -1000 },
-  mssql: { types: new Set(['DECIMAL', 'NUMERIC']), p: 38, s: 38, sWithinP: true },
-  oracle: { types: new Set(['NUMBER']), p: 38, s: 127, sWithinP: false, minS: -84 },
-};
-
-/**
- * DB별로 아는 타입 이름 (첫 단어 기준: DOUBLE PRECISION → DOUBLE, TIMESTAMP WITH TIME ZONE → TIMESTAMP).
- * 여기 없는 타입은 오타이거나 다른 DB 전용 타입일 수 있어 경고한다 (직접 만든 타입·확장 타입일 수도 있어 오류는 아님).
- * 다른 DB의 흔한 타입 대부분은 SQL을 만들 때 이 DB 타입으로 바뀐다 (renderType) — 바뀐 뒤 이름으로 본다.
- */
-const words = (s: string) => new Set(s.trim().split(/\s+/));
-const MYSQL_KNOWN =
-  'TINYINT SMALLINT MEDIUMINT MIDDLEINT INT INTEGER BIGINT INT1 INT2 INT3 INT4 INT8 DECIMAL DEC NUMERIC FIXED FLOAT DOUBLE REAL BIT BOOL BOOLEAN SERIAL ' +
-  'DATE DATETIME TIMESTAMP TIME YEAR CHAR CHARACTER VARCHAR NCHAR NVARCHAR NATIONAL BINARY VARBINARY TINYBLOB BLOB MEDIUMBLOB LONGBLOB ' +
-  'TINYTEXT TEXT MEDIUMTEXT LONGTEXT LONG ENUM SET JSON GEOMETRY POINT LINESTRING POLYGON MULTIPOINT MULTILINESTRING MULTIPOLYGON GEOMETRYCOLLECTION GEOMCOLLECTION';
-const KNOWN_TYPES: Record<DialectId, Set<string>> = {
-  mysql: words(MYSQL_KNOWN),
-  mariadb: words(`${MYSQL_KNOWN} UUID INET4 INET6 VECTOR`),
-  postgresql: words(
-    'SMALLINT INTEGER INT INT2 INT4 INT8 BIGINT DECIMAL NUMERIC REAL DOUBLE FLOAT FLOAT4 FLOAT8 SMALLSERIAL SERIAL BIGSERIAL SERIAL2 SERIAL4 SERIAL8 MONEY ' +
-      'CHARACTER CHAR VARCHAR BPCHAR TEXT NAME CITEXT BYTEA TIMESTAMP TIMESTAMPTZ DATE TIME TIMETZ INTERVAL BOOLEAN BOOL ' +
-      'POINT LINE LSEG BOX PATH POLYGON CIRCLE CIDR INET MACADDR MACADDR8 BIT VARBIT TSVECTOR TSQUERY UUID XML JSON JSONB HSTORE LTREE ' +
-      'INT4RANGE INT8RANGE NUMRANGE TSRANGE TSTZRANGE DATERANGE OID GEOMETRY GEOGRAPHY VECTOR',
-  ),
-  oracle: words(
-    'VARCHAR2 NVARCHAR2 VARCHAR CHAR NCHAR CHARACTER NATIONAL NUMBER FLOAT BINARY_FLOAT BINARY_DOUBLE INTEGER INT SMALLINT DECIMAL NUMERIC REAL DOUBLE ' +
-      'DATE TIMESTAMP INTERVAL RAW LONG CLOB NCLOB BLOB BFILE ROWID UROWID JSON BOOLEAN XMLTYPE SDO_GEOMETRY VECTOR',
-  ),
-  mssql: words(
-    'BIGINT INT INTEGER SMALLINT TINYINT BIT DECIMAL DEC NUMERIC MONEY SMALLMONEY FLOAT REAL DOUBLE DATE DATETIME DATETIME2 SMALLDATETIME DATETIMEOFFSET TIME ' +
-      'CHAR CHARACTER VARCHAR TEXT NCHAR NVARCHAR NTEXT NATIONAL BINARY VARBINARY IMAGE UNIQUEIDENTIFIER XML SQL_VARIANT ROWVERSION TIMESTAMP HIERARCHYID GEOMETRY GEOGRAPHY JSON SYSNAME VECTOR',
-  ),
-};
 
 const isInt = (v: string) => /^\d+$/.test(v.trim());
 const CURRENT_TIME = /^(CURRENT_TIMESTAMP|NOW|LOCALTIMESTAMP)\s*(\(\s*(\d*)\s*\))?$/i;
@@ -129,78 +64,70 @@ const currentTimestamp = (fsp: number) => (fsp > 0 ? `CURRENT_TIMESTAMP(${fsp})`
 const fspOf = (ctx: Ctx) => (isInt(ctx.args) ? Number(ctx.args) : 0);
 
 function canAutoIncrementType(ctx: Ctx): boolean {
-  const { dialect, base, args } = ctx;
-  if (INTEGER_TYPES[dialect].has(base)) return true;
-  const scale = Number(args.split(',')[1] ?? 0);
-  if (dialect === 'mssql') return (base === 'DECIMAL' || base === 'NUMERIC') && scale === 0;
-  // Oracle은 NUMBER(10,2)도 IDENTITY로 만들 수 있다 (실제 서버로 확인)
-  if (dialect === 'oracle') return base === 'NUMBER';
-  return false;
+  const { base, args } = ctx;
+  const auto = ctx.dialect.types.autoIncrement;
+  if (auto.integers.has(base)) return true;
+  return auto.also?.(base, Number(args.split(',')[1] ?? 0)) ?? false;
 }
 
 const RULES: Rule[] = [
   // ── 이 DB에 없는 타입 ────────────────────────────────────
   {
+    // 컬럼 타입 ENUM(...)·SET(...)은 컬럼형 ENUM 모듈이 있는 DB만
     code: 'enum-unsupported',
-    dialects: ['postgresql', 'oracle', 'mssql'],
-    check({ base }) {
-      if (!ENUM_LIKE.has(base)) return undefined;
+    check({ dialect, base }) {
+      if (!ENUM_LIKE.has(base) || dialect.features.enum?.kind === 'column') return undefined;
       return {
         severity: 'error',
         field: 'type',
-        message: `${base}(...) 타입은 이 DB에 없습니다 (MySQL·MariaDB 전용). VARCHAR로 바꾸고 허용 값은 CHECK 제약으로 거세요`,
+        message: `${base}(...) 타입은 ${dialect.label}에 없습니다. VARCHAR로 바꾸고 허용 값은 CHECK 제약으로 거세요${dialect.features.enum ? ' (또는 사용자 정의 타입을 만들어 쓰세요)' : ''}`,
         fix: { label: 'VARCHAR(50)으로', patch: { type: 'VARCHAR', length: '50' } },
       };
     },
   },
   {
     code: 'unknown-type',
-    dialects: 'all',
     check({ dialect, base, column }) {
       const first = base.replace(/\[\]$/, '').split(/\s+/)[0] ?? '';
-      if (!first || KNOWN_TYPES[dialect].has(first) || ENUM_LIKE.has(first)) return undefined;
-      // PostgreSQL: 따옴표로 감싼 타입은 직접 만든 타입 (CREATE TYPE)
-      if (dialect === 'postgresql' && column.type.includes('"')) return undefined;
+      if (!first || dialect.types.known.has(first) || ENUM_LIKE.has(first)) return undefined;
+      // 따옴표로 감싼 타입은 직접 만든 타입 (CREATE TYPE·DOMAIN)
+      if (dialect.types.quotedUserTypes && column.type.includes('"')) return undefined;
       return {
         severity: 'warning',
         field: 'type',
-        message: `${first}는 ${getDialect(dialect).label}에서 모르는 타입입니다. 오타이거나 다른 DB 전용 타입이면 실행할 때 실패합니다 (직접 만든 타입이면 무시하세요)`,
+        message: `${first}는 ${dialect.label}에서 모르는 타입입니다. 오타이거나 다른 DB 전용 타입이면 실행할 때 실패합니다 (직접 만든 타입이면 무시하세요)`,
       };
     },
   },
   // ── 자동 증가 ────────────────────────────────────────────
   {
     code: 'auto-increment-type',
-    dialects: 'all',
     check(ctx) {
       const { column, dialect, base } = ctx;
       if (!column.autoIncrement || column.generated?.expression.trim() || canAutoIncrementType(ctx)) return undefined;
-      // MySQL은 FLOAT·DOUBLE의 AUTO_INCREMENT를 아직 받지만 쓰지 않을 기능(deprecated)이다
-      const floatOk = MY.includes(dialect) && (base === 'FLOAT' || base === 'DOUBLE');
-      const what = dialect === 'mysql' || dialect === 'mariadb' ? 'AUTO_INCREMENT' : dialect === 'mssql' ? 'IDENTITY' : 'IDENTITY(자동 증가)';
+      const auto = dialect.types.autoIncrement;
+      const floatOk = Boolean(auto.floatDeprecated) && (base === 'FLOAT' || base === 'DOUBLE');
       return {
         severity: floatOk ? 'warning' : 'error',
         field: 'autoIncrement',
         message: floatOk
-          ? `${column.name}: ${base}의 ${what}는 곧 없어질 기능입니다. 정수 타입(BIGINT 등)을 쓰세요`
-          : `${column.name}: ${what}는 정수 타입에만 쓸 수 있습니다 (지금 ${ctx.rendered})`,
+          ? `${column.name}: ${base}의 ${auto.label}는 곧 없어질 기능입니다. 정수 타입(BIGINT 등)을 쓰세요`
+          : `${column.name}: ${auto.label}는 정수 타입에만 쓸 수 있습니다 (지금 ${ctx.rendered})`,
         fix: { label: 'BIGINT로', patch: { type: 'BIGINT', length: '', defaultValue: null } },
       };
     },
   },
   {
     code: 'auto-increment-default',
-    dialects: MY,
-    check({ column }) {
-      if (!column.autoIncrement || column.defaultValue === null || !column.defaultValue.trim()) return undefined;
+    check({ dialect, column }) {
+      if (dialect.types.autoIncrement.defaultValue !== 'error' || !column.autoIncrement || column.defaultValue === null || !column.defaultValue.trim()) return undefined;
       return { severity: 'error', field: 'defaultValue', message: `${column.name}: 자동 증가 컬럼에는 기본값을 둘 수 없습니다`, fix: { label: '기본값 지우기', patch: { defaultValue: null } } };
     },
   },
   {
     code: 'auto-increment-default-ignored',
-    dialects: ['postgresql', 'oracle', 'mssql'],
-    check({ column }) {
-      if (!column.autoIncrement || column.defaultValue === null || !column.defaultValue.trim()) return undefined;
+    check({ dialect, column }) {
+      if (dialect.types.autoIncrement.defaultValue !== 'ignored' || !column.autoIncrement || column.defaultValue === null || !column.defaultValue.trim()) return undefined;
       return { severity: 'info', field: 'defaultValue', message: `${column.name}: 자동 증가 컬럼이라 기본값 ${column.defaultValue}은(는) 쓰지 않습니다`, fix: { label: '기본값 지우기', patch: { defaultValue: null } } };
     },
   },
@@ -208,18 +135,17 @@ const RULES: Rule[] = [
   // ── 날짜·시간 자릿수 ─────────────────────────────────────
   {
     code: 'time-precision',
-    dialects: ['mysql', 'mariadb', 'postgresql'],
     autoFix: true,
     check(ctx) {
-      const types = FRACTION_TYPES[ctx.dialect];
-      if (!types?.has(ctx.base) || !ctx.args) return undefined;
+      const fraction = ctx.dialect.types.fraction;
+      if (!fraction?.types.has(ctx.base) || !ctx.args) return undefined;
       if (isInt(ctx.args) && Number(ctx.args) <= 6) return undefined;
-      // PostgreSQL은 실패하지 않고 6으로 줄여 만든다 (실제 서버로 확인)
-      const pg = ctx.dialect === 'postgresql';
+      // clamp: 실패하지 않고 6으로 줄여 만든다 (PostgreSQL — 실제 서버로 확인)
+      const clamp = fraction.over === 'clamp';
       return {
-        severity: pg ? 'warning' : 'error',
+        severity: clamp ? 'warning' : 'error',
         field: 'length',
-        message: `${ctx.column.name}: ${ctx.base}의 괄호 숫자는 초 아래 자릿수라 0~6만 됩니다 (지금 ${ctx.args})${pg ? '. PostgreSQL은 6으로 줄여 만듭니다' : ''}`,
+        message: `${ctx.column.name}: ${ctx.base}의 괄호 숫자는 초 아래 자릿수라 0~6만 됩니다 (지금 ${ctx.args})${clamp ? `. ${ctx.dialect.label}은 6으로 줄여 만듭니다` : ''}`,
         fix: { label: '길이 지우기', patch: { length: '' } },
       };
     },
@@ -228,55 +154,52 @@ const RULES: Rule[] = [
   // ── 길이 ────────────────────────────────────────────────
   {
     code: 'length-not-allowed',
-    dialects: MY,
     autoFix: true,
     check(ctx) {
-      if (!ctx.args || !MYSQL_NO_LENGTH.has(ctx.base)) return undefined;
+      if (!ctx.args || !ctx.dialect.types.noLength?.has(ctx.base)) return undefined;
       return { severity: 'error', field: 'length', message: `${ctx.column.name}: ${ctx.base}에는 길이를 쓸 수 없습니다 (지금 ${ctx.args})`, fix: { label: '길이 지우기', patch: { length: '' } } };
     },
   },
   {
     code: 'length-ignored',
-    dialects: ['postgresql', 'oracle', 'mssql'],
     autoFix: true,
     check(ctx) {
+      if (!ctx.dialect.types.reportsIgnoredLength) return undefined;
       const length = ctx.column.length.replace(/\s+/g, '').toUpperCase();
       if (!length || ENUM_LIKE.has(ctx.base) || ctx.column.generated?.expression.trim()) return undefined;
       if (ctx.args.replace(/\s+/g, '').toUpperCase() === (length === '-1' ? 'MAX' : length)) return undefined;
       return {
         severity: 'info',
         field: 'length',
-        message: `${ctx.column.name}: ${getDialect(ctx.dialect).label}에서는 ${ctx.column.type}의 길이 ${ctx.column.length}을(를) 쓰지 않고 ${ctx.rendered}(으)로 만듭니다`,
+        message: `${ctx.column.name}: ${ctx.dialect.label}에서는 ${ctx.column.type}의 길이 ${ctx.column.length}을(를) 쓰지 않고 ${ctx.rendered}(으)로 만듭니다`,
         fix: { label: '길이 지우기', patch: { length: '' } },
       };
     },
   },
   {
     code: 'varchar-length-required',
-    dialects: MY,
     autoFix: true,
     check(ctx) {
-      if (ctx.base !== 'VARCHAR' && ctx.base !== 'VARBINARY') return undefined;
-      if (ctx.args) return undefined;
+      if (!ctx.dialect.types.lengthRequired?.has(ctx.base) || ctx.args) return undefined;
       return { severity: 'error', field: 'length', message: `${ctx.column.name}: ${ctx.base}는 길이가 꼭 있어야 합니다`, fix: { label: '길이 255', patch: { length: '255' } } };
     },
   },
   {
     code: 'string-length',
-    dialects: 'all',
     check(ctx) {
-      const limit = STRING_LIMITS[ctx.dialect][ctx.base];
+      const t = ctx.dialect.types;
+      const limit = t.strings[ctx.base];
       if (!limit || !ctx.args) return undefined;
       const args = ctx.args.trim().toUpperCase();
       if (args === 'MAX' && limit.useMax) return undefined;
-      // Oracle: VARCHAR2(100 CHAR)
-      const n = ctx.dialect === 'oracle' ? args.replace(/\s*(CHAR|BYTE)$/, '') : args;
+      // 길이 뒤 단위 (Oracle: VARCHAR2(100 CHAR))
+      const n = t.lengthSuffix ? args.replace(t.lengthSuffix, '') : args;
       if (!isInt(n) || Number(n) < 1) {
         return { severity: 'error', field: 'length', message: `${ctx.column.name}: ${ctx.base}의 길이는 1 이상의 숫자여야 합니다 (지금 ${ctx.args})` };
       }
       const len = Number(n);
       if (len > limit.max) {
-        const fix = limit.useMax ? { label: 'MAX로', patch: { length: 'MAX' } } : MY.includes(ctx.dialect) && ctx.base === 'VARCHAR' ? { label: 'TEXT로', patch: { type: 'TEXT', length: '' } } : { label: `${limit.max}로`, patch: { length: String(limit.max) } };
+        const fix = limit.useMax ? { label: 'MAX로', patch: { length: 'MAX' } } : t.tooLongToText && ctx.base === 'VARCHAR' ? { label: 'TEXT로', patch: { type: 'TEXT', length: '' } } : { label: `${limit.max}로`, patch: { length: String(limit.max) } };
         return { severity: 'error', field: 'length', message: `${ctx.column.name}: ${ctx.base}의 최대 길이는 ${limit.max}입니다 (지금 ${len})`, fix };
       }
       if (limit.soft && len > limit.soft) {
@@ -287,18 +210,17 @@ const RULES: Rule[] = [
   },
   {
     code: 'integer-display-width',
-    dialects: MY,
     check(ctx) {
-      if (!INTEGER_TYPES[ctx.dialect].has(ctx.base) || !ctx.args) return undefined;
+      const t = ctx.dialect.types;
+      if (!t.integerDisplayWidth || !t.autoIncrement.integers.has(ctx.base) || !ctx.args) return undefined;
       if (isInt(ctx.args) && Number(ctx.args) <= 255) return undefined;
       return { severity: 'error', field: 'length', message: `${ctx.column.name}: ${ctx.base}의 괄호 숫자(표시 폭)는 0~255만 됩니다 (지금 ${ctx.args}). 정수 타입은 길이를 비워 두면 됩니다`, fix: { label: '길이 지우기', patch: { length: '' } } };
     },
   },
   {
     code: 'decimal-precision',
-    dialects: 'all',
     check(ctx) {
-      const limit = DECIMAL_LIMITS[ctx.dialect];
+      const limit = ctx.dialect.types.decimal;
       if (!limit?.types.has(ctx.base) || !ctx.args) return undefined;
       const [pText, sText] = ctx.args.split(',').map((v) => v.trim());
       const signed = (v: string) => /^-?\d+$/.test(v);
@@ -316,24 +238,21 @@ const RULES: Rule[] = [
     },
   },
 
-  // ── 수정 시 값 (ON UPDATE CURRENT_TIMESTAMP) ─────────────
+  // ── 수정 시 값 (ON UPDATE CURRENT_TIMESTAMP 모듈) ─────────
   {
     code: 'on-update-type',
-    dialects: MY,
     autoFix: true,
     check(ctx) {
-      if (!ctx.column.onUpdate?.trim()) return undefined;
-      if (ctx.base === 'DATETIME' || ctx.base === 'TIMESTAMP') return undefined;
+      const feature = ctx.dialect.features.onUpdateTimestamp;
+      if (!feature || !ctx.column.onUpdate?.trim() || feature.types.test(ctx.base)) return undefined;
       return { severity: 'error', field: 'onUpdate', message: `${ctx.column.name}: ON UPDATE ${ctx.column.onUpdate}는 DATETIME·TIMESTAMP에만 쓸 수 있습니다`, fix: { label: 'ON UPDATE 끄기', patch: { onUpdate: undefined } } };
     },
   },
   {
     code: 'on-update-precision',
-    // MariaDB는 자릿수가 달라도 받는다 (실제 서버로 확인)
-    dialects: ['mysql'],
     autoFix: true,
     check(ctx) {
-      if (ctx.base !== 'DATETIME' && ctx.base !== 'TIMESTAMP') return undefined;
+      if (!ctx.dialect.types.onUpdatePrecisionStrict || (ctx.base !== 'DATETIME' && ctx.base !== 'TIMESTAMP')) return undefined;
       const p = timePrecision(ctx.column.onUpdate);
       const fsp = fspOf(ctx);
       if (p === null || p === fsp || fsp > 6) return undefined;
@@ -347,9 +266,8 @@ const RULES: Rule[] = [
   },
   {
     code: 'on-update-created',
-    dialects: MY,
-    check({ column }) {
-      if (!column.onUpdate?.trim()) return undefined;
+    check({ dialect, column }) {
+      if (!dialect.features.onUpdateTimestamp || !column.onUpdate?.trim()) return undefined;
       if (!/^(created?|reg|regist|insert)(_|at|date|dt|$)/i.test(column.name) && !/생성|등록/.test(column.logicalName)) return undefined;
       return {
         severity: 'warning',
@@ -360,24 +278,23 @@ const RULES: Rule[] = [
     },
   },
   {
+    // ON UPDATE 모듈이 없는 DB: 만들지 않는다
     code: 'on-update-ignored',
-    dialects: ['postgresql', 'oracle', 'mssql'],
     check(ctx) {
-      if (!ctx.column.onUpdate?.trim()) return undefined;
-      return { severity: 'info', field: 'onUpdate', message: `${ctx.column.name}: ON UPDATE ${ctx.column.onUpdate}는 MySQL·MariaDB 기능이라 ${getDialect(ctx.dialect).label}에서는 만들지 않습니다 (트리거가 필요)`, fix: { label: 'ON UPDATE 끄기', patch: { onUpdate: undefined } } };
+      if (ctx.dialect.features.onUpdateTimestamp || !ctx.column.onUpdate?.trim()) return undefined;
+      return { severity: 'info', field: 'onUpdate', message: `${ctx.column.name}: ${ctx.dialect.label}에는 ON UPDATE ${ctx.column.onUpdate}가 없어 만들지 않습니다 (트리거가 필요)`, fix: { label: 'ON UPDATE 끄기', patch: { onUpdate: undefined } } };
     },
   },
 
   // ── 기본값 ──────────────────────────────────────────────
   {
     code: 'default-time-type',
-    // MariaDB는 DATE 기본값 CURRENT_TIMESTAMP·자릿수 차이를 받는다 (실제 서버로 확인)
-    dialects: ['mysql'],
     check(ctx) {
+      const strict = ctx.dialect.types.defaultTimeStrict;
       const p = timePrecision(ctx.column.defaultValue);
-      if (p === null || ctx.column.autoIncrement) return undefined;
-      if (ctx.base !== 'DATETIME' && ctx.base !== 'TIMESTAMP') {
-        return { severity: 'error', field: 'defaultValue', message: `${ctx.column.name}: 기본값 ${ctx.column.defaultValue}는 DATETIME·TIMESTAMP에만 쓸 수 있습니다 (지금 ${ctx.rendered})` };
+      if (!strict || p === null || ctx.column.autoIncrement) return undefined;
+      if (!strict.types.has(ctx.base)) {
+        return { severity: 'error', field: 'defaultValue', message: `${ctx.column.name}: 기본값 ${ctx.column.defaultValue}는 ${[...strict.types].join('·')}에만 쓸 수 있습니다 (지금 ${ctx.rendered})` };
       }
       const fsp = fspOf(ctx);
       if (p === fsp || fsp > 6) return undefined;
@@ -391,21 +308,20 @@ const RULES: Rule[] = [
   },
   {
     code: 'default-on-lob',
-    dialects: ['mysql'],
     check(ctx) {
+      const lob = ctx.dialect.types.lobNoLiteralDefault;
       const v = ctx.column.defaultValue?.trim();
-      if (!v || /^null$/i.test(v) || v.startsWith('(') || !MYSQL_LOB.test(ctx.base)) return undefined;
+      if (!lob || !v || /^null$/i.test(v) || v.startsWith('(') || !lob.test(ctx.base)) return undefined;
       return {
         severity: 'error',
         field: 'defaultValue',
-        message: `${ctx.column.name}: MySQL의 ${ctx.base}에는 값 그대로의 기본값을 둘 수 없습니다. 괄호로 감싼 식만 됩니다 (MySQL 8.0.13 이상)`,
+        message: `${ctx.column.name}: ${ctx.dialect.label}의 ${ctx.base}에는 값 그대로의 기본값을 둘 수 없습니다. 괄호로 감싼 식만 됩니다`,
         fix: { label: `(${v})로`, patch: { defaultValue: `(${v})` } },
       };
     },
   },
   {
     code: 'default-not-number',
-    dialects: 'all',
     check(ctx) {
       const v = ctx.column.defaultValue?.trim();
       if (!v || ctx.column.autoIncrement || !NUMERIC_TYPES.has(ctx.base)) return undefined;
@@ -418,12 +334,12 @@ const RULES: Rule[] = [
   },
   {
     code: 'default-boolean',
-    dialects: ['postgresql'],
     check(ctx) {
+      if (!ctx.dialect.types.booleanLiteral) return undefined;
       const v = ctx.column.defaultValue?.trim().replace(/^'|'$/g, '');
       if (ctx.base !== 'BOOLEAN' || (v !== '0' && v !== '1')) return undefined;
       const value = v === '1' ? 'TRUE' : 'FALSE';
-      return { severity: 'error', field: 'defaultValue', message: `${ctx.column.name}: PostgreSQL BOOLEAN의 기본값은 TRUE/FALSE로 씁니다 (지금 ${ctx.column.defaultValue})`, fix: { label: `${value}로`, patch: { defaultValue: value } } };
+      return { severity: 'error', field: 'defaultValue', message: `${ctx.column.name}: ${ctx.dialect.label} BOOLEAN의 기본값은 TRUE/FALSE로 씁니다 (지금 ${ctx.column.defaultValue})`, fix: { label: `${value}로`, patch: { defaultValue: value } } };
     },
   },
 ];
@@ -440,22 +356,21 @@ const asDialect = (dialect: Dialect | DialectId | string): Dialect => (typeof di
 
 function contextOf(dialect: Dialect, column: Column): Ctx {
   const rendered = dialect.renderType(column);
-  return { dialect: dialect.id, column, rendered, ...parseRendered(rendered) };
+  return { dialect, column, rendered, ...parseRendered(rendered) };
 }
 
 function runRules(dialect: Dialect, column: Column, only?: (rule: Rule) => boolean): (TypeIssue & { autoFix?: boolean })[] {
   // SQL Server 계산 컬럼은 타입을 DB가 정한다
-  if (column.generated?.expression.trim() && dialect.generatedSupport?.typed === false) return [];
+  if (column.generated?.expression.trim() && dialect.features.generated?.typed === false) return [];
   const ctx = contextOf(dialect, column);
   // ENUM·SET은 괄호 안이 값 목록이라 길이 규칙은 보지 않는다. ENUM이 없는 DB인지만 본다
   if (ENUM_LIKE.has(ctx.base)) {
     const found = RULES.find((r) => r.code === 'enum-unsupported')!;
-    const issue = (found.dialects as DialectId[]).includes(dialect.id) && (!only || only(found)) ? found.check(ctx) : undefined;
+    const issue = !only || only(found) ? found.check(ctx) : undefined;
     return issue ? [{ code: found.code, ...issue }] : [];
   }
   const issues: (TypeIssue & { autoFix?: boolean })[] = [];
   for (const rule of RULES) {
-    if (rule.dialects !== 'all' && !rule.dialects.includes(dialect.id)) continue;
     if (only && !only(rule)) continue;
     const found = rule.check(ctx);
     if (found) issues.push({ code: rule.code, ...found, autoFix: rule.autoFix });
@@ -469,9 +384,10 @@ function runRules(dialect: Dialect, column: Column, only?: (rule: Rule) => boole
  */
 export function columnTypeIssues(dialect: Dialect | DialectId | string, column: Column, enums?: EnumType[]): TypeIssue[] {
   const d = asDialect(dialect);
-  if (enumOfType(enums, column.type)) {
-    if (d.id === 'postgresql') return [];
-    column = resolveEnumColumn(column, enums, d.id);
+  if (enumOfType(enums, column.type) && d.features.enum) {
+    // 타입 객체로 만드는 ENUM은 이 DB가 만든 타입이라 검사하지 않는다
+    if (d.features.enum.kind === 'type') return [];
+    column = resolveEnumColumn(column, enums, d);
   }
   return runRules(d, column).map(({ autoFix: _autoFix, ...issue }) => issue);
 }
@@ -481,7 +397,8 @@ export function tableTypeIssues(dialect: Dialect | DialectId | string, table: Ta
   const d = asDialect(dialect);
   const issues: TableTypeIssue[] = table.columns.flatMap((c) => columnTypeIssues(d, c, enums).map((i) => ({ ...i, columnId: c.id, columnName: c.name })));
   const auto = table.columns.filter((c) => c.autoIncrement && !c.generated?.expression.trim());
-  if (auto.length > 1 && d.id !== 'postgresql') {
+  const t = d.types;
+  if (auto.length > 1 && t.autoIncrement.single) {
     for (const c of auto.slice(1)) {
       issues.push({
         code: 'auto-increment-multiple', severity: 'error', field: 'autoIncrement', columnId: c.id, columnName: c.name,
@@ -490,22 +407,24 @@ export function tableTypeIssues(dialect: Dialect | DialectId | string, table: Ta
       });
     }
   }
-  if (d.id === 'mysql' || d.id === 'mariadb') {
-    const row = mysqlRowBytes(table);
-    if (row.bytes > 65535 && row.widest) {
+  if (t.rowSize) {
+    const row = t.rowSize.bytes(table.columns);
+    if (row.bytes > t.rowSize.max && row.widest) {
       issues.push({
         code: 'row-size', severity: 'error', field: 'length', columnId: row.widest.id, columnName: row.widest.name,
-        message: `${table.name}: 한 행의 최대 크기 65535바이트를 넘습니다 (약 ${row.bytes}바이트, utf8mb4는 한 글자 4바이트). 긴 VARCHAR를 TEXT로 바꾸세요 (가장 긴 것: ${row.widest.name})`,
+        message: `${table.name}: 한 행의 최대 크기 ${t.rowSize.max}바이트를 넘습니다 (약 ${row.bytes}바이트, utf8mb4는 한 글자 4바이트). 긴 VARCHAR를 TEXT로 바꾸세요 (가장 긴 것: ${row.widest.name})`,
         fix: { label: `${row.widest.name}을(를) TEXT로`, patch: { type: 'TEXT', length: '' } },
       });
     }
+  }
+  if (t.autoIncrement.mustBeKey) {
     const pkFirst = table.columns.find((c) => c.primaryKey)?.id;
     for (const c of auto) {
       const keyed = pkFirst === c.id || c.unique || table.indexes.some((i) => !i.expression?.trim() && i.columnIds[0] === c.id);
       if (keyed) continue;
       issues.push({
         code: 'auto-increment-key', severity: 'error', field: 'autoIncrement', columnId: c.id, columnName: c.name,
-        message: `${c.name}: AUTO_INCREMENT 컬럼은 기본키(첫 번째 컬럼)이거나 인덱스의 첫 번째 컬럼이어야 합니다`,
+        message: `${c.name}: ${t.autoIncrement.label} 컬럼은 기본키(첫 번째 컬럼)이거나 인덱스의 첫 번째 컬럼이어야 합니다`,
         fix: { label: 'UNIQUE로', patch: { unique: true } },
       });
     }
@@ -513,33 +432,7 @@ export function tableTypeIssues(dialect: Dialect | DialectId | string, table: Ta
   return issues;
 }
 
-/** MySQL 한 행 크기(바이트) 어림값. TEXT·BLOB은 행 밖에 저장되어 몇 바이트만 센다 */
-function mysqlRowBytes(table: Table): { bytes: number; widest?: Column } {
-  const FIXED: Record<string, number> = { TINYINT: 1, SMALLINT: 2, MEDIUMINT: 3, INT: 4, INTEGER: 4, BIGINT: 8, FLOAT: 4, DOUBLE: 8, DATE: 3, TIME: 6, DATETIME: 8, TIMESTAMP: 7, YEAR: 1, BOOLEAN: 1, BOOL: 1 };
-  let bytes = Math.ceil(table.columns.filter((c) => c.nullable && !c.primaryKey).length / 8);
-  let widest: Column | undefined;
-  let widestBytes = 0;
-  for (const c of table.columns) {
-    if (c.generated?.expression.trim() && !c.generated.stored) continue;
-    const { base, args } = parseRendered(mysqlRenderType(c));
-    const n = Number.parseInt(args, 10) || 0;
-    let size: number;
-    if (base === 'VARCHAR') size = n * 4 + (n * 4 > 255 ? 2 : 1);
-    else if (base === 'CHAR') size = n * 4;
-    else if (base === 'VARBINARY') size = n + (n > 255 ? 2 : 1);
-    else if (base === 'BINARY') size = n;
-    else if (base === 'DECIMAL' || base === 'NUMERIC') size = Math.ceil((n || 10) / 2) + 1;
-    else if (MYSQL_LOB.test(base)) size = 12;
-    else size = FIXED[base] ?? 8;
-    bytes += size;
-    if ((base === 'VARCHAR' || base === 'CHAR') && size > widestBytes) {
-      widest = c;
-      widestBytes = size;
-    }
-  }
-  return { bytes, widest };
-}
-const mysqlRenderType = (c: Column) => getDialect('mysql').renderType(c);
+
 
 /** 이 타입으로 자동 증가를 켤 수 있는지 */
 export function canAutoIncrement(dialect: Dialect | DialectId | string, column: Column): boolean {

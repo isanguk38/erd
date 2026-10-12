@@ -319,7 +319,7 @@ export function registerProjectRoutes(
       // 아직 제안에만 있는 테이블을 가리키면 제안에 이어서 넣는다
       if (mode === 'propose' && commands.every((c) => AREA_OPS.has(c?.op))) {
         try {
-          const direct = applyCommands(store.schema(id), commands);
+          const direct = applyCommands(store.schema(id), commands, getDialect(store.dialect(id)));
           return change(id, direct.schema, { mode: 'apply', source, title, messages: [...direct.messages, '영역은 화면에서 나눠 보는 구분이라 제안 없이 바로 반영했습니다'] });
         } catch (e) {
           if (!(e instanceof CommandError)) throw e;
@@ -329,7 +329,7 @@ export function registerProjectRoutes(
       const base = mode === 'propose' ? (store.proposals(id).find((p) => p.status === 'pending' && p.source === (source === 'ai' ? 'ai' : 'api'))?.target ?? store.schema(id)) : store.schema(id);
       let result;
       try {
-        result = applyCommands(base, commands);
+        result = applyCommands(base, commands, getDialect(store.dialect(id)));
       } catch (e) {
         if (e instanceof CommandError) throw badRequest(e.message);
         throw e;
@@ -359,7 +359,7 @@ export function registerProjectRoutes(
       const project = getDialect(store.dialect(id));
       if (!project.ddlGrammar) throw badRequest(`${project.label} 프로젝트는 SQL 붙여넣기(DDL 가져오기)를 지원하지 않습니다. DB에서 가져오기를 쓰세요`);
       const found = ddlGrammarOf(sql);
-      if (found && found !== project.ddlGrammar) throw badRequest(dbmsMismatch(project.id, found, 'DDL')!);
+      if (found && found !== project.ddlGrammar.family) throw badRequest(dbmsMismatch(project.id, found, 'DDL')!);
       if (req.body.dialect && req.body.dialect !== 'auto' && req.body.dialect !== project.id) throw badRequest(dbmsMismatch(project.id, req.body.dialect, 'DDL')!);
       const parsed = parseDdl(sql, { dialect: project.id, context: current });
       const diff = diffIncoming(current, parsed.schema, project);

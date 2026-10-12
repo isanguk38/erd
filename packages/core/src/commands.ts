@@ -30,6 +30,8 @@ import {
 } from './operations';
 import { addToArea, createArea, moveToArea, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
+import { FEATURE_LABEL, type FeatureKey } from './features';
+import type { Dialect } from './dialects/types';
 import { addEnumType, canonicalEnumColumns, removeEnumType, requireEnum, typeName, updateEnumType } from './enums';
 
 export interface ColumnSpec {
@@ -308,8 +310,58 @@ export interface CommandResult {
   messages: string[];
 }
 
-/** 명령들을 차례로 적용한 새 스키마를 돌려준다. 하나라도 실패하면 CommandError. 새 테이블은 빈 자리에 배치한다. */
-export function applyCommands(input: Schema, commands: Command[]): CommandResult {
+/**
+ * 이 명령이 쓰는 기능 모듈 (그 DB에 없으면 거절한다). 모두 DB에 있는 기본 기능이면 빈 목록
+ * 예) Oracle 프로젝트에 createEnum → ENUM 모듈이 없어 거절
+ */
+export function commandFeatures(command: Command): FeatureKey[] {
+  const out: FeatureKey[] = [];
+  const column = (spec?: Partial<ColumnSpec>) => {
+    if (spec?.onUpdate?.trim()) out.push('onUpdateTimestamp');
+    if (spec?.generated?.trim()) out.push('generated');
+  };
+  switch (command.op) {
+    case 'createEnum':
+    case 'updateEnum':
+    case 'dropEnum':
+      out.push('enum');
+      break;
+    case 'addCheck':
+      out.push('check');
+      break;
+    case 'addIndex':
+      if (command.expression?.trim()) out.push('expressionIndex');
+      if (command.where?.trim()) out.push('partialIndex');
+      if (command.method?.trim() && command.method.trim().toLowerCase() !== 'btree') out.push('indexMethods');
+      break;
+    case 'createTable':
+      (command.columns ?? []).forEach(column);
+      break;
+    case 'addColumn':
+      column(command.column);
+      break;
+    case 'updateColumn':
+      column(command.changes);
+      break;
+    case 'addRelation':
+      if (command.onUpdate && command.onUpdate !== 'NO ACTION') out.push('fkOnUpdate');
+      break;
+  }
+  return out;
+}
+
+/** 명령들을 차례로 적용한 새 스키마를 돌려준다. 하나라도 실패하면 CommandError. 새 테이블은 빈 자리에 배치한다.
+ * dialect를 주면 그 DB에 없는 기능(기능 모듈이 없는 것)을 쓰는 명령은 거절한다. */
+export function applyCommands(input: Schema, commands: Command[], dialect?: Pick<Dialect, 'label' | 'features'>): CommandResult {
+  if (dialect) {
+    commands.forEach((command, i) => {
+      const missing = commandFeatures(command).find((k) => !dialect.features[k]);
+      if (missing) throw new CommandError(i, `${dialect.label}에는 ${FEATURE_LABEL[missing]}이(가) 없습니다 (이 프로젝트 DB에서 쓸 수 없는 기능)`);
+      if (command.op === 'addIndex' && command.method?.trim() && dialect.features.indexMethods && !dialect.features.indexMethods.methods.includes(command.method.trim().toLowerCase()) && command.method.trim().toLowerCase() !== 'btree') {
+        throw new CommandError(i, `${dialect.label}에는 ${command.method} 인덱스 방식이 없습니다 (있는 방식: ${dialect.features.indexMethods.methods.join(', ')})`);
+      }
+    });
+  }
   const schema = cloneSchema(input);
   const created: string[] = [];
   const areaOf = new Map<string, string>();

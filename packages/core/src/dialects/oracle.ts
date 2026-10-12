@@ -1,6 +1,7 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { quoteExpression, columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys } from './common';
-import type { Dialect } from './types';
+import { quoteExpression, columnNames, literal, numericRegex, typeWords, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys } from './common';
+import type { Dialect, TypeProfile } from './types';
+import { standardCheck } from '../features';
 
 // Oracle 12c 이상 (IDENTITY 컬럼). 따옴표 없는 이름은 Oracle이 대문자로 바꿔 저장하므로,
 // 소문자·대문자로만 된 이름은 따옴표 없이 쓰고 DB에서 읽을 때 소문자로 돌려 ERD 이름과 맞춘다.
@@ -98,11 +99,25 @@ const pkName = (table: Table) => table.primaryKeyName || `pk_${table.name}`.slic
 /** 한 번에 바꿀 수 없는 변경은 이유를 담은 오류로 멈춘다 (조용히 다른 일을 하지 않게) */
 const fail = (message: string) => `BEGIN RAISE_APPLICATION_ERROR(-20001, ${literal(message)}); END;`;
 
+/** Oracle 타입 정보 (컬럼 타입 검사가 쓴다) */
+const oracleTypes: TypeProfile = {
+  known: typeWords(
+    'VARCHAR2 NVARCHAR2 VARCHAR CHAR NCHAR CHARACTER NATIONAL NUMBER FLOAT BINARY_FLOAT BINARY_DOUBLE INTEGER INT SMALLINT DECIMAL NUMERIC REAL DOUBLE ' +
+      'DATE TIMESTAMP INTERVAL RAW LONG CLOB NCLOB BLOB BFILE ROWID UROWID JSON BOOLEAN XMLTYPE SDO_GEOMETRY VECTOR',
+  ),
+  // NUMBER(10,2)도 IDENTITY로 만들 수 있다 (실제 서버로 확인)
+  autoIncrement: { label: 'IDENTITY(자동 증가)', integers: typeWords('INTEGER'), also: (base) => base === 'NUMBER', defaultValue: 'ignored', single: true },
+  reportsIgnoredLength: true,
+  // 기본 설정은 4000바이트, MAX_STRING_SIZE=EXTENDED면 32767바이트
+  strings: { VARCHAR2: { max: 32767, soft: 4000 }, NVARCHAR2: { max: 16383, soft: 2000 }, CHAR: { max: 2000 }, NCHAR: { max: 1000 }, RAW: { max: 32767, soft: 2000 } },
+  lengthSuffix: /\s*(CHAR|BYTE)$/,
+  decimal: { types: typeWords('NUMBER'), p: 38, s: 127, sWithinP: false, minS: -84 },
+};
+
 export const oracle: Dialect = {
   id: 'oracle',
   label: 'Oracle',
   typeSuggestions: ['NUMBER', 'BIGINT', 'INT', 'VARCHAR2', 'NVARCHAR2', 'CHAR', 'CLOB', 'DATE', 'TIMESTAMP', 'BLOB', 'BINARY_DOUBLE', 'BOOLEAN'],
-  supportsOnUpdate: false,
 
   quote: q,
   renderType,
@@ -164,8 +179,27 @@ export const oracle: Dialect = {
     return statements;
   },
 
-  indexSupport: { expression: true },
-  generatedSupport: { virtual: true },
+  // ENUM·부분 인덱스·인덱스 방식·외래키 ON UPDATE는 없다 (모듈을 넣지 않는다)
+  features: {
+    check: standardCheck(q),
+    expressionIndex: {
+      example: (col) => `UPPER("${col.toUpperCase()}")`,
+      hint: '예) UPPER("EMAIL"), TRUNC("CREATED_AT")',
+      warn: (e) =>
+        /::|\bto_tsvector\b|\bjsonb_/i.test(e) ? `식에 PostgreSQL 전용 문법이 있어 Oracle에서는 실패할 수 있습니다: ${e}`
+        : /->>?\s*'\$/.test(e) ? `식에 MySQL JSON 경로('$.키') 문법이 있어 Oracle에서는 실패할 수 있습니다: ${e}`
+        : undefined,
+    },
+    generated: { virtual: true },
+  },
+  traits: {},
+  types: oracleTypes,
+  connection: { port: 1521, databaseLabel: '서비스 이름', databasePlaceholder: 'FREEPDB1 / ORCLPDB1', schemaPlaceholder: '비우면 접속 사용자', transactional: false },
+  safety: {
+    countUpTo: (inner, n) => `SELECT COUNT(*) AS n FROM (SELECT x FROM (SELECT 1 AS x ${inner}) WHERE ROWNUM <= ${n})`,
+    lengthFn: 'LENGTH',
+    notNumeric: (col, integer) => `${col} IS NOT NULL AND NOT REGEXP_LIKE(${col}, '${numericRegex(integer)}')`,
+  },
   createIndex(table, index) {
     return [`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${q(indexName(table, index))} ON ${q(table.name)} (${indexKeys(table, index, q)})`];
   },

@@ -1,6 +1,9 @@
 // 설계 검사: 자주 하는 설계 실수를 찾아 목록으로 돌려준다. 스키마는 바꾸지 않는다.
 
 import type { DialectId } from './dialects/types';
+import { getDialect } from './dialects';
+import { FEATURE_LABEL } from './features';
+import { enumOfType } from './enums';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
 import { fitsStyle, isToolTable, namingIssues, namingRuleText, projectNamingStyles, stylesOf, type NameStyle, type NamingSetting } from './naming';
@@ -20,7 +23,8 @@ export type LintRule =
   | 'type-ignored'
   | 'dict-mismatch'
   | 'dict-unknown'
-  | 'duplicate-table-logical';
+  | 'duplicate-table-logical'
+  | 'unsupported-feature';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -56,6 +60,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
   'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
   'dict-unknown': { label: '사전에 없는 용어', severity: 'warning', description: '논리명이 표준 용어 사전에 없습니다. "사전에 추가"로 이 컬럼의 이름·타입을 새 용어로 넣거나, 사전에 있는 표준 용어로 바꾸세요.' },
+  'unsupported-feature': { label: '이 DB에 없는 기능', severity: 'error', description: '프로젝트 DB 종류에는 없는 기능을 쓰고 있습니다 (예: Oracle에 ENUM, MySQL에 부분 인덱스). 예전 데이터나 SQL 붙여넣기로 들어온 것이니 이 DB에 있는 방법으로 바꾸세요.' },
   'duplicate-table-logical': { label: '같은 논리명 테이블', severity: 'warning', description: '두 테이블이 같은 논리명을 씁니다. 같은 것을 두 번 만든 것인지 확인하고, 다르면 논리명을 구분하세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
@@ -103,7 +108,8 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   for (const t of schema.tables) if (!t.columns.some((c) => c.primaryKey)) add('no-primary-key', t, `${t.name}: 기본키가 없습니다`);
 
   // 외래키: 타입, 인덱스
-  const autoFkIndex = dialect === 'mysql' || dialect === 'mariadb';
+  const d = getDialect((dialect || 'mysql') as DialectId);
+  const autoFkIndex = Boolean(d.traits.fkAutoIndex);
   for (const r of schema.relations) {
     const child = schema.tables.find((t) => t.id === r.fromTableId);
     const parent = schema.tables.find((t) => t.id === r.toTableId);
@@ -180,7 +186,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   for (const t of schema.tables) {
     for (const c of t.columns) {
       // MySQL·MariaDB의 VARCHAR 길이 없음은 실패하므로 타입 검사(DB에서 실패하는 타입)에서 알린다
-      if (dialect === 'mysql' || dialect === 'mariadb') continue;
+      if (d.traits.varcharLengthIsTypeError) continue;
       if (/^(VARCHAR|CHAR|NVARCHAR|NCHAR|VARCHAR2|NVARCHAR2|CHARACTER VARYING)$/i.test(c.type.trim()) && !c.length.trim()) {
         add('varchar-no-length', t, `${t.name}.${c.name}: ${c.type}에 길이가 없습니다`, { columnId: c.id, columnName: c.name });
       }
@@ -281,6 +287,39 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
           fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: '표준대로', patch: r.patch! },
         });
       }
+    }
+  }
+
+  // 이 DB에 없는 기능 (기능 모듈이 없는데 그 기능을 쓰는 것)
+  const f = d.features;
+  const no = (what: string) => `${d.label}에는 ${what}이(가) 없습니다`;
+  for (const t of schema.tables) {
+    for (const c of t.columns) {
+      const e = !f.enum ? enumOfType(schema.enums, c.type) : undefined;
+      if (e) {
+        const len = String(Math.max(20, ...e.values.map((v) => v.length)));
+        add('unsupported-feature', t, `${t.name}.${c.name}: ${no(FEATURE_LABEL.enum)} — VARCHAR로 바꾸세요 (허용 값은 CHECK로)`, {
+          columnId: c.id,
+          columnName: c.name,
+          fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: `VARCHAR(${len})로`, patch: { type: 'VARCHAR', length: len } },
+        });
+      }
+      // ON UPDATE가 없는 DB는 타입 검사(on-update-ignored)가 알린다
+      if (c.generated?.expression.trim() && !f.generated) add('unsupported-feature', t, `${t.name}.${c.name}: ${no(FEATURE_LABEL.generated)}`, { columnId: c.id, columnName: c.name });
+    }
+    if (t.checks?.length && !f.check) add('unsupported-feature', t, `${t.name}: ${no(FEATURE_LABEL.check)}`);
+    for (const i of t.indexes) {
+      if (i.expression?.trim() && !f.expressionIndex) add('unsupported-feature', t, `${t.name} 인덱스 ${i.name || i.expression}: ${no(FEATURE_LABEL.expressionIndex)} (계산 컬럼을 만들어 인덱스를 거세요)`);
+      if (i.where?.trim() && !f.partialIndex) add('unsupported-feature', t, `${t.name} 인덱스 ${i.name || ''}: ${no(FEATURE_LABEL.partialIndex)} — 조건(WHERE ${i.where.trim()})을 빼고 만듭니다`);
+      const m = i.method?.trim().toLowerCase();
+      if (m && m !== 'btree' && !(f.indexMethods?.methods ?? []).includes(m)) add('unsupported-feature', t, `${t.name} 인덱스 ${i.name || ''}: ${d.label}에는 ${m} 방식이 없습니다 — 일반 인덱스로 만듭니다`);
+    }
+  }
+  if (!f.fkOnUpdate) {
+    for (const r of schema.relations) {
+      if (r.onUpdate === 'NO ACTION' || r.onUpdate === 'RESTRICT') continue;
+      const child = schema.tables.find((t) => t.id === r.fromTableId);
+      if (child) add('unsupported-feature', child, `${child.name} 외래키: ${no(FEATURE_LABEL.fkOnUpdate)} (ON UPDATE ${r.onUpdate}는 빼고 만듭니다)`);
     }
   }
 

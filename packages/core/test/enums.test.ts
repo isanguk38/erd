@@ -61,11 +61,17 @@ describe('사용자 정의 타입 (ENUM)', () => {
     expect(sql).toContain(`status "OrderStatus" NOT NULL DEFAULT 'READY'`);
   });
 
-  it('MySQL: 컬럼마다 ENUM(...)으로 펼친다 (값 안 공백 유지), Oracle·SQL Server는 VARCHAR', () => {
+  it('MySQL: 컬럼마다 ENUM(...)으로 펼친다 (값 안 공백 유지), Oracle·SQL Server에는 ENUM 모듈이 없다', () => {
     const sql = generateCreateSql(base(), my);
     expect(sql).toContain("`status` ENUM('READY','PAID','in progress') NOT NULL");
     expect(sql).not.toContain('CREATE TYPE');
-    expect(resolveEnumColumns(base(), 'oracle').tables[0].columns[1]).toMatchObject({ type: 'VARCHAR', length: '11' });
+    // ENUM 모듈이 없는 DB: 펼치지 않고, 설계 검사가 "이 DB에 없는 기능"으로 알리며 VARCHAR로 바꾸게 한다
+    expect(getDialect('oracle').features.enum).toBeUndefined();
+    expect(resolveEnumColumns(base(), getDialect('oracle')).tables[0].columns[1].type).toBe('OrderStatus');
+    const ora = lintSchema(base(), 'oracle').filter((i) => i.rule === 'unsupported-feature');
+    expect(ora[0]?.message).toContain('Oracle에는 사용자 정의 타입(ENUM)이(가) 없습니다');
+    expect(ora[0]?.fix).toMatchObject({ kind: 'patchColumn', patch: { type: 'VARCHAR', length: '20' } });
+    expect(diffSchemas(emptySchema(), base(), getDialect('mssql')).changes.some((c) => c.kind === 'createEnum')).toBe(false);
     // 설계 검사: ENUM 이름을 모르는 타입이라고 하지 않는다
     expect(lintSchema(base(), 'mysql').filter((i) => i.message.includes('모르는 타입'))).toEqual([]);
     expect(lintSchema(base(), 'postgresql').filter((i) => i.message.includes('모르는 타입'))).toEqual([]);
@@ -162,7 +168,7 @@ CREATE TABLE bill (id integer PRIMARY KEY, status "BillingStatus" DEFAULT 'ISSUE
   it('타입을 모르는 쪽(enums 없음 — MySQL DB, CREATE TYPE 없는 DDL)과는 타입을 비교하지 않는다', () => {
     const erd = base();
     // MySQL DB에서 읽으면 ENUM은 컬럼마다 ENUM(...)이고 타입 목록은 없다
-    const { enums: _e, ...db } = resolveEnumColumns(structuredClone(erd), 'mysql');
+    const { enums: _e, ...db } = resolveEnumColumns(structuredClone(erd), my);
     expect(diffSchemas(db, erd, my).changes).toEqual([]);
     expect(diffSchemas(erd, db, my).changes).toEqual([]);
   });

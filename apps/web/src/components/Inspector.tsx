@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { requestFocus, takeFocus } from '../lib/focus';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { requestFocus } from '../lib/focus';
+import { Slot, useFeatures, useSlot } from '../features/registry';
+import { TextInput, type Mark } from './TextInput';
 import {
   addColumn,
   addToArea,
@@ -9,7 +11,6 @@ import {
   autoFixColumnPatch,
   canAutoIncrement,
   columnDeleteImpact,
-  createCheck,
   NAME_STYLE_LABEL,
   checkColumnAgainstDictionary,
   checkTableAgainstDictionary,
@@ -23,7 +24,6 @@ import {
   suggestTerms,
   termFromTable,
   type DictTerm,
-  type EnumType,
   fitsStyle,
   projectNamingStyles,
   namingRuleText,
@@ -51,6 +51,7 @@ import {
   updateRelation,
   updateTable,
   type Column,
+  type Index,
   type ReferentialAction,
   type Relation,
   type Table,
@@ -89,131 +90,8 @@ export function Inspector() {
   return readOnly ? <fieldset className="readonly-fieldset" disabled>{content}</fieldset> : content;
 }
 
-/**
- * 컬럼 타입 칸 오른쪽 작은 버튼: ENUM이면 그 타입의 값을 보고 고치는 창을 열고,
- * 목록에 없는 사용자 타입("Approve" 같은 따옴표 타입)이면 그 이름으로 타입을 만드는 창을 연다
- */
-function EnumButton({ type, enums, unknown }: { type: string; enums: EnumType[] | undefined; unknown?: boolean }) {
-  const e = enumOfType(enums, type);
-  // 따옴표 타입(PostgreSQL 사용자 타입)이거나, 이 DB가 모르는 이름 하나짜리 타입(직접 만든 타입일 수 있음)
-  const custom = !e && (/^"[^"]+"$/.test(type.trim()) || (Boolean(unknown) && /^[A-Za-z_][\w$]*$/.test(type.trim())));
-  if (!e && !custom) return null;
-  const open = () => useStore.getState().setEnumDialog(e ? { focus: e.name } : { create: type.trim().replace(/"/g, '') });
-  return (
-    <button
-      type="button"
-      className={`type-cell__enum${e ? '' : ' missing'}`}
-      onClick={open}
-      title={e ? `ENUM ${e.name}: ${e.values.join(', ')}\n누르면 값을 보고 고칩니다` : `${type.trim()}은(는) 타입 목록에 없는 타입입니다 — 직접 만든 타입이면 누르고 값을 넣어 ENUM 타입으로 만드세요`}
-      aria-label={e ? `${e.name} 타입 값 보기·고치기` : `${type.trim()} 타입 만들기`}
-    >
-      {e ? 'ENUM' : '+'}
-    </button>
-  );
-}
 
-/** 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해).
- * suggest를 주면 입력하는 동안 아래에 후보(표준 용어)를 보여 주고, 고르면 onPick (↑↓ Enter, 마우스)
- */
-function TextInput({ value, onCommit, placeholder, className, list, issue, focusKey, onEnter, suggest, onPick }: {
-  value: string; onCommit: (v: string) => void; placeholder?: string; className?: string; list?: string; issue?: Mark; focusKey?: string; onEnter?: () => void;
-  suggest?: (query: string) => DictTerm[]; onPick?: (term: DictTerm) => void;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  // 고른 후보 (-1: 아직 안 고름 — Enter는 입력한 그대로 저장)
-  const [active, setActive] = useState(-1);
-  const [closed, setClosed] = useState(false);
-  const inputEl = useRef<HTMLInputElement | null>(null);
-  // 후보를 골랐으면 칸을 떠날 때 입력하던 글자를 저장하지 않는다 (고른 용어가 덮이지 않게)
-  const picked = useRef(false);
-  // 방금 만든 테이블·컬럼이면 이름 칸에 커서를 두고 전체 선택 (바로 타이핑해 이름을 바꾸게)
-  const ref = useCallback((el: HTMLInputElement | null) => {
-    inputEl.current = el;
-    if (el && takeFocus(focusKey)) requestAnimationFrame(() => { el.focus(); el.select(); });
-  }, [focusKey]);
-  const commit = () => {
-    if (picked.current) picked.current = false;
-    else if (draft !== null && draft !== value) onCommit(draft);
-    setDraft(null);
-  };
-  const items = suggest && draft !== null && !closed ? suggest(draft) : [];
-  const pick = (term: DictTerm) => {
-    picked.current = true;
-    setDraft(null);
-    onPick?.(term);
-    inputEl.current?.blur();
-  };
-  const rect = items.length ? inputEl.current?.getBoundingClientRect() : undefined;
-  return (
-    <>
-      <input
-        ref={ref}
-        className={[className, issue?.className].filter(Boolean).join(' ') || undefined}
-        value={draft ?? value}
-        // 칸이 좁아 잘려도 마우스를 올리면 전체 값이 보인다. 타입 문제가 있으면 그 이유도
-        title={[issue?.title, draft ?? value].filter(Boolean).join('\n\n') || undefined}
-        placeholder={placeholder}
-        list={list}
-        autoComplete="off"
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setActive(-1);
-          setClosed(false);
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (items.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-            e.preventDefault();
-            setActive((a) => (a < 0 ? (e.key === 'ArrowDown' ? 0 : items.length - 1) : (a + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length));
-            return;
-          }
-          if (items.length && active >= 0 && e.key === 'Enter') {
-            e.preventDefault();
-            pick(items[Math.min(active, items.length - 1)]);
-            return;
-          }
-          if (e.key === 'Enter') {
-            (e.target as HTMLInputElement).blur();
-            onEnter?.();
-          }
-          if (e.key === 'Escape') {
-            if (items.length) return setClosed(true);
-            setDraft(null);
-          }
-        }}
-      />
-      {rect && (
-        <ul className="term-suggest" style={{ left: rect.left, top: rect.bottom + 2, minWidth: Math.max(rect.width, 280) }} role="listbox">
-          {items.map((t, i) => (
-            <li
-              key={t.logical}
-              role="option"
-              aria-selected={i === active}
-              className={i === active ? 'active' : ''}
-              // 누르는 순간 입력 칸이 포커스를 잃지 않게 (그래야 고른 용어가 들어간다)
-              onMouseDown={(e) => {
-                e.preventDefault();
-                pick(t);
-              }}
-              onMouseEnter={() => setActive(i)}
-            >
-              <b className="mono">{t.physical}</b>
-              <span>{t.logical}</span>
-              <span className="muted mono">{t.type ? `${t.type}${t.length ? `(${t.length})` : ''}` : ''}</span>
-            </li>
-          ))}
-          <li className="term-suggest__hint muted">표준 용어 사전 · 누르거나 ↑↓ 후 Enter로 고르기 · 그냥 Enter는 입력한 그대로 · Esc 닫기</li>
-        </ul>
-      )}
-    </>
-  );
-}
 
-/** 타입 검사 결과를 편집 칸에 표시 (빨강: DB에서 실패, 주황: 주의) */
-interface Mark {
-  className: string;
-  title: string;
-}
 function markOf(issues: TableTypeIssue[], columnId: string, field: TypeIssueField): Mark | undefined {
   const found = issues.filter((i) => i.columnId === columnId && i.field === field && i.severity !== 'info');
   if (!found.length) return undefined;
@@ -486,7 +364,7 @@ function TableEditor({ table }: { table: Table }) {
               <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />
               <div className="type-cell">
                 <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, enumOfType(enums, type) ? { type: canonicalType({ enums }, type), length: '' } : { type: typeName(type) })} />
-                <EnumButton type={c.type} enums={enums} unknown={typeIssues.some((x) => x.columnId === c.id && x.code === 'unknown-type')} />
+                <Slot name="typeCell" table={table} column={c} enums={enums} unknownType={typeIssues.some((x) => x.columnId === c.id && x.code === 'unknown-type')} />
               </div>
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
@@ -510,33 +388,8 @@ function TableEditor({ table }: { table: Table }) {
                 ) : (
                   <TextInput value={c.defaultValue ?? ''} placeholder="NULL" issue={mark(c, 'defaultValue')} onCommit={(v) => setColumn(c, { defaultValue: v.trim() === '' ? null : v })} />
                 )}
-                <button
-                  className={`generated-btn${c.generated ? ' on' : ''}`}
-                  title={
-                    c.generated
-                      ? `계산 컬럼 (${c.generated.stored ? 'STORED: 값을 저장' : 'VIRTUAL: 읽을 때 계산'}) — 누르면 ${c.generated.stored ? '일반 컬럼으로' : 'STORED로'}`
-                      : '계산 컬럼으로 (GENERATED ALWAYS AS): 다른 컬럼으로 값을 계산합니다'
-                  }
-                  onClick={() =>
-                    setColumn(c, {
-                      generated: !c.generated ? { expression: '', stored: dialect.id === 'postgresql' } : !c.generated.stored && dialect.id !== 'postgresql' && dialect.id !== 'oracle' ? { ...c.generated, stored: true } : undefined,
-                      ...(c.generated ? {} : { defaultValue: null, autoIncrement: false }),
-                    })
-                  }
-                >
-                  ƒ{c.generated?.stored ? <sub>S</sub> : null}
-                </button>
-                {/* MySQL·MariaDB 날짜 컬럼: 행이 바뀔 때 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP) */}
-                {(dialect.id === 'mysql' || dialect.id === 'mariadb') && /^(TIMESTAMP|DATETIME)/i.test(c.type) && (
-                  <button
-                    className={`onupdate-btn${c.onUpdate ? ' on' : ''}${mark(c, 'onUpdate') ? ` ${mark(c, 'onUpdate')!.className}` : ''}`}
-                    title={[mark(c, 'onUpdate')?.title, c.onUpdate ? `ON UPDATE ${c.onUpdate} (행이 바뀔 때마다 현재 시각) — 누르면 끕니다` : '행이 바뀔 때마다 현재 시각으로 (ON UPDATE CURRENT_TIMESTAMP)'].filter(Boolean).join('\n\n')}
-                    // 자릿수는 컬럼의 소수 초 자릿수(0~6)와 같아야 한다
-                    onClick={() => setColumn(c, { onUpdate: c.onUpdate ? undefined : /^[1-6]$/.test(c.length.trim()) ? `CURRENT_TIMESTAMP(${c.length.trim()})` : 'CURRENT_TIMESTAMP' })}
-                  >
-                    ↻
-                  </button>
-                )}
+                {/* 기능 모듈 버튼 (계산 컬럼 ƒ, ON UPDATE ↻ 등 — 프로젝트 DB에 있는 기능만) */}
+                <Slot name="columnTools" table={table} column={c} mark={mark(c, 'onUpdate')} setColumn={(patch) => setColumn(c, patch)} />
               </span>
               <TextInput value={c.comment} onCommit={(comment) => setColumn(c, { comment })} />
               <span className="row-actions">
@@ -561,74 +414,15 @@ function TableEditor({ table }: { table: Table }) {
       </div>
 
       <IndexEditor table={table} />
-      <CheckEditor table={table} />
+      {/* 기능 모듈 구역 (CHECK 등 — 프로젝트 DB에 있는 기능만) */}
+      <Slot name="tableSections" table={table} />
       <TableComments table={table} />
     </aside>
   );
 }
 
 /** 식 인덱스 예시 (DB 종류별 문법) */
-const EXPRESSION_EXAMPLE: Record<string, (col: string) => string> = {
-  postgresql: (col) => `lower(${col})`,
-  mysql: (col) => `(lower(\`${col}\`))`,
-  mariadb: (col) => `(lower(\`${col}\`))`,
-  oracle: (col) => `UPPER("${col.toUpperCase()}")`,
-  mssql: (col) => col,
-};
-const EXPRESSION_HINT: Record<string, string> = {
-  postgresql: "예) lower(email), (metadata ->> 'sitecd'), to_tsvector('simple', body)",
-  mysql: '예) (lower(`email`)) — MySQL 8.0.13 이상, 식마다 괄호를 한 번 더 감쌉니다',
-  mariadb: 'MariaDB는 식 인덱스를 지원하지 않습니다 (가상 컬럼을 만들어 인덱스를 거세요)',
-  oracle: '예) UPPER("EMAIL"), TRUNC("CREATED_AT")',
-  mssql: 'SQL Server는 식 인덱스를 지원하지 않습니다 (계산 컬럼을 만들어 인덱스를 거세요)',
-};
 
-/** CHECK 제약: 이름(비우면 ck_테이블_번호)과 조건식 */
-function CheckEditor({ table }: { table: Table }) {
-  const { edit } = useStore.getState();
-  const checks = table.checks ?? [];
-  const update = (fn: (list: NonNullable<Table['checks']>) => NonNullable<Table['checks']>) =>
-    edit((d) => {
-      const t = findTable(d, table.id);
-      if (!t) return;
-      const next = fn(t.checks ?? []);
-      if (next.length) t.checks = next;
-      else delete t.checks;
-    });
-  return (
-    <div className="inspector__section">
-      <div className="inspector__section-head">
-        <h4>CHECK 제약 ({checks.length})</h4>
-        <button className="btn btn-sm" title="값이 지켜야 할 조건. 예: point >= 0" onClick={() => update((list) => {
-          // 새 CHECK의 조건 칸으로 커서를 옮긴다 (버튼에 머물면 스페이스가 버튼을 다시 눌러 빈 CHECK가 생김)
-          const check = createCheck({ expression: '' });
-          requestFocus(`check:${check.id}`);
-          return [...list, check];
-        })}>
-          + CHECK
-        </button>
-      </div>
-      {checks.length === 0 && <p className="muted">값이 지켜야 할 조건을 걸 수 있습니다. 예) point &gt;= 0, status IN ('READY','DONE')</p>}
-      {checks.map((check, i) => (
-        <div key={check.id} className="check-row">
-          <TextInput
-            value={check.name}
-            placeholder={`ck_${table.name}_${i + 1}`}
-            onCommit={(name) => update((list) => list.map((k) => (k.id === check.id ? { ...k, name: name.trim() } : k)))}
-          />
-          <TextInput
-            className="mono"
-            value={check.expression}
-            placeholder="조건 예: point >= 0"
-            focusKey={`check:${check.id}`}
-            onCommit={(expression) => update((list) => list.map((k) => (k.id === check.id ? { ...k, expression: expression.trim().replace(/^check\s*/i, '') } : k)))}
-          />
-          <button className="icon-btn danger" title="CHECK 삭제" onClick={() => update((list) => list.filter((k) => k.id !== check.id))}>×</button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** 새 인덱스의 첫 컬럼: 기본키가 아니고 아직 어느 인덱스의 첫 컬럼도 아닌 컬럼 (기본키에 또 걸면 바로 중복 인덱스가 됨) */
 function firstUnindexedColumn(table: Table) {
@@ -636,14 +430,14 @@ function firstUnindexedColumn(table: Table) {
   return table.columns.find((c) => !c.primaryKey && !leading.has(c.id)) ?? table.columns.find((c) => !c.primaryKey) ?? table.columns[0];
 }
 
+/** 인덱스 카드의 "방식·조건" 접기 제목 */
+const optionLabel = (index: Index) => `방식·조건${index.method || index.where ? ` (${[index.method, index.where && 'WHERE'].filter(Boolean).join(', ')})` : ''}`;
+
 function IndexEditor({ table }: { table: Table }) {
   const { edit } = useStore.getState();
-  const dialectId = useDialect();
-  // DB마다 쓸 수 있는 인덱스 방식(PostgreSQL: gin 등, MySQL: fulltext·spatial)과 부분 인덱스(WHERE) 지원
-  const support = getDialect(dialectId).indexSupport ?? {};
-  const methods = support.methods ?? [];
-  const canMethod = methods.length > 0;
-  const canWhere = Boolean(support.where);
+  // 식 인덱스 안내는 그 DB의 식 인덱스 모듈이 준다 (없으면 그 DB에는 식 인덱스가 없다)
+  const expressionFeature = useFeatures().expressionIndex;
+  const optionParts = useSlot('indexOptions');
   return (
     <div className="inspector__section">
       <div className="inspector__section-head">
@@ -652,21 +446,12 @@ function IndexEditor({ table }: { table: Table }) {
           <button className="btn btn-sm" disabled={table.columns.length === 0} onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [firstUnindexedColumn(table).id] }))}>
             + 인덱스
           </button>
-          <button
-            className="btn btn-sm"
-            title="컬럼 대신 식(함수)으로 만드는 인덱스. 예) lower(email)"
-            disabled={table.columns.length === 0}
-            onClick={() => edit((d) => addIndex(d, table.id, { columnIds: [], expression: (EXPRESSION_EXAMPLE[dialectId] ?? EXPRESSION_EXAMPLE.postgresql)(table.columns[0].name) }))}
-          >
-            + 식 인덱스
-          </button>
+          <Slot name="indexHead" table={table} />
         </span>
       </div>
       {table.indexes.length === 0 && <p className="muted">조회 조건에 자주 쓰는 컬럼에 인덱스를 추가하세요. 컬럼의 UQ 체크는 UNIQUE 인덱스로 만들어집니다.</p>}
       {table.indexes.map((index) => {
         const isExpression = index.expression !== undefined;
-        const showMethod = canMethod || Boolean(index.method);
-        const showWhere = canWhere || Boolean(index.where);
         return (
           <div key={index.id} className="index-card">
             <div className="index-card__head">
@@ -684,11 +469,11 @@ function IndexEditor({ table }: { table: Table }) {
                   <TextInput
                     className="mono"
                     value={index.expression ?? ''}
-                    placeholder={(EXPRESSION_EXAMPLE[dialectId] ?? EXPRESSION_EXAMPLE.postgresql)(table.columns[0]?.name ?? 'name')}
+                    placeholder={expressionFeature?.example(table.columns[0]?.name ?? 'name')}
                     onCommit={(expression) => edit((d) => updateIndex(d, table.id, index.id, { expression }))}
                   />
                 </label>
-                <p className="muted small">{EXPRESSION_HINT[dialectId] ?? EXPRESSION_HINT.postgresql}</p>
+                {expressionFeature && <p className="muted small">{expressionFeature.hint}</p>}
               </div>
             ) : (
               <div className="index-card__columns">
@@ -720,31 +505,11 @@ function IndexEditor({ table }: { table: Table }) {
                 </select>
               </div>
             )}
-            {(showMethod || showWhere) && (
+            {/* 방식·조건: 인덱스 방식·부분 인덱스 모듈이 있는 DB만 */}
+            {optionParts.length > 0 && (
               <details className="index-card__more" open={Boolean(index.method || index.where) || undefined}>
-                <summary>방식·조건{index.method || index.where ? ` (${[index.method, index.where && 'WHERE'].filter(Boolean).join(', ')})` : ''}</summary>
-                {showMethod && (
-                  <label>
-                    <span>방식</span>
-                    <select value={index.method ?? ''} onChange={(e) => edit((d) => updateIndex(d, table.id, index.id, { method: e.target.value || undefined }))}>
-                      <option value="">기본 (btree)</option>
-                      {[...new Set([...methods, ...(index.method ? [index.method] : [])])].map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {showWhere && (
-                  <label>
-                    <span>조건</span>
-                    <TextInput
-                      className="mono"
-                      value={index.where ?? ''}
-                      placeholder="WHERE 뒤 조건 (부분 인덱스). 예) deleted_at IS NULL"
-                      onCommit={(where) => edit((d) => updateIndex(d, table.id, index.id, { where: where.trim() || undefined }))}
-                    />
-                  </label>
-                )}
+                <summary>{optionLabel(index)}</summary>
+                <Slot name="indexOptions" table={table} index={index} />
               </details>
             )}
           </div>
