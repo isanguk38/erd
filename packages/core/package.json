@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./layout": "./src/layout.ts",
-    "./excel": "./src/export/definition.ts"
+    "./excel": "./src/export/definition.ts",
+    "./dictionary-excel": "./src/export/dictionaryExcel.ts"
   },
   "scripts": {
     "test": "vitest run",

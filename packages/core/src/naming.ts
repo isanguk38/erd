@@ -1,5 +1,5 @@
 // 이름 표기 기준: 프로젝트의 테이블·컬럼 물리명을 snake_case / SNAKE_CASE / camelCase 중 하나로 맞춘다.
-// 기준은 프로젝트 정보(meta.namingStyle)에 저장한다. 정하지 않았으면 지금 이름들로 판단한다 (가장 많이 맞는 표기).
+// 기준은 프로젝트 정보(meta.namingStyle)에 저장한다. 정하지 않았으면 용어 사전의 표기, 사전도 없으면 지금 이름들로 판단한다 (가장 많이 맞는 표기).
 // 설계 검사가 기준과 다른 이름을 알려 주고, AI도 이 기준을 읽어 같은 표기로 만든다.
 
 import type { Schema } from './model';
@@ -46,10 +46,18 @@ export function detectNamingStyle(schema: Pick<Schema, 'tables'>): NameStyle | n
   return best ? NAME_STYLES[fits.indexOf(best)] : null;
 }
 
-/** 프로젝트의 표기 기준: 저장한 값, 없으면 지금 이름들로 판단 (auto) */
-export function projectNamingStyle(saved: unknown, schema: Pick<Schema, 'tables'>): { style: NameStyle | null; auto: boolean } {
-  if (isNameStyle(saved)) return { style: saved, auto: false };
-  return { style: detectNamingStyle(schema), auto: true };
+/**
+ * 프로젝트의 표기 기준: 저장한 값 → 용어 사전의 표기 → 지금 이름들로 판단 (뒤의 둘은 auto).
+ * from: 어디서 정했는지 (배지·안내에 보인다)
+ */
+export function projectNamingStyle(
+  saved: unknown,
+  schema: Pick<Schema, 'tables'>,
+  dictionaryStyle?: NameStyle | null,
+): { style: NameStyle | null; auto: boolean; from: 'saved' | 'dictionary' | 'names' } {
+  if (isNameStyle(saved)) return { style: saved, auto: false, from: 'saved' };
+  if (dictionaryStyle) return { style: dictionaryStyle, auto: true, from: 'dictionary' };
+  return { style: detectNamingStyle(schema), auto: true, from: 'names' };
 }
 
 export interface NamingIssue {

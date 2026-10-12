@@ -3,7 +3,8 @@
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
-import { NAME_STYLE_LABEL, namingIssues, projectNamingStyle, type NameStyle } from './naming';
+import { fitsStyle, NAME_STYLE_LABEL, namingIssues, projectNamingStyle, type NameStyle } from './naming';
+import { checkColumnAgainstDictionary, checkTableAgainstDictionary, describeMatch, dictIndex, lookupPhysical, lookupTablePhysical, termFromTable, type DictTerm, type Dictionary } from './dictionary';
 
 export type LintRule =
   | 'no-primary-key'
@@ -17,6 +18,8 @@ export type LintRule =
   | 'type-error'
   | 'type-warning'
   | 'type-ignored'
+  | 'dict-mismatch'
+  | 'dict-unknown'
   | 'duplicate-table-logical';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
@@ -36,6 +39,7 @@ export interface LintIssue {
     | { kind: 'addIndex'; tableId: string; columnIds: string[] }
     | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> }
     | { kind: 'removeRelation'; relationId: string }
+    | { kind: 'addTerm'; term: DictTerm }
     | { kind: 'patchTable'; tableId: string; label: string; patch: Partial<Pick<Table, 'name' | 'logicalName'>> };
 }
 
@@ -50,6 +54,8 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'duplicate-relation': { label: '중복 관계', severity: 'error', description: '같은 FK 컬럼으로 같은 테이블을 가리키는 관계가 두 번 있습니다. DB로 내보내면 같은 외래키를 두 번 만들다 실패합니다.' },
   'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
+  'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
+  'dict-unknown': { label: '사전에 없는 용어', severity: 'warning', description: '논리명이 표준 용어 사전에 없습니다. "사전에 추가"로 이 컬럼의 이름·타입을 새 용어로 넣거나, 사전에 있는 표준 용어로 바꾸세요.' },
   'duplicate-table-logical': { label: '같은 논리명 테이블', severity: 'warning', description: '두 테이블이 같은 논리명을 씁니다. 같은 것을 두 번 만든 것인지 확인하고, 다르면 논리명을 구분하세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
@@ -74,8 +80,10 @@ export function sameColumnType(a: Pick<Column, 'type' | 'length'>, b: Pick<Colum
 }
 
 export interface LintOptions {
-  /** 프로젝트에 저장한 이름 표기 기준 (없으면 지금 이름들로 판단) */
+  /** 프로젝트에 저장한 이름 표기 기준 (없으면 사전 표기, 사전도 없으면 지금 이름들로 판단) */
   namingStyle?: NameStyle | null;
+  /** 표준 용어 사전 (있으면 컬럼·테이블이 사전을 따르는지도 검사) */
+  dictionary?: Dictionary | null;
 }
 
 export function lintSchema(schema: Schema, dialect: DialectId | string, options: LintOptions = {}): LintIssue[] {
@@ -124,7 +132,9 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   }
 
   // 이름 표기 기준: 프로젝트 기준(없으면 많이 쓰는 표기)과 다른 테이블·컬럼 이름
-  const { style } = projectNamingStyle(options.namingStyle, schema);
+  const dict = options.dictionary?.terms.length ? dictIndex(options.dictionary) : null;
+  const { style } = projectNamingStyle(options.namingStyle, schema, dict?.style);
+  const fitsName = (name: string) => !style || fitsStyle(name, style);
   if (style) {
     const label = NAME_STYLE_LABEL[style];
     for (const i of namingIssues(schema, style)) {
@@ -227,6 +237,48 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
     const first = seenLogical.get(k);
     if (first) add('duplicate-table-logical', t, `${t.name}: 논리명 "${t.logicalName}"을(를) ${first.name} 테이블도 씁니다`);
     else seenLogical.set(k, t);
+  }
+
+  // 표준 용어 사전 (사전이 있을 때만). 표기(snake_case 등)는 위의 이름 표기 기준이 본다
+  if (dict) {
+    for (const t of schema.tables) {
+      const r = checkTableAgainstDictionary(dict, t);
+      if (!r || r.status === 'ok') continue;
+      if (r.status === 'mismatch') {
+        add('dict-mismatch', t, `${t.name}: 테이블 "${t.logicalName}"의 표준 물리명은 ${r.physical}입니다`, { fix: { kind: 'patchTable', tableId: t.id, label: '표준대로', patch: { name: r.physical! } } });
+        continue;
+      }
+      if (style && t.name.trim() && !fitsName(t.name)) continue; // 표기부터 고친다 (이름 표기 기준 경고)
+      const owner = lookupTablePhysical(dict, t.name);
+      add('dict-unknown', t, owner
+        ? `${t.name}: 테이블 논리명 "${t.logicalName}"이(가) 사전에 없습니다 (이 물리명은 사전에 "${owner.logical}"(으)로 있음)`
+        : `${t.name}: 테이블 "${t.logicalName}"이(가) 표준 용어 사전에 없습니다 — 사전에 추가해 주세요`, {
+        fix: owner ? { kind: 'patchTable', tableId: t.id, label: `논리명을 "${owner.logical}"(으)로`, patch: { logicalName: owner.logical } } : { kind: 'addTerm', term: termFromTable(t) },
+      });
+    }
+    for (const t of schema.tables) {
+      for (const c of t.columns) {
+        const r = checkColumnAgainstDictionary(dict, c);
+        if (!r || r.status === 'ok') continue;
+        if (r.status === 'unknown') {
+          if (style && c.name.trim() && !fitsName(c.name)) continue;
+          const owner = lookupPhysical(dict, c.name);
+          add('dict-unknown', t, owner
+            ? `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 사전에 없습니다 (이 물리명은 사전에 "${owner.logical}"(으)로 있음)`
+            : `${t.name}.${c.name}: 논리명 "${c.logicalName}"이(가) 표준 용어 사전에 없습니다 — 사전에 추가해 주세요`, {
+            columnId: c.id,
+            columnName: c.name,
+            fix: owner ? { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: `논리명을 "${owner.logical}"(으)로`, patch: { logicalName: owner.logical } } : { kind: 'addTerm', term: { logical: c.logicalName.trim(), physical: c.name, ...(c.type ? { type: c.type } : {}), ...(c.length ? { length: c.length } : {}), ...(c.comment.trim() ? { description: c.comment.trim() } : {}) } },
+          });
+          continue;
+        }
+        add('dict-mismatch', t, `${t.name}.${c.name}: "${c.logicalName}"의 표준은 ${describeMatch(r.match!)}입니다 (다른 점: ${r.diffs.join(', ')})`, {
+          columnId: c.id,
+          columnName: c.name,
+          fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: '표준대로', patch: r.patch! },
+        });
+      }
+    }
   }
 
   const order: Record<LintSeverity, number> = { error: 0, warning: 1, info: 2 };

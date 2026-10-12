@@ -9,11 +9,15 @@ import {
   deleteComment,
   emptySchema,
   readComments,
+  readDictionary,
+  detectStyle,
+  NAME_STYLE_LABEL,
   readMeta,
   readNotes,
   addNote as addNoteToDoc,
   updateNote as updateNoteInDoc,
   removeNote as removeNoteFromDoc,
+  type Dictionary,
   type Note,
   readSchema,
   replyComment,
@@ -108,6 +112,10 @@ interface State extends LocalPrefs {
   addNote: (input: { position: { x: number; y: number }; areaId?: string | null; text?: string; color?: string }) => string | null;
   updateNote: (id: string, patch: Partial<Pick<Note, 'text' | 'position' | 'width' | 'height' | 'color'>>) => void;
   removeNotes: (ids: string[]) => void;
+  /** 표준 용어 사전 (없으면 null) */
+  dictionary: Dictionary | null;
+  /** 사전 고치기 (되돌리기 대상 아님) */
+  editDictionary: (fn: (d: Y.Doc) => void) => boolean;
   /** 화면 아래 잠깐 뜨는 안내 (되돌릴 수 있는 작업 등) */
   notice: { text: string; action?: { label: string; run: () => void } } | null;
   showNotice: (notice: State['notice']) => void;
@@ -231,6 +239,7 @@ export const useStore = create<State>()(
         me: null,
         comments: [],
         notes: [],
+        dictionary: null,
         remoteChanges: {},
         notice: null,
         showNotice: (notice) => set({ notice }),
@@ -273,6 +282,8 @@ export const useStore = create<State>()(
               if (!doc) return;
               const next = readSchema(doc);
               const patch: Partial<State> = { schema: next, meta: readMeta(doc), comments: readComments(doc) };
+              // 사전의 표기는 프로젝트 이름 표기 기준을 따르므로 기준이 바뀌면 사전도 다시 읽는다
+              if (patch.meta!.namingStyle !== get().meta.namingStyle) patch.dictionary = readDictionary(doc);
               // 메모는 바뀌었을 때만 새 목록 (캔버스를 덜 다시 그리게)
               const notes = readNotes(doc);
               if (JSON.stringify(notes) !== JSON.stringify(get().notes)) patch.notes = notes;
@@ -296,8 +307,12 @@ export const useStore = create<State>()(
           provider.on('status', ({ status }: { status: SyncStatus }) => set({ status }));
           provider.on('sync', (synced: boolean) => {
             set({ synced });
-            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc), notes: readNotes(doc) });
+            if (synced && doc) set({ schema: readSchema(doc), meta: readMeta(doc), comments: readComments(doc), notes: readNotes(doc), dictionary: readDictionary(doc) });
           });
+          // 사전은 클 수 있어 사전이 바뀔 때만 다시 읽는다 (이름 표기 기준이 바뀌면 아래 update에서)
+          const dictDoc = doc;
+          doc.getMap('dictionary').observeDeep(() => set({ dictionary: readDictionary(dictDoc) }));
+
           provider.awareness.on('change', () => {
             const me = provider?.awareness.clientID;
             const peers: Peer[] = [];
@@ -307,7 +322,7 @@ export const useStore = create<State>()(
             });
             set({ peers });
           });
-          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], notes: [], remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
+          set({ projectId, schema: emptySchema(), meta: emptyMeta, comments: [], notes: [], dictionary: null, remoteChanges: {}, selection: null, selectedTables: [], inspectorOpen: false, synced: false, status: 'connecting', peers: [], canUndo: false, canRedo: false, role: null, openError: '', activeArea: readActiveArea(projectId) });
           publishPresence();
           authApi
             .project(projectId)
@@ -387,6 +402,19 @@ export const useStore = create<State>()(
           if (ids.length) noteEdit((d) => ids.forEach((id) => removeNoteFromDoc(d, id)));
         },
 
+        editDictionary(fn) {
+          if (!doc || !get().synced || get().role === 'viewer') return false;
+          const d = doc;
+          try {
+            d.transact(() => fn(d), COMMENT);
+          } catch (e) {
+            alert(e instanceof Error ? e.message : String(e));
+            return false;
+          }
+          set({ dictionary: readDictionary(d) });
+          return true;
+        },
+
         undo() {
           undoManager?.undo();
         },
@@ -440,6 +468,13 @@ export const useStore = create<State>()(
         setNamingStyle(namingStyle) {
           const d = doc;
           if (!get().synced || get().role === 'viewer') return;
+          // 용어 사전이 있으면 사전 용어도 그 표기여야 한다 (사전과 기준이 어긋나지 않게)
+          const terms = get().dictionary?.terms ?? [];
+          const off = namingStyle ? detectStyle(terms, namingStyle).offenders : [];
+          if (off.length) {
+            alert(`용어 사전에 ${NAME_STYLE_LABEL[namingStyle!]}가 아닌 용어가 ${off.length}개 있어 기준을 바꿀 수 없습니다 (예: ${off.slice(0, 3).map((t) => t.physical).join(', ')}).\n용어 사전의 물리명을 먼저 그 표기로 고치세요.`);
+            return;
+          }
           d?.transact(() => writeMeta(d, { namingStyle }), LOCAL);
         },
         setProjectName(name) {

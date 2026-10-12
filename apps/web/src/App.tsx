@@ -4,6 +4,7 @@ import { useStore } from './store';
 import { Canvas } from './components/Canvas';
 import { Inspector } from './components/Inspector';
 import { Toolbar, type DialogName } from './components/Toolbar';
+import { DictionaryDialog } from './components/DictionaryDialog';
 import { SqlDialog } from './components/SqlDialog';
 import { VersionsDialog } from './components/VersionsDialog';
 import { DbPullDialog } from './components/DbPullDialog';
@@ -261,6 +262,7 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'help' && <HelpDialog onClose={close} />}
         {dialog === 'image' && <ImageExportDialog onClose={close} />}
         {dialog === 'templates' && <TemplateManagerDialog onClose={close} />}
+        {dialog === 'dictionary' && <DictionaryDialog onClose={close} onOpenLint={() => { close(); setSidePanel('lint'); }} />}
         <Notice />
       </div>
     </ReactFlowProvider>

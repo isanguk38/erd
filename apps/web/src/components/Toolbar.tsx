@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addToArea, areaSchema, createColumn, dialectList, getDialect, isNameStyle, NAME_STYLE_LABEL, NAME_STYLES, projectNamingStyle, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
+import { addToArea, areaSchema, createColumn, dialectList, dictIndex, getDialect, isNameStyle, NAME_STYLE_LABEL, NAME_STYLES, projectNamingStyle, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
@@ -19,7 +19,7 @@ import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -214,7 +214,12 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const commentCount = useOpenCommentCount();
   // 이름 표기 기준 배지: 저장한 기준, 없으면 지금 이름들로 판단한 것 (자동)
   // 객체를 돌려주면 매번 새 값이라 다시 그리기를 반복하므로 값 하나씩 읽는다
-  const naming = { style: useStore((s) => projectNamingStyle(s.meta.namingStyle, s.schema).style), auto: useStore((s) => !isNameStyle(s.meta.namingStyle)) };
+  const naming = {
+    style: useStore((s) => projectNamingStyle(s.meta.namingStyle, s.schema, s.dictionary ? dictIndex(s.dictionary).style : null).style),
+    from: useStore((s) => projectNamingStyle(s.meta.namingStyle, s.schema, s.dictionary ? dictIndex(s.dictionary).style : null).from),
+    auto: useStore((s) => !isNameStyle(s.meta.namingStyle)),
+  };
+  const dictionarySize = useStore((s) => s.dictionary?.terms.length ?? 0);
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -237,9 +242,9 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           value={naming.auto ? '' : naming.style ?? ''}
           disabled={!synced || readOnly}
           onChange={(e) => setNamingStyle(isNameStyle(e.target.value) ? e.target.value : null)}
-          title={`이름 표기 기준: 테이블·컬럼 물리명을 이 표기로 맞춥니다. 설계 검사가 다른 이름을 알려 주고, AI도 이 기준으로 만듭니다.${naming.auto ? '\n지금은 정하지 않아 많이 쓰는 표기로 판단했습니다 — 골라 두면 그 기준이 저장됩니다.' : ''}`}
+          title={`이름 표기 기준: 테이블·컬럼 물리명을 이 표기로 맞춥니다. 설계 검사가 다른 이름을 알려 주고, AI도 이 기준으로 만듭니다.${naming.auto ? `\n지금은 정하지 않아 ${naming.from === 'dictionary' ? '용어 사전의 표기를 기준으로 봅니다' : '많이 쓰는 표기로 판단했습니다'} — 골라 두면 그 기준이 저장됩니다.` : ''}`}
         >
-          <option value="">{naming.style ? `${NAME_STYLE_LABEL[naming.style]} (자동)` : '표기 기준: 자동'}</option>
+          <option value="">{naming.style ? `${NAME_STYLE_LABEL[naming.style]} (${naming.from === 'dictionary' ? '사전' : '자동'})` : '표기 기준: 자동'}</option>
           {NAME_STYLES.map((st) => <option key={st} value={st}>{NAME_STYLE_LABEL[st]}</option>)}
         </select>
         {role === 'viewer' && <span className="role-tag" title="이 프로젝트는 보기 권한입니다">보기 전용</span>}
@@ -261,6 +266,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           {lintCount > 0 && <span className="db-badge lint">{lintCount}</span>}
           {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
           {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
+        </button>
+        <button className="btn btn-ghost" onClick={() => onOpen('dictionary')} title={dictionarySize ? `표준 용어 사전: 용어 ${dictionarySize}개` : '표준 용어 사전: 엑셀로 올리거나 지금 ERD로 만들면, 논리명으로 물리명·타입을 채우고 다르면 알려 줍니다'}>
+          <Icon name="book" />
+          <span className="hide-narrow">용어 사전</span>
         </button>
         <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
           <Icon name="comment" />

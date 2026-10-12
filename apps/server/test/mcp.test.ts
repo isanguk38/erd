@@ -174,6 +174,83 @@ describe('MCP', () => {
     expect((await call('edit_notes', { project: '표기', action: 'list' })).notes).toEqual([]);
   }, 30_000);
 
+  it('표준 용어 사전: AI가 사전을 찾아 쓰고, 사전과 다르면 알리고, 새 용어는 사전에 넣는다 (표기는 프로젝트 기준)', async () => {
+    const { erd, url } = await start();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await client.callTool({ name, arguments: args });
+      if ((r as ToolResult).isError) throw new Error(textOf(r));
+      const t = textOf(r);
+      return t.startsWith('{') ? JSON.parse(t) : t;
+    };
+    const created = await call('create_project', { name: '사전', dialect: 'mysql' });
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'apply' } });
+
+    // 사전이 없으면 평소대로
+    expect(await call('lookup_dictionary', { project: '사전', names: ['회원번호'] })).toContain('표준 용어 사전이 없습니다');
+    expect((await call('get_schema', { project: '사전' })).project.dictionary).toBeUndefined();
+
+    // 사람이 엑셀로 올린 사전 (화면은 문서에 직접 쓴다)
+    const { doc } = erd.projects.load(created.id);
+    const { writeDictionary } = await import('@erd/core');
+    doc.transact(() => writeDictionary(doc, { terms: [{ logical: '회원번호', physical: 'MBR_NO', type: 'VARCHAR(20)' }, { logical: '회원명', physical: 'MBR_NM', type: 'VARCHAR(100)' }] }));
+
+    const info = (await call('get_schema', { project: '사전' })).project;
+    expect(info.dictionary).toContain('용어 2개');
+    // 표기 기준을 정하지 않았으면 사전 표기가 프로젝트 기준
+    expect(info.namingStyle).toContain('SNAKE_CASE (예: MEMBER_NO) — 용어 사전의 표기');
+    const found = await call('lookup_dictionary', { project: '사전', names: ['회원번호', '회원명', '배송지'] });
+    expect(found.results[0]).toMatchObject({ name: 'MBR_NO', type: 'VARCHAR(20)' });
+    expect(found.results[1]).toMatchObject({ name: 'MBR_NM', type: 'VARCHAR(100)' });
+    expect(found.results[2].standard).toBeNull();
+
+    // 사전과 다르게 만들면 결과에 dictionary로 알려 준다
+    const edited = await call('edit_schema', {
+      project: '사전',
+      commands: [
+        { op: 'createTable', name: 'MEMBER', logicalName: '회원', columns: [{ name: 'MEMBER_ID', logicalName: '회원번호', type: 'BIGINT', primaryKey: true }] },
+        { op: 'createTable', name: 'ORDERS', logicalName: '주문', columns: [{ name: 'ORDER_ID', type: 'BIGINT', primaryKey: true }] },
+      ],
+    });
+    expect(edited.dictionary.join('\n')).toContain('MBR_NO VARCHAR(20)');
+    // 사전이 있으면 표기 기준을 따로 저장하지 않는다 (사전 표기가 기준)
+    expect(edited.namingStyleSaved).toBeUndefined();
+    const lint = await call('check_design', { project: '사전' });
+    expect(lint.basicChecks.some((i: { rule: string }) => i.rule === '표준 용어와 다름')).toBe(true);
+
+    // 사전에 없는 용어는 사전에 자동으로 (같은 것은 한 번만), 표기 기준과 다르면 넣지 않고 naming으로 안내
+    const added = await call('edit_schema', {
+      project: '사전',
+      commands: [
+        { op: 'addColumn', table: 'ORDERS', column: { name: 'ORD_AMT', logicalName: '주문금액', type: 'DECIMAL(12,2)' } },
+        { op: 'addColumn', table: 'MEMBER', column: { name: 'mbrAge', logicalName: '회원나이', type: 'INT' } },
+      ],
+    });
+    expect(added.dictionaryAdded).toEqual(['주문금액=ORD_AMT']);
+    expect(added.naming.join('\n')).toContain('MEMBER.mbrAge: 이 프로젝트는 SNAKE_CASE 기준입니다 — MBR_AGE');
+    expect(added.dictionary.join('\n')).toContain('그래서 사전에 넣지 않았습니다');
+    const again = await call('edit_schema', { project: '사전', commands: [{ op: 'addColumn', table: 'MEMBER', column: { name: 'ORD_AMT', logicalName: '주문금액', type: 'DECIMAL(12,2)' } }] });
+    expect(again.dictionaryAdded).toBeUndefined();
+    expect((await call('lookup_dictionary', { project: '사전' })).dictionary).toContain('물리명 표기(프로젝트 기준): SNAKE_CASE');
+
+    // 테이블 용어: 새 테이블은 사전에 자동으로, lookup_dictionary(tables)로 찾는다
+    const madeTable = await call('edit_schema', { project: '사전', commands: [{ op: 'createTable', name: 'DELIVERY', logicalName: '배송', columns: [{ name: 'DLV_NO', logicalName: '배송번호', type: 'BIGINT', primaryKey: true }] }] });
+    expect(madeTable.dictionaryAdded).toEqual(['배송=DELIVERY', '배송번호=DLV_NO']);
+    expect((await call('lookup_dictionary', { project: '사전', tables: ['배송', '정산'] })).tableResults).toEqual([{ logicalName: '배송', name: 'DELIVERY' }, expect.objectContaining({ logicalName: '정산', standard: null })]);
+
+    // 제안 모드: 승인하기 전에는 사전에 넣지 않고, 사람이 승인하면 넣는다
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'propose' } });
+    const proposed = await call('edit_schema', { project: '사전', commands: [{ op: 'addColumn', table: 'ORDERS', column: { name: 'DLV_MEMO', logicalName: '배송메모', type: 'VARCHAR(200)' } }] });
+    expect(proposed.mode).toBe('propose');
+    expect((await call('lookup_dictionary', { project: '사전', names: ['배송메모'] })).results[0].standard).toBeNull();
+    const approved = (await erd.app.inject({ method: 'POST', url: `/api/projects/${created.id}/proposals/${proposed.proposalId}/apply`, payload: {} })).json() as { dictionaryAdded?: string[] };
+    expect(approved.dictionaryAdded).toEqual(['배송메모=DLV_MEMO']);
+  }, 30_000);
+
   it('로컬(stdio와 같은 경로): AI가 테이블을 만들고 관계를 잇고 SQL을 뽑는다', async () => {
     const { erd, url } = await start();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

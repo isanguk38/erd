@@ -75,8 +75,8 @@ describe('이름 표기 기준', () => {
     expect(toStyle('member_age', 'SNAKE')).toBe('MEMBER_AGE');
     expect(detectNamingStyle(schema)).toBe('snake');
     expect(detectNamingStyle(emptySchema())).toBeNull();
-    expect(projectNamingStyle('camel', schema)).toEqual({ style: 'camel', auto: false });
-    expect(projectNamingStyle(null, schema)).toEqual({ style: 'snake', auto: true });
+    expect(projectNamingStyle('camel', schema)).toEqual({ style: 'camel', auto: false, from: 'saved' });
+    expect(projectNamingStyle(null, schema)).toEqual({ style: 'snake', auto: true, from: 'names' });
   });
 
   it('기준과 다른 테이블·컬럼 (바꿀 이름이 없으면 고치기 없이)', () => {
