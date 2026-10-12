@@ -4,6 +4,7 @@ import {
   applyCommands,
   detectNamingStyles,
   describeNaming,
+  fitsStyle,
   readMeta,
   writeMeta,
   diffIncoming,
@@ -77,6 +78,12 @@ describe('이름 표기 기준', () => {
     expect(toStyle('memberAge', 'snake')).toBe('member_age');
     expect(toStyle('MEMBER_AGE', 'camel')).toBe('memberAge');
     expect(toStyle('member_age', 'SNAKE')).toBe('MEMBER_AGE');
+    // 앞 밑줄(도구가 만든 테이블)은 그대로 두고 본다
+    expect(fitsStyle('_prisma_migrations', 'snake')).toBe(true);
+    expect(fitsStyle('__EFMigrationsHistory', 'snake')).toBe(false);
+    expect(toStyle('_orderItem', 'snake')).toBe('_order_item');
+    const tool = applyCommands(emptySchema(), [{ op: 'createTable', name: '__EFMigrationsHistory', columns: [{ name: 'MigrationId', type: 'VARCHAR(150)', primaryKey: true }] }, { op: 'createTable', name: '_prisma_migrations', columns: [{ name: 'id', type: 'VARCHAR(36)', primaryKey: true }] }]).schema;
+    expect(namingIssues(tool, 'snake')).toEqual([]);
     expect(detectNamingStyles(schema)).toEqual({ table: 'snake', column: 'snake' });
     expect(detectNamingStyles(emptySchema())).toEqual({ table: null, column: null });
     // 예전 값(문자열 하나)은 테이블·컬럼 모두

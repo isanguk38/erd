@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { dictIndex, isNameStyle, NAME_KIND_LABEL, NAME_KINDS, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, NAME_STYLES, projectNamingStyles, type NameKind } from '@erd/core';
+import { dictIndex, isNameStyle, NAME_KIND_LABEL, NAME_KINDS, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, NAME_STYLES, namingIssues, projectNamingStyles, stylesOf, type NameKind } from '@erd/core';
 import { useStore } from '../store';
 
 const FROM_LABEL = { saved: '', dictionary: '사전', names: '자동' } as const;
@@ -19,6 +19,13 @@ export function NamingBadge({ disabled }: { disabled: boolean }) {
   const columnFrom = useStore((s) => resolved(s).column.from);
   const savedTable = useStore((s) => s.meta.namingStyle?.table ?? null);
   const savedColumn = useStore((s) => s.meta.namingStyle?.column ?? null);
+  // 기준과 다른 이름 수 (테이블·컬럼) — 문자열 하나로 읽어 다시 그리기를 줄인다
+  const offCounts = useStore((s) => {
+    if (!open) return '';
+    const issues = namingIssues(s.schema, stylesOf(resolved(s)));
+    return `${issues.filter((i) => !i.columnId).length},${issues.filter((i) => i.columnId).length}`;
+  });
+  const [offTables, offColumns] = offCounts ? offCounts.split(',').map(Number) : [0, 0];
   const info = { table: { style: tableStyle, from: tableFrom, saved: savedTable }, column: { style: columnStyle, from: columnFrom, saved: savedColumn } };
 
   useEffect(() => {
@@ -69,6 +76,9 @@ export function NamingBadge({ disabled }: { disabled: boolean }) {
           {NAME_KINDS.map((kind) => (
             <label key={kind} className="naming-panel__row">
               <span>{NAME_KIND_LABEL[kind]} 이름</span>
+              <span className={`naming-panel__count${(kind === 'table' ? offTables : offColumns) ? ' off' : ''}`} title="이 기준과 다른 이름 수 (설계 검사 '이름 표기 기준과 다름'에서 보고 고칩니다). 밑줄로 시작하는 도구용 테이블은 빼고 셉니다">
+                {info[kind].style ? ((kind === 'table' ? offTables : offColumns) ? `다름 ${kind === 'table' ? offTables : offColumns}` : '모두 맞음') : ''}
+              </span>
               <select value={info[kind].saved ?? ''} onChange={(e) => choose(kind, e.target.value)} aria-label={`${NAME_KIND_LABEL[kind]} 이름 표기`}>
                 <option value="">{info[kind].style ? `자동 — ${NAME_STYLE_LABEL[info[kind].style!]}${info[kind].from === 'dictionary' ? ' (사전)' : ''}` : '자동'}</option>
                 {NAME_STYLES.map((st) => <option key={st} value={st}>{NAME_STYLE_LABEL[st]} (예: {NAME_STYLE_EXAMPLE[st]})</option>)}

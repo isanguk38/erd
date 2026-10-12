@@ -1018,7 +1018,11 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .naming-chip:disabled { cursor: default; opacity: 0.6; }
 .naming-badge .naming-panel { left: 0; right: auto; width: 320px; padding: 10px 12px; display: grid; gap: 8px; }
 .naming-panel__title { margin: 0; font-weight: 700; font-size: 13px; }
-.naming-panel__row { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+.naming-panel__row { display: grid; grid-template-columns: 70px 1fr; grid-template-areas: 'label select' 'label count'; align-items: center; column-gap: 8px; row-gap: 2px; font-size: 13px; }
+.naming-panel__row > span:first-child { grid-area: label; }
+.naming-panel__row select { grid-area: select; }
+.naming-panel__count { grid-area: count; font-size: 11px; color: var(--ok, #16a34a); }
+.naming-panel__count.off { color: var(--warning); }
 .naming-panel__row select { width: 100%; font-size: 12px; }
 .naming-panel__quick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .dropdown__menu.naming-panel .naming-panel__quick button { all: unset; cursor: pointer; font-size: 11px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 10px; width: auto; }

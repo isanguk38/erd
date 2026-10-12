@@ -60,15 +60,19 @@ export function namingSettingValue(setting: NamingSetting | null | undefined): N
 export const sameNamingSetting = (a: NamingSetting | null | undefined, b: NamingSetting | null | undefined) =>
   (a?.table ?? null) === (b?.table ?? null) && (a?.column ?? null) === (b?.column ?? null);
 
-/** 이 이름이 그 표기에 맞는지. 한 단어(price)는 snake·camel 둘 다 맞는다 */
+/**
+ * 이 이름이 그 표기에 맞는지. 한 단어(price)는 snake·camel 둘 다 맞는다.
+ * 앞에 붙은 밑줄(_prisma_migrations, __EFMigrationsHistory 같은 도구가 만든 테이블)은 표기와 상관없이 본다
+ */
 export function fitsStyle(name: string, style: NameStyle): boolean {
-  return STYLE_RE[style].test(name.trim());
+  return STYLE_RE[style].test(name.trim().replace(/^_+/, ''));
 }
 
 /** 낱말로 나눠 그 표기로 (memberNo → member_no, MEMBER_NO → memberNo) */
 export function toStyle(name: string, style: NameStyle): string {
-  const words = name.trim().split(/[_\s-]+/).flatMap((w) => w.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
-  return words.length ? JOIN[style](words) : name;
+  const prefix = name.trim().match(/^_+/)?.[0] ?? '';
+  const words = name.trim().slice(prefix.length).split(/[_\s-]+/).flatMap((w) => w.split(/(?<=[a-z0-9])(?=[A-Z])/)).filter(Boolean);
+  return words.length ? prefix + JOIN[style](words) : name;
 }
 
 /** 이름들 중 가장 많이 맞는 표기 (같으면 snake → SNAKE → camel). 이름이 없거나 아무것도 안 맞으면 null */
@@ -156,6 +160,8 @@ export function namingIssues(schema: Pick<Schema, 'tables'>, input: Partial<Nami
   };
   const { table: ts, column: cs } = styles;
   for (const t of schema.tables) {
+    // 밑줄로 시작하는 테이블은 도구가 만든 것 (_prisma_migrations, __EFMigrationsHistory) — 검사하지 않는다
+    if (t.name.trim().startsWith('_')) continue;
     if (ts && t.name.trim() && !fitsStyle(t.name, ts)) out.push({ tableId: t.id, table: t.name, name: t.name, suggestion: suggest(t.name, ts) });
     if (!cs) continue;
     for (const c of t.columns) {
