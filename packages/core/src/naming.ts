@@ -35,6 +35,12 @@ const JOIN: Record<NameStyle, (words: string[]) => string> = {
   camel: (w) => w.map((x, i) => (i ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x.toLowerCase())).join(''),
 };
 
+/**
+ * 도구가 만든 테이블 (이름이 밑줄로 시작: _prisma_migrations, __EFMigrationsHistory 등).
+ * 이름 표기 기준·용어 사전·논리명 검사에서 뺀다 (이름을 바꾸거나 사전에 넣을 대상이 아니다)
+ */
+export const isToolTable = (name: string) => name.trim().startsWith('_');
+
 export function isNameStyle(v: unknown): v is NameStyle {
   return v === 'snake' || v === 'SNAKE' || v === 'camel';
 }
@@ -160,8 +166,7 @@ export function namingIssues(schema: Pick<Schema, 'tables'>, input: Partial<Nami
   };
   const { table: ts, column: cs } = styles;
   for (const t of schema.tables) {
-    // 밑줄로 시작하는 테이블은 도구가 만든 것 (_prisma_migrations, __EFMigrationsHistory) — 검사하지 않는다
-    if (t.name.trim().startsWith('_')) continue;
+    if (isToolTable(t.name)) continue;
     if (ts && t.name.trim() && !fitsStyle(t.name, ts)) out.push({ tableId: t.id, table: t.name, name: t.name, suggestion: suggest(t.name, ts) });
     if (!cs) continue;
     for (const c of t.columns) {

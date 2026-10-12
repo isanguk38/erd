@@ -9,7 +9,7 @@
 import * as Y from 'yjs';
 import type { Column } from './model';
 import { readMeta } from './ydoc';
-import { fitsStyle, NAME_KIND_LABEL, NAME_STYLE_LABEL, toStyle, type NameKind, type NameStyle, type NamingSetting, type NamingStyles } from './naming';
+import { fitsStyle, isToolTable, NAME_KIND_LABEL, NAME_STYLE_LABEL, toStyle, type NameKind, type NameStyle, type NamingSetting, type NamingStyles } from './naming';
 
 export interface DictTerm {
   /** 테이블 용어면 'table' (없으면 컬럼 용어). 테이블 용어는 타입·길이가 없다 */
@@ -522,6 +522,7 @@ export function syncDictionaryForAi(
   const changed: { table: string; column: Column }[] = [];
   const notes: string[] = [];
   for (const t of after.tables) {
+    if (isToolTable(t.name)) continue;
     for (const c of t.columns) {
       const old = prev.get(c.id);
       if (old && old.name === c.name && old.logicalName === c.logicalName && old.type === c.type && old.length === c.length) continue;
@@ -536,6 +537,7 @@ export function syncDictionaryForAi(
   // 테이블: 새로 만들었거나 이름·논리명을 바꾼 것
   const prevTables = new Map(before.tables.map((t) => [t.id, t] as const));
   const changedTables = after.tables.filter((t) => {
+    if (isToolTable(t.name)) return false;
     const old = prevTables.get(t.id) as { name?: string; logicalName?: string } | undefined;
     return !old || old.name !== t.name || old.logicalName !== (t as { logicalName?: string }).logicalName;
   }) as { id: string; name: string; logicalName: string; comment: string }[];
@@ -624,7 +626,9 @@ export interface DictDraftRow extends DictTerm {
  */
 export function dictionaryFromSchema(schema: { tables: { name: string; logicalName?: string; comment?: string; columns: Column[] }[] }): DictDraftRow[] {
   const groups = new Map<string, { logicals: Map<string, number>; comments: Map<string, number>; variants: Map<string, DictVariant> }>();
-  for (const t of schema.tables) {
+  // 도구가 만든 테이블(_prisma_migrations 등)은 사전에 넣지 않는다
+  const tables = schema.tables.filter((t) => !isToolTable(t.name));
+  for (const t of tables) {
     for (const c of t.columns) {
       const logical = c.logicalName.trim();
       const key = logical ? dictKey(logical) : `@${physicalKey(c.name)}`;
@@ -649,7 +653,7 @@ export function dictionaryFromSchema(schema: { tables: { name: string; logicalNa
   }
   // 테이블 용어: 논리명이 같은 테이블은 묶는다 (같은 논리명을 다른 테이블이 쓰면 variants)
   const tableGroups = new Map<string, DictDraftRow>();
-  for (const t of schema.tables) {
+  for (const t of tables) {
     const logical = t.logicalName?.trim() ?? '';
     const key = logical ? dictKey(logical) : `@${physicalKey(t.name)}`;
     const row = tableGroups.get(key);

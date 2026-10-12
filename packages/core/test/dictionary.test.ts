@@ -194,6 +194,17 @@ describe('표준 용어 사전', () => {
 });
 
 describe('ERD에서 사전 만들기 · 논리명 없는 용어', () => {
+  it('도구가 만든 테이블(_prisma_migrations)은 사전 초안·설계 검사(논리명·표기)에서 뺀다', () => {
+    const schema = applyCommands(emptySchema(), [
+      { op: 'createTable', name: '_prisma_migrations', columns: [{ name: 'id', type: 'VARCHAR(36)', primaryKey: true }, { name: 'applied_steps_count', type: 'INT' }] },
+      { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'orderId', logicalName: '주문번호', type: 'INT', primaryKey: true }] },
+    ]).schema;
+    const draft = dictionaryFromSchema(schema);
+    expect(draft.map((r) => r.physical)).toEqual(expect.not.arrayContaining(['applied_steps_count', '_prisma_migrations']));
+    expect(draft.map((r) => r.physical)).toEqual(expect.arrayContaining(['orderId', 'orders']));
+    expect(lintSchema(schema, 'postgresql').filter((i) => i.tableName === '_prisma_migrations')).toEqual([]);
+  });
+
   const { schema } = applyCommands(emptySchema(), [
     { op: 'createTable', name: 'member', columns: [{ name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true, comment: '회원 구분' }, { name: 'nick', type: 'VARCHAR(20)' }] },
     { op: 'createTable', name: 'orders', columns: [{ name: 'member_id', logicalName: '회원 번호', type: 'BIGINT' }, { name: 'reg_dt', logicalName: '등록일시', type: 'DATETIME' }, { name: 'nick', type: 'VARCHAR(20)' }] },

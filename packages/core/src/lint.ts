@@ -3,7 +3,7 @@
 import type { DialectId } from './dialects/types';
 import type { Column, Schema, Table } from './model';
 import { tableTypeIssues } from './typeRules';
-import { fitsStyle, namingIssues, namingRuleText, projectNamingStyles, stylesOf, type NameStyle, type NamingSetting } from './naming';
+import { fitsStyle, isToolTable, namingIssues, namingRuleText, projectNamingStyles, stylesOf, type NameStyle, type NamingSetting } from './naming';
 import { checkColumnAgainstDictionary, checkTableAgainstDictionary, describeMatch, dictIndex, lookupPhysical, lookupTablePhysical, termFromTable, type DictTerm, type Dictionary } from './dictionary';
 
 export type LintRule =
@@ -152,8 +152,9 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
     }
   }
 
-  // 논리명
+  // 논리명 (도구가 만든 테이블은 빼고)
   for (const t of schema.tables) {
+    if (isToolTable(t.name)) continue;
     if (!t.logicalName.trim()) add('missing-logical-name', t, `${t.name}: 테이블 논리명이 없습니다`);
     for (const c of t.columns) {
       if (!c.logicalName.trim()) add('missing-logical-name', t, `${t.name}.${c.name}: 컬럼 논리명이 없습니다`, { columnId: c.id, columnName: c.name });
@@ -242,6 +243,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   // 표준 용어 사전 (사전이 있을 때만). 표기(snake_case 등)는 위의 이름 표기 기준이 본다
   if (dict) {
     for (const t of schema.tables) {
+      if (isToolTable(t.name)) continue;
       const r = checkTableAgainstDictionary(dict, t);
       if (!r || r.status === 'ok') continue;
       if (r.status === 'mismatch') {
@@ -257,6 +259,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
       });
     }
     for (const t of schema.tables) {
+      if (isToolTable(t.name)) continue;
       for (const c of t.columns) {
         const r = checkColumnAgainstDictionary(dict, c);
         if (!r || r.status === 'ok') continue;

@@ -7,6 +7,7 @@ import {
   updateTable,
   clearDictionary,
   detectTermStyles,
+  isToolTable,
   NAME_KIND_LABEL,
   type NameKind,
   type NamingSetting,
@@ -513,7 +514,8 @@ function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: 
     let unknown = 0;
     let ok = 0;
     let style = 0;
-    for (const t of schema.tables) {
+    const tables = schema.tables.filter((t) => !isToolTable(t.name));
+    for (const t of tables) {
       for (const c of t.columns) {
         const r = checkColumnAgainstDictionary(index, c);
         if (r?.status === 'ok') ok++;
@@ -524,14 +526,14 @@ function ErdCheck({ dictionary, readOnly, onOpenLint, onFixAll }: { dictionary: 
     }
     // 테이블도 같은 규칙으로 센다
     const tableMismatches: { tableId: string; name: string }[] = [];
-    for (const t of schema.tables) {
+    for (const t of tables) {
       const r = checkTableAgainstDictionary(index, t);
       if (r?.status === 'ok') ok++;
       else if (r?.status === 'mismatch') tableMismatches.push({ tableId: t.id, name: r.physical! });
       else if (styleSuggestion(index, t.name, 'table')) style++;
       else if (r?.status === 'unknown') unknown++;
     }
-    const missing = [...newTableTerms(index, schema.tables).add, ...newTermsFromColumns(index, schema.tables.flatMap((t) => t.columns.map((column) => ({ table: t.name, column })))).add];
+    const missing = [...newTableTerms(index, tables).add, ...newTermsFromColumns(index, tables.flatMap((t) => t.columns.map((column) => ({ table: t.name, column })))).add];
     const fills = logicalFillsFromSchema(dictionary, schema);
     return { ok, unknown, style, mismatches, tableMismatches, missing, fills };
   }, [dictionary, schema]);
