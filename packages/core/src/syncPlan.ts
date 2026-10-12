@@ -15,7 +15,7 @@ import { diffSchemas, type Change, type DiffResult } from './diff';
 import { applyExpressionPairs, rememberExpressions, withExpressionPairs, type BaselineSchema } from './expressionMemory';
 import type { Dialect } from './dialects/types';
 import { cloneSchema, type Column, type Schema, type Table } from './model';
-import { alignToCurrent } from './sync';
+import { alignToCurrent, applyChanges } from './sync';
 import { enumKey } from './enums';
 
 export type ChangeOrigin = 'db' | 'erd' | 'conflict' | 'unknown';
@@ -350,13 +350,33 @@ export function summarizePlan(plan: SyncPlan) {
 /**
  * DB와 맞춘 뒤 저장할 기준 시점: 지금 DB 구조(ERD id로 맞춤) + 식 짝.
  * applied: 이번에 DB에 실행해 성공한 변경 (내보내기). previous: 이전 기준 시점 (이어받을 짝).
+ *
+ * skipped: 이번에 반영하지 않은 변경 (가져오기·내보내기에서 체크를 푼 것, 실패한 것).
+ * 그 요소는 아직 맞추지 않았으므로 기준 시점에 "지금 DB"를 넣지 않고 이전 기준 시점의 모양을 그대로 둔다 —
+ * 그래야 다음 비교에서도 원래대로 "DB에서 바뀜"(또는 "ERD에서 바뀜")으로 나온다.
+ * 이전 기준 시점이 없으면 바뀌지 않은 쪽(가져오기면 ERD, 내보내기면 DB)의 모양을 둔다.
  */
 export function syncedBaseline(
   db: Schema,
   erd: Schema,
-  options: { links?: RenameLink[]; applied?: Change[]; previous?: Schema | null } = {},
+  options: { links?: RenameLink[]; applied?: Change[]; previous?: Schema | null; skipped?: Change[]; dialect?: Dialect; direction?: 'pull' | 'push' } = {},
 ): BaselineSchema {
-  const aligned = alignDb(db, erd, null, options.links ?? []);
+  let aligned = alignDb(db, erd, null, options.links ?? []);
+  if (options.skipped?.length && options.dialect) {
+    const keep = options.previous ?? (options.direction === 'pull' ? erd : null);
+    if (keep) {
+      const keys = new Set(options.skipped.map(changeKey));
+      const back = diffSchemas(aligned, keep, options.dialect);
+      const picked = new Set(back.changes.filter((c) => keys.has(changeKey(c))).map((c) => c.id));
+      if (picked.size) aligned = applyChanges(aligned, back, picked);
+    }
+  }
   const previous = (options.previous as BaselineSchema | null | undefined)?.expressionPairs;
   return withExpressionPairs(aligned, rememberExpressions(aligned, erd, { applied: options.applied, previous }));
+}
+
+/** 계획의 변경 중 이번에 반영하지 않은 것 (기준 시점에 "맞춘 것"으로 넣지 않을 것) */
+export function skippedChanges(changes: Change[], done: Set<string> | Change[]): Change[] {
+  const ids = done instanceof Set ? done : new Set(done.map((c) => c.id));
+  return changes.filter((c) => !ids.has(c.id));
 }

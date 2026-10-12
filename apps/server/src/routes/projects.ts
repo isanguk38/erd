@@ -51,6 +51,7 @@ import {
   type SyncPlan,
   dbmsMismatch,
   ddlGrammarOf,
+  skippedChanges,
 } from '@erd/core';
 import { autoLayout } from '@erd/core/layout';
 import { buildDefinitionXlsx } from '@erd/core/excel';
@@ -551,10 +552,10 @@ export function registerProjectRoutes(
   }
 
   /** 지금 DB 상태를 기준 시점으로 저장한다 (가져오기·내보내기 직후) */
-  async function markSynced(id: string, connectionId: string, userId: string, applied: Change[] = []) {
-    const { db } = await readDb(id, connectionId, userId);
+  async function markSynced(id: string, connectionId: string, userId: string, applied: Change[] = [], skipped: Change[] = []) {
+    const { db, dialect } = await readDb(id, connectionId, userId);
     const previous = store.baseline(id, connectionId)?.schema;
-    return store.setBaseline(id, connectionId, syncedBaseline(db.schema, store.schema(id), { applied, previous }));
+    return store.setBaseline(id, connectionId, syncedBaseline(db.schema, store.schema(id), { applied, previous, skipped, dialect, direction: 'push' }));
   }
 
   /** 이름 변경 후보 중 받아들일 것: true면 전부, 배열이면 그 id만 */
@@ -643,11 +644,11 @@ export function registerProjectRoutes(
     } else {
       placeNewTables(next, plan.diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
     }
-    store.setMeta(id, { dialect: config.dialect });
     const result = change(id, next, { mode: modeOf(id, req.body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
     if (result.mode === 'apply') {
       store.saveVersion(id, `DB 가져오기 · ${saved.name}`, 'db');
-      store.setBaseline(id, connectionId, syncedBaseline(db.schema, store.schema(id), { previous: store.baseline(id, connectionId)?.schema }));
+      // 반영하지 않은 변경은 기준 시점에 넣지 않는다 (다음에도 "DB에서 바뀜"으로)
+      store.setBaseline(id, connectionId, syncedBaseline(db.schema, store.schema(id), { previous: store.baseline(id, connectionId)?.schema, skipped: skippedChanges(plan.diff.changes, selected), dialect, direction: 'pull' }));
     }
     return { ...result, warnings: db.warnings };
   });
@@ -680,7 +681,10 @@ export function registerProjectRoutes(
     executeLog({ at: new Date().toISOString(), project: id, connection: saved.name, database: saved.database, source, ok: result.ok, results: result.results });
     if (result.ok) store.saveVersion(id, `DB 적용 · ${saved.name}`, 'db');
     // 일부만 성공했어도 DB는 바뀌었으므로 지금 DB 상태를 기준 시점으로 다시 잡는다
-    if (result.appliedCount > 0) await markSynced(id, connectionId, req.user.id, appliedChanges(plan.diff.changes, statements, result.results));
+    if (result.appliedCount > 0) {
+      const applied = appliedChanges(plan.diff.changes, statements, result.results);
+      await markSynced(id, connectionId, req.user.id, applied, skippedChanges(plan.diff.changes, applied));
+    }
     return { ...preview, result };
   });
 }

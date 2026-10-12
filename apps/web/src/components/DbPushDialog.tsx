@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { appliedChanges, dbmsMismatch, generateStatements, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
+import { appliedChanges, dbmsMismatch, generateStatements, skippedChanges, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
@@ -89,7 +89,9 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
         const after = await api.introspect(connection.id);
         // 성공한 문장이 만든 식은 DB가 돌려준 모양과 짝으로 기억한다 (다음 비교에서 DB가 바꿔 쓴 식을 같은 것으로 봄)
         const applied = diff ? appliedChanges(diff.changes, statements, r.results) : [];
-        await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, useStore.getState().schema, { links, applied, previous: baseline?.schema }));
+        // 체크를 풀었거나 실패한 변경은 아직 맞추지 않은 것 — 기준 시점에 넣지 않는다
+        const skipped = diff ? skippedChanges(diff.changes, applied) : [];
+        await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, useStore.getState().schema, { links, applied, previous: baseline?.schema, skipped, dialect, direction: 'push' }));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

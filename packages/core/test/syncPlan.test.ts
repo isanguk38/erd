@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyChanges, generateStatements, getDialect, parseDdl, planPull, planPush, summarizePlan, syncedBaseline, toLink, type Schema } from '../src';
+import { applyChanges, generateStatements, getDialect, parseDdl, planPull, planPush, skippedChanges, summarizePlan, syncedBaseline, toLink, type Schema } from '../src';
 
 const mysql = getDialect('mysql');
 const pg = getDialect('postgresql');
@@ -60,6 +60,29 @@ describe('이름 변경 추정', () => {
 });
 
 describe('3방향 비교', () => {
+  it('가져오기에서 체크를 푼 DB 변경은 기준 시점에 넣지 않는다 — 다음에도 "DB에서 바뀜" (ERD에서 바뀜으로 뒤집히지 않음)', () => {
+    // DB에 테이블·컬럼이 새로 생겼는데, 가져올 때 한 테이블의 변경은 빼고 반영했다
+    const erd0 = read(BASE);
+    const db = read(BASE.replace('memo TEXT', 'memo TEXT, coupon_amount INT') + 'CREATE TABLE coupon (coupon_id BIGINT NOT NULL PRIMARY KEY);');
+    for (const previous of [structuredClone(erd0), null]) {
+      const plan = planPull(erd0, db, { dialect: mysql, baseline: previous });
+      const picked = new Set(plan.diff.changes.filter((c) => c.kind === 'createTable').map((c) => c.id)); // coupon 테이블만 가져옴
+      const erd1 = applyChanges(erd0, plan.diff, picked);
+      const baseline = syncedBaseline(db, erd1, { previous, skipped: skippedChanges(plan.diff.changes, picked), dialect: mysql, direction: 'pull' });
+      const again = planPull(erd1, db, { dialect: mysql, baseline });
+      expect(summaries(again)).toEqual(['db:orders.coupon_amount 컬럼 추가']);
+      expect(again.defaultSelected.size).toBe(1);
+    }
+  });
+
+  it('내보내기에서 체크를 푼 ERD 변경은 다음에도 "ERD에서 바뀜", 되돌리지 않은 DB 변경은 "DB에서 바뀜"', () => {
+    const { baseline, erd, db } = setup();
+    const plan = planPush(erd, db, { dialect: mysql, baseline });
+    // 아무것도 실행하지 않았다고 치고 (모두 체크 해제) 기준 시점을 다시 잡는다
+    const next = syncedBaseline(db, erd, { previous: baseline, skipped: plan.diff.changes, dialect: mysql, direction: 'push' });
+    expect(summaries(planPush(erd, db, { dialect: mysql, baseline: next }))).toEqual(summaries(plan));
+  });
+
   // 기준: 마지막으로 맞춘 시점의 DB
   const setup = () => {
     const baseline = read(BASE);
