@@ -132,6 +132,7 @@ export function App() {
 
 function Editor({ projectId }: { projectId: string }) {
   const [dialog, setDialog] = useState<DialogName | null>(null);
+  const enumDialog = useStore((s) => s.enumDialog);
   const [fitRequest, setFitRequest] = useState(0);
   const [relayoutRequest, setRelayoutRequest] = useState(0);
   const synced = useStore((s) => s.synced);
@@ -263,7 +264,7 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'help' && <HelpDialog onClose={close} />}
         {dialog === 'image' && <ImageExportDialog onClose={close} />}
         {dialog === 'templates' && <TemplateManagerDialog onClose={close} />}
-        {dialog === 'enums' && <EnumDialog onClose={close} />}
+        {(dialog === 'enums' || enumDialog) && <EnumDialog focus={enumDialog?.focus} create={enumDialog?.create} onClose={() => { close(); useStore.getState().setEnumDialog(null); }} />}
         {dialog === 'dictionary' && <DictionaryDialog onClose={close} onOpenLint={() => { close(); setSidePanel('lint'); }} />}
         <Notice />
       </div>

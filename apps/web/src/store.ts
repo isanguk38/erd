@@ -120,6 +120,9 @@ interface State extends LocalPrefs {
   editDictionary: (fn: (d: Y.Doc) => void) => boolean;
   /** 화면 아래 잠깐 뜨는 안내 (되돌릴 수 있는 작업 등) */
   notice: { text: string; action?: { label: string; run: () => void } } | null;
+  /** 사용자 정의 타입(ENUM) 창: focus — 열자마자 보여 줄 타입, create — 새로 만들 이름 (컬럼 타입 칸에서 연다) */
+  enumDialog: { focus?: string; create?: string } | null;
+  setEnumDialog: (value: { focus?: string; create?: string } | null) => void;
   showNotice: (notice: State['notice']) => void;
   /** 다른 사람·AI가 방금 바꾼 테이블 (잠깐 강조) */
   remoteChanges: Record<string, RemoteChange>;
@@ -245,6 +248,8 @@ export const useStore = create<State>()(
         remoteChanges: {},
         notice: null,
         showNotice: (notice) => set({ notice }),
+        enumDialog: null,
+        setEnumDialog: (enumDialog) => set({ enumDialog }),
         searchOpen: false,
         searchQuery: '',
         searchFocus: null,

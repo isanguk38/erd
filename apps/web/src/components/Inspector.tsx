@@ -23,6 +23,7 @@ import {
   suggestTerms,
   termFromTable,
   type DictTerm,
+  type EnumType,
   fitsStyle,
   projectNamingStyles,
   namingRuleText,
@@ -89,7 +90,28 @@ export function Inspector() {
 }
 
 /**
- * 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해).
+ * 컬럼 타입 칸 오른쪽 작은 버튼: ENUM이면 그 타입의 값을 보고 고치는 창을 열고,
+ * 목록에 없는 사용자 타입("Approve" 같은 따옴표 타입)이면 그 이름으로 타입을 만드는 창을 연다
+ */
+function EnumButton({ type, enums }: { type: string; enums: EnumType[] | undefined }) {
+  const e = enumOfType(enums, type);
+  const custom = !e && /^"[^"]+"$/.test(type.trim());
+  if (!e && !custom) return null;
+  const open = () => useStore.getState().setEnumDialog(e ? { focus: e.name } : { create: type.trim().replace(/"/g, '') });
+  return (
+    <button
+      type="button"
+      className={`type-cell__enum${e ? '' : ' missing'}`}
+      onClick={open}
+      title={e ? `ENUM ${e.name}: ${e.values.join(', ')}\n누르면 값을 보고 고칩니다` : `${type.trim()}은(는) 타입 목록에 없는 사용자 타입입니다 — 누르면 이 이름으로 ENUM 타입을 만듭니다 (값 입력)`}
+      aria-label={e ? `${e.name} 타입 값 보기·고치기` : `${type.trim()} 타입 만들기`}
+    >
+      {e ? 'ENUM' : '+'}
+    </button>
+  );
+}
+
+/** 입력 중에는 로컬 값만 바꾸고, 포커스를 잃거나 Enter를 누를 때 저장한다 (되돌리기 기록을 글자마다 남기지 않기 위해).
  * suggest를 주면 입력하는 동안 아래에 후보(표준 용어)를 보여 주고, 고르면 onPick (↑↓ Enter, 마우스)
  */
 function TextInput({ value, onCommit, placeholder, className, list, issue, focusKey, onEnter, suggest, onPick }: {
@@ -443,7 +465,10 @@ function TableEditor({ table }: { table: Table }) {
               {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
               <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} issue={nameMark(c.name, 'column')} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByPhysical} onPick={(t) => pickTerm(c, t)} />
               <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />
-              <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, enumOfType(enums, type) ? { type: canonicalType({ enums }, type), length: '' } : { type: typeName(type) })} />
+              <div className="type-cell">
+                <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, enumOfType(enums, type) ? { type: canonicalType({ enums }, type), length: '' } : { type: typeName(type) })} />
+                <EnumButton type={c.type} enums={enums} />
+              </div>
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
               <input type="checkbox" checked={!c.nullable || c.primaryKey} disabled={c.primaryKey} onChange={(e) => setColumn(c, { nullable: !e.target.checked })} />

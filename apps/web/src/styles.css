@@ -1041,3 +1041,15 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .enum-row__values { width: 100%; box-sizing: border-box; resize: vertical; font-size: 12px; line-height: 1.5; }
 .enum-row__usages { margin: 0; word-break: break-all; }
 @media (max-width: 720px) { .enum-new { grid-template-columns: 1fr; } }
+
+/* 컬럼 타입 칸: ENUM이면 값 보기·고치기 버튼 (목록에 없는 사용자 타입이면 + 만들기) */
+.type-cell { position: relative; min-width: 0; }
+.type-cell:has(.type-cell__enum) input { padding-right: 40px; }
+.type-cell__enum {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%); height: 18px; padding: 0 5px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; line-height: 18px; border: 1px solid var(--accent); color: var(--accent); background: var(--accent-soft); cursor: pointer;
+}
+.type-cell__enum.missing { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); width: 18px; padding: 0; }
+.type-cell__enum:hover { filter: brightness(0.95); }
+.enum-row.focused { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.type-cell:has(.type-cell__enum.missing) input { padding-right: 24px; }

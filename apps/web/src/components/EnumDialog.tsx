@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { addEnumType, enumUsages, removeEnumType, updateEnumType, type EnumType } from '@erd/core';
+import { useEffect, useRef, useState } from 'react';
+import { addEnumType, enumKey, enumUsages, removeEnumType, updateEnumType, type EnumType } from '@erd/core';
 import { useStore } from '../store';
 import { Modal } from './Modal';
 
@@ -15,13 +15,14 @@ const HOW: Record<string, string> = {
 const lines = (text: string) => text.split('\n').map((v) => v.trim()).filter(Boolean);
 
 /** 사용자 정의 타입(ENUM) 관리: 만들기·이름·값 고치기·지우기. 컬럼 타입 칸에 이름을 적어 쓴다 */
-export function EnumDialog({ onClose }: { onClose: () => void }) {
+export function EnumDialog({ onClose, focus, create: createName }: { onClose: () => void; focus?: string; create?: string }) {
   const enums = useStore((s) => s.schema.enums);
   const schema = useStore((s) => s.schema);
   const dialect = useStore((s) => s.meta.dialect);
   const readOnly = useStore((s) => s.role === 'viewer' || Boolean(s.compare));
   const { edit, showNotice } = useStore.getState();
-  const [name, setName] = useState('');
+  // 컬럼 타입 칸에서 "타입으로 만들기"로 열면 이름을 채워 둔다
+  const [name, setName] = useState(createName ?? '');
   const [values, setValues] = useState('');
 
   const create = () => {
@@ -46,7 +47,7 @@ export function EnumDialog({ onClose }: { onClose: () => void }) {
           </label>
           <label>
             <span>값 (한 줄에 하나, 순서대로)</span>
-            <textarea rows={3} value={values} placeholder={'READY\nPAID\nCANCELED'} onChange={(e) => setValues(e.target.value)} />
+            <textarea rows={3} autoFocus={Boolean(createName)} value={values} placeholder={'READY\nPAID\nCANCELED'} onChange={(e) => setValues(e.target.value)} />
           </label>
           <button className="btn btn-primary" disabled={!name.trim() || !lines(values).length} onClick={create}>
             + 타입 만들기
@@ -58,7 +59,7 @@ export function EnumDialog({ onClose }: { onClose: () => void }) {
       ) : (
         <ul className="enum-list">
           {enums.map((e) => (
-            <EnumRow key={e.id} item={e} usages={enumUsages(schema, e).map((u) => `${u.table}.${u.column.name}`)} readOnly={readOnly} />
+            <EnumRow key={e.id} item={e} usages={enumUsages(schema, e).map((u) => `${u.table}.${u.column.name}`)} readOnly={readOnly} focused={Boolean(focus) && enumKey(focus!) === enumKey(e.name)} />
           ))}
         </ul>
       )}
@@ -66,8 +67,15 @@ export function EnumDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EnumRow({ item, usages, readOnly }: { item: EnumType; usages: string[]; readOnly: boolean }) {
+function EnumRow({ item, usages, readOnly, focused }: { item: EnumType; usages: string[]; readOnly: boolean; focused?: boolean }) {
   const { edit, showNotice } = useStore.getState();
+  // 컬럼 타입 칸에서 열었으면 그 타입 카드로 스크롤하고 값 칸에 커서를 둔다
+  const ref = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    ref.current?.scrollIntoView({ block: 'nearest' });
+    ref.current?.querySelector('textarea')?.focus();
+  }, [focused]);
   const [name, setName] = useState<string | null>(null);
   const [values, setValues] = useState<string | null>(null);
   const update = (patch: { name?: string; values?: string[]; comment?: string }) => edit((d) => void updateEnumType(d, item.id, patch));
@@ -95,7 +103,7 @@ function EnumRow({ item, usages, readOnly }: { item: EnumType; usages: string[];
     showNotice({ text: `타입 ${item.name}을(를) 지웠습니다 (Ctrl+Z로 되돌리기)` });
   };
   return (
-    <li className="enum-row">
+    <li className={`enum-row${focused ? ' focused' : ''}`} ref={ref}>
       <div className="enum-row__head">
         <input
           className="mono enum-row__name"
