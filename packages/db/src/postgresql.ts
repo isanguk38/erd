@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
+import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, enumOfType, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
 import { explainConnectionError, guardErrors } from './errors';
 import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
@@ -38,7 +38,8 @@ export function parsePgType(formatted: string): { type: string; length: string }
     length = m[2].replace(/\s+/g, '');
     t = `${m[1]}${m[3]}`.replace(/\s+/g, ' ').trim();
   }
-  const type = (TYPE_NAMES[t] ?? t).toUpperCase() + array;
+  // 따옴표로 감싼 사용자 타입("BillingStatus")은 대소문자를 구분하므로 그대로 둔다
+  const type = (t.includes('"') ? t : (TYPE_NAMES[t] ?? t).toUpperCase()) + array;
   return { type, length };
 }
 
@@ -47,13 +48,22 @@ export function cleanPgDefault(value: string | null): string | null {
   if (value === null) return null;
   let v = value.trim();
   // 형 변환 꼬리 제거 (여러 번 붙을 수 있음)
-  for (let i = 0; i < 3; i++) v = v.replace(/::[a-z_ ]+(\(\d+(,\d+)?\))?(\[\])?$/i, '');
+  for (let i = 0; i < 3; i++) v = v.replace(/::([a-z_ ]+|"(?:[^"]|"")+")(\(\d+(,\d+)?\))?(\[\])?$/i, '');
   if (/^\((.*)\)$/.test(v) && !/^\(.*\)\s*\(/.test(v)) {
     const inner = v.slice(1, -1);
     if (/^-?\d+(\.\d+)?$/.test(inner)) v = inner;
   }
   return /^null$/i.test(v) ? null : v;
 }
+
+/** 사용자 정의 타입 (ENUM) 과 값 (정의한 순서대로) */
+const SQL_ENUMS = `
+  SELECT t.typname AS name, e.enumlabel AS value
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+  JOIN pg_enum e ON e.enumtypid = t.oid
+  WHERE n.nspname = $1
+  ORDER BY t.typname, e.enumsortorder`;
 
 const SQL_TABLES = `
   SELECT c.relname AS table_name, obj_description(c.oid, 'pg_class') AS comment
@@ -240,6 +250,21 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
     const pk = table.columns.filter((c) => c.primaryKey).map((c) => c.id);
     const same = (ids: string[]) => ids.length === r.fromColumnIds.length && ids.every((id) => r.fromColumnIds.includes(id));
     if (same(pk) || table.indexes.some((i) => i.unique && same(i.columnIds))) r.cardinality = '1:1';
+  }
+
+  // 사용자 정의 타입 (ENUM). id는 이름으로 정해 다시 읽어도 같게
+  const enumValues = new Map<string, string[]>();
+  for (const row of (await db.query<{ name: string; value: string }>(SQL_ENUMS, [schemaName])).rows) enumValues.set(row.name, [...(enumValues.get(row.name) ?? []), row.value]);
+  // 타입이 없어도 []로 둔다 (PostgreSQL은 타입 정보를 가진 쪽 — ERD에만 있는 타입은 'ERD에서 바뀜'으로 비교)
+  schema.enums = [...enumValues].map(([name, values]) => ({ id: `enum_${name}`, name, values }));
+  {
+    // ENUM을 쓰는 컬럼의 타입은 ENUM 이름 그대로 ("BillingStatus" → BillingStatus)
+    for (const t of schema.tables) {
+      for (const c of t.columns) {
+        const e = enumOfType(schema.enums, c.type);
+        if (e) c.type = e.name;
+      }
+    }
   }
 
   return { schema: stabilizeIds(schema), warnings };

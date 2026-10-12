@@ -17,6 +17,7 @@ const INSTRUCTIONS = [
   '영향도: edit_schema 결과의 impact에 함께 사라진 외래키·인덱스나 타입이 어긋난 FK 컬럼이 나오면, 의도와 다른 것은 이어서 고치고 사용자에게 알려 줍니다. 테이블·컬럼을 지우기 전에는 get_schema의 relations로 참조하는 테이블을 먼저 확인합니다.',
   '이름 표기 기준: get_schema의 project.namingStyle에 이 프로젝트의 물리명 표기(snake_case·SNAKE_CASE·camelCase)가 나옵니다. 테이블과 컬럼의 기준이 다를 수 있으니(예: 테이블 camelCase, 컬럼 snake_case) 각각 그 표기로 만듭니다. 아직 정해지지 않았으면 처음 만든 표기가 테이블·컬럼 따로 기준으로 저장되어 다음 명령부터 그 기준을 따릅니다 (snake_case 권장). edit_schema 결과의 naming에 기준과 다른 이름이 나오면 바로 고칩니다.',
   '표준 용어 사전: get_schema의 project.dictionary에 사전이 있다고 나오면, 설계 전에 lookup_dictionary(names·tables)로 논리명의 표준 물리명·타입·길이를 찾아 그대로 씁니다. 사전 표기는 프로젝트 이름 표기 기준과 같습니다. 사전에 없는 용어는 edit_schema가 반영될 때 사전에 자동으로 추가되고(같은 논리명·물리명이 이미 있으면 추가 안 됨) 결과의 dictionaryAdded에 나옵니다. 결과의 dictionary에 사전과 다른 컬럼·테이블이 나오면 고칩니다. 같은 이름·같은 논리명의 테이블은 만들 수 없습니다.',
+  '사용자 정의 타입(ENUM): 상태·구분처럼 값이 정해진 컬럼은 edit_schema의 createEnum으로 타입을 만들고 컬럼 type에 그 이름을 씁니다 (PostgreSQL은 CREATE TYPE, MySQL·MariaDB는 컬럼별 ENUM, Oracle·SQL Server는 VARCHAR로 만들어짐). get_schema의 enums에 있는 타입을 먼저 확인하고, 같은 값 목록의 타입을 또 만들지 않습니다.',
   '논리명·설명: DB comment에는 테이블·컬럼의 논리명(logicalName)이 들어가고, comment(설명)는 ERD에만 저장되는 상세 설명입니다. 논리명은 꼭 넣고, 설명은 필요할 때만 자세히 씁니다.',
   '메모: 사용자가 설계 설명·주의 사항을 캔버스에 남겨 달라고 하면 edit_notes(add)로 메모를 붙입니다 (영역 탭이면 area). 메모는 SQL·DB에 영향이 없습니다.',
 ].join('\n');

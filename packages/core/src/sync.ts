@@ -8,6 +8,7 @@ import { diffSchemas, normalizeSchema, type Change, type DiffResult } from './di
 import type { Dialect } from './dialects/types';
 import { cloneSchema, findTable, sameExpression, type Column, type Index, type Relation, type Schema, type Table } from './model';
 import { removeColumn, removeTable } from './operations';
+import { enumKey } from './enums';
 
 const key = (name: string) => name.toLowerCase();
 
@@ -73,6 +74,13 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema, opti
     }
   }
 
+  for (const e of incoming.enums ?? []) {
+    const m = (currentInput.enums ?? []).find((x) => enumKey(x.name) === enumKey(e.name));
+    if (!m) continue;
+    e.id = m.id;
+    if (m.comment) e.comment = m.comment;
+  }
+
   for (const relation of incoming.relations) {
     relation.fromTableId = tableIdMap.get(relation.fromTableId) ?? relation.fromTableId;
     relation.toTableId = tableIdMap.get(relation.toTableId) ?? relation.toTableId;
@@ -126,6 +134,10 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
       case 'addCheck':
       case 'dropCheck':
         return change.table.id;
+      case 'createEnum':
+      case 'dropEnum':
+      case 'alterEnum':
+        return undefined;
       case 'renameTable':
       case 'primaryKey':
         return change.after.id;
@@ -196,6 +208,16 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
         }
         break;
     }
+  }
+
+  // 사용자 정의 타입 (이름으로 맞춘다)
+  for (const change of changes) {
+    if (change.kind !== 'createEnum' && change.kind !== 'dropEnum' && change.kind !== 'alterEnum') continue;
+    const target = change.kind === 'alterEnum' ? change.after : change.enumType;
+    const k = enumKey(target.name);
+    const rest = (schema.enums ?? []).filter((e) => enumKey(e.name) !== k);
+    const old = (schema.enums ?? []).find((e) => enumKey(e.name) === k);
+    schema.enums = change.kind === 'dropEnum' ? rest : [...rest, { ...structuredClone(target), id: old?.id ?? target.id, ...(old?.comment ? { comment: old.comment } : {}) }];
   }
 
   for (const change of changes) {

@@ -30,6 +30,7 @@ import {
 } from './operations';
 import { addToArea, createArea, moveToArea, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
+import { addEnumType, enumOfType, removeEnumType, requireEnum, typeName, updateEnumType } from './enums';
 
 export interface ColumnSpec {
   name: string;
@@ -79,7 +80,11 @@ export type Command =
   | { op: 'dropArea'; area: string }
   | { op: 'addToArea'; area: string; tables: string[] }
   | { op: 'removeFromArea'; area: string; tables: string[] }
-  | { op: 'moveToArea'; area: string; tables: string[]; from?: string };
+  | { op: 'moveToArea'; area: string; tables: string[]; from?: string }
+  // 사용자 정의 타입 (ENUM). 컬럼 타입 칸에 이 이름을 쓴다
+  | { op: 'createEnum'; name: string; values: string[]; comment?: string }
+  | { op: 'updateEnum'; enum: string; name?: string; values?: string[]; comment?: string }
+  | { op: 'dropEnum'; enum: string };
 
 export class CommandError extends Error {
   constructor(public readonly index: number, message: string) {
@@ -109,10 +114,10 @@ export function columnPatch(spec: Partial<ColumnSpec>): Partial<Column> {
   if (spec.type !== undefined) {
     const m = spec.type.trim().match(/^([^(]+?)\s*\(([^)]*)\)\s*(.*)$/);
     if (m) {
-      patch.type = `${m[1]} ${m[3]}`.trim().toUpperCase();
+      patch.type = typeName(`${m[1]} ${m[3]}`);
       patch.length = m[2].replace(/\s+/g, '');
     } else {
-      patch.type = spec.type.trim().toUpperCase();
+      patch.type = typeName(spec.type);
       if (spec.length === undefined) patch.length = '';
     }
   }
@@ -273,6 +278,21 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
       removeFromArea(schema, area.id, tables.map((t) => t.id));
       return `영역 ${area.name}에서 ${tables.map((t) => t.name).join(', ')} 빼기 (테이블은 남음)`;
     }
+    case 'createEnum': {
+      const e = addEnumType(schema, { name: command.name, values: command.values, comment: command.comment });
+      return `타입 ${e.name} 생성 (ENUM ${e.values.join(', ')})`;
+    }
+    case 'updateEnum': {
+      const e = requireEnum(schema, command.enum);
+      const before = e.name;
+      updateEnumType(schema, e.id, { name: command.name, values: command.values, comment: command.comment });
+      return `타입 ${before}${e.name !== before ? ` → ${e.name}` : ''} 수정 (${e.values.join(', ')})`;
+    }
+    case 'dropEnum': {
+      const e = requireEnum(schema, command.enum);
+      const n = removeEnumType(schema, e.id);
+      return `타입 ${e.name} 삭제${n ? ` (쓰던 컬럼 ${n}개는 VARCHAR로)` : ''}`;
+    }
     case 'moveToArea': {
       const area = requireArea(schema, command.area);
       const from = command.from ? requireArea(schema, command.from) : undefined;
@@ -305,6 +325,18 @@ export function applyCommands(input: Schema, commands: Command[]): CommandResult
   const byArea = new Map<string, string[]>();
   for (const [tableId, areaId] of areaOf) if (findTable(schema, tableId) && schema.areas?.some((a) => a.id === areaId)) byArea.set(areaId, [...(byArea.get(areaId) ?? []), tableId]);
   for (const [areaId, ids] of byArea) addToArea(schema, areaId, ids);
+  // ENUM을 쓰는 컬럼의 타입은 ENUM에 적힌 이름 그대로 (대소문자·따옴표가 달라도 같은 타입)
+  if (schema.enums?.length) {
+    for (const t of schema.tables) {
+      for (const c of t.columns) {
+        const e = enumOfType(schema.enums, c.type);
+        if (e && (c.type !== e.name || c.length)) {
+          c.type = e.name;
+          c.length = '';
+        }
+      }
+    }
+  }
   return { schema, messages };
 }
 
@@ -353,6 +385,8 @@ export function describeSchema(schema: Schema) {
         onUpdate: r.onUpdate !== 'NO ACTION' ? r.onUpdate : undefined,
       };
     }),
+    // 사용자 정의 타입 (ENUM): 컬럼 type에 이 이름을 쓴다
+    enums: schema.enums?.length ? schema.enums.map((e) => ({ name: e.name, values: e.values, comment: e.comment || undefined })) : undefined,
     // 주제영역: 이름과 들어 있는 테이블 (화면에서 나눠 보는 탭)
     areas: schema.areas?.length
       ? schema.areas.map((a) => ({ name: a.name, tables: a.tableIds.map((id) => findTable(schema, id)?.name).filter(Boolean) }))

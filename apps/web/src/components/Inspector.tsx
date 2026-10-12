@@ -42,6 +42,9 @@ import {
   removeRelation,
   removeTable,
   tableTypeIssues,
+  canonicalType,
+  enumOfType,
+  typeName,
   updateColumn,
   updateIndex,
   updateRelation,
@@ -202,6 +205,7 @@ function TableEditor({ table }: { table: Table }) {
   const fkIds = foreignKeyColumnIds(schema, table.id);
   const setTable = (patch: Parameters<typeof updateTable>[2]) => edit((d) => updateTable(d, table.id, patch));
   // 지금 영역 탭이고 이 테이블이 그 영역에 있으면 (삭제 버튼 대신 영역에서 빼기)
+  const enums = useStore((s) => s.schema.enums);
   const currentArea = useStore((s) => (s.activeArea ? s.schema.areas?.find((a) => a.id === s.activeArea && a.tableIds.includes(table.id)) : undefined));
   const setColumn = (column: Column, patch: Partial<Column>) => edit((d) => updateColumn(d, table.id, column.id, patch));
   // 타입·길이·자동 증가·ON UPDATE를 바꿀 때 함께 바로잡는다 (예: VARCHAR(255)를 DATETIME으로 바꾸면 길이 255를 지움)
@@ -367,7 +371,7 @@ function TableEditor({ table }: { table: Table }) {
     edit((d) => {
       requestFocus(`column:${addColumn(d, table.id).id}`);
     });
-  const typeIssues = tableTypeIssues(dialect, table);
+  const typeIssues = tableTypeIssues(dialect, table, enums);
   const mark = (column: Column, field: TypeIssueField) => markOf(typeIssues, column.id, field);
 
   return (
@@ -424,6 +428,8 @@ function TableEditor({ table }: { table: Table }) {
           <button className="btn btn-sm" onClick={addColumnAndFocus} title="컬럼 추가 (마지막 컬럼 이름에서 Enter로도 추가)">+ 컬럼</button>
         </div>
         <datalist id="type-suggestions">
+          {/* 사용자 정의 타입(ENUM)을 먼저 */}
+          {(enums ?? []).map((e) => <option key={e.id} value={e.name} label={`ENUM ${e.values.join(', ')}`} />)}
           {dialect.typeSuggestions.map((t) => <option key={t} value={t} />)}
         </datalist>
         <div className="column-grid">
@@ -437,7 +443,7 @@ function TableEditor({ table }: { table: Table }) {
               {/* 마지막 컬럼의 이름에서 Enter: 다음 컬럼을 바로 추가 */}
               <TextInput value={c.name} onCommit={(name) => setPhysicalName(c, name)} className={fkIds.has(c.id) ? 'is-fk' : ''} issue={nameMark(c.name, 'column')} focusKey={`column:${c.id}`} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByPhysical} onPick={(t) => pickTerm(c, t)} />
               <TextInput value={c.logicalName} issue={dictMark(c)} onCommit={(logicalName) => setLogicalName(c, logicalName)} onEnter={i === table.columns.length - 1 ? addColumnAndFocus : undefined} suggest={suggestByLogical} onPick={(t) => pickTerm(c, t)} />
-              <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, { type: type.toUpperCase() })} />
+              <TextInput value={c.type} list="type-suggestions" issue={mark(c, 'type')} onCommit={(type) => setColumnFixed(c, enumOfType(enums, type) ? { type: canonicalType({ enums }, type), length: '' } : { type: typeName(type) })} />
               <TextInput value={c.length} issue={mark(c, 'length')} onCommit={(length) => setColumnFixed(c, { length })} />
               <input type="checkbox" checked={c.primaryKey} onChange={(e) => setColumn(c, { primaryKey: e.target.checked })} />
               <input type="checkbox" checked={!c.nullable || c.primaryKey} disabled={c.primaryKey} onChange={(e) => setColumn(c, { nullable: !e.target.checked })} />

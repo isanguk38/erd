@@ -27,7 +27,7 @@ const referentialAction = z.enum(['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL'
 const columnSpec = z.object({
   name: z.string().describe('물리명 (예: member_id)'),
   logicalName: z.string().optional().describe('논리명 (예: 회원번호)'),
-  type: z.string().optional().describe('타입. 길이를 붙여도 된다 (예: VARCHAR(100), DECIMAL(12,2), BIGINT)'),
+  type: z.string().optional().describe('타입. 길이를 붙여도 된다 (예: VARCHAR(100), DECIMAL(12,2), BIGINT). 사용자 정의 타입(ENUM)은 그 이름 (예: order_status)'),
   nullable: z.boolean().optional().describe('NULL 허용 (기본 true)'),
   primaryKey: z.boolean().optional(),
   unique: z.boolean().optional(),
@@ -90,6 +90,22 @@ const command = z.discriminatedUnion('op', [
   z.object({ op: z.literal('dropArea'), area: z.string().describe('지울 영역 (테이블은 남는다)') }),
   z.object({ op: z.literal('addToArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('넣을 테이블 (다른 영역에도 그대로 남는다)') }),
   z.object({ op: z.literal('removeFromArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('영역에서 뺄 테이블 (테이블은 남는다)') }),
+  // 사용자 정의 타입 (ENUM): 허용 값 목록. 컬럼 type에 이 이름을 쓴다.
+  // PostgreSQL은 CREATE TYPE으로, MySQL·MariaDB는 컬럼마다 ENUM(...)으로, Oracle·SQL Server는 VARCHAR로 만든다
+  z.object({
+    op: z.literal('createEnum'),
+    name: z.string().describe('타입 이름 (예: order_status). 프로젝트 이름 표기 기준을 따른다'),
+    values: z.array(z.string()).min(1).describe("허용 값 (순서대로. 예: ['READY', 'PAID', 'CANCELED'])"),
+    comment: z.string().optional().describe('설명 (ERD에만 저장)'),
+  }),
+  z.object({
+    op: z.literal('updateEnum'),
+    enum: z.string().describe('고칠 타입 이름'),
+    name: z.string().optional().describe('새 이름 (쓰는 컬럼의 타입도 함께 바뀐다)'),
+    values: z.array(z.string()).min(1).optional().describe('새 값 목록 전체 (PostgreSQL에서 값을 빼거나 순서를 바꾸면 타입을 다시 만든다)'),
+    comment: z.string().optional(),
+  }),
+  z.object({ op: z.literal('dropEnum'), enum: z.string().describe('지울 타입 (쓰던 컬럼은 VARCHAR로 바뀐다)') }),
   z.object({
     op: z.literal('moveToArea'),
     area: z.string().describe('옮겨 갈 영역'),

@@ -21,6 +21,7 @@ export * from './comments';
 export * from './changes';
 export * from './notes';
 export * from './naming';
+export * from './enums';
 export * from './dictionary';
 export * from './impact';
 export * from './safety';

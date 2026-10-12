@@ -1,6 +1,7 @@
 import type { ColumnField, Dialect } from './dialects/types';
 import { columnWarnings, indexWarnings, sqlComment } from './dialects/common';
 import { columnTypeIssues, tableTypeIssues, type TypeIssue } from './typeRules';
+import { enumAdditions, enumKey, enumUsages, hasEnumObjects, resolveEnumColumns, sameEnumValues } from './enums';
 import {
   cloneSchema,
   expressionColumns,
@@ -12,6 +13,7 @@ import {
   sameIndexMethod,
   type CheckConstraint,
   type Column,
+  type EnumType,
   type Index,
   type Relation,
   type Schema,
@@ -52,6 +54,10 @@ export type Change = ChangeBase &
     | { kind: 'dropForeignKey'; relation: Relation }
     | { kind: 'addCheck'; table: Table; check: CheckConstraint }
     | { kind: 'dropCheck'; table: Table; check: CheckConstraint }
+    // 사용자 정의 타입 (PostgreSQL처럼 타입 객체가 있는 DB만). usages: 이 타입을 쓰는 컬럼 (다시 만들 때 컬럼 타입도 바꾼다)
+    | { kind: 'createEnum'; enumType: EnumType }
+    | { kind: 'dropEnum'; enumType: EnumType }
+    | { kind: 'alterEnum'; before: EnumType; after: EnumType; usages: { table: string; column: Column }[] }
   );
 
 export type ChangeKind = Change['kind'];
@@ -157,9 +163,14 @@ function typeWarnings(issues: TypeIssue[]): string[] {
 const joinWarnings = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(' / ') || undefined;
 
 export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dialect): DiffResult {
-  const base = normalizeSchema(baseInput);
-  const target = normalizeSchema(targetInput);
+  // ENUM을 쓰는 컬럼은 이 DB에서 실제로 만들 타입으로 펼쳐 비교한다 (MySQL: ENUM('a','b'), PostgreSQL: 타입 이름)
+  const base = normalizeSchema(resolveEnumColumns(baseInput, dialect.id));
+  const target = normalizeSchema(resolveEnumColumns(targetInput, dialect.id));
   const changes: Change[] = [];
+  // 사용자 정의 타입: 양쪽 모두 타입 정보를 가질 때만 비교한다 (enums가 없는 쪽은 모르는 것 — MySQL DB, CREATE TYPE 없는 DDL 등).
+  // 타입 객체가 있는 DB(PostgreSQL)는 빈 스키마에서 만들 때도 비교한다 (전체 CREATE SQL, 빈 ERD로 가져오기)
+  const knows = (s: Schema) => Array.isArray(s.enums) || (hasEnumObjects(dialect.id) && !s.tables.length);
+  if (knows(base) && knows(target)) diffEnums(base, target, changes);
 
   const baseTables = byId(base.tables);
   const targetTables = byId(target.tables);
@@ -170,7 +181,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     const before = baseTables.get(table.id);
     if (!before) {
       createdTableIds.add(table.id);
-      const tableWarning = joinWarnings(...table.columns.map((c) => columnWarnings(dialect, c)), ...typeWarnings(tableTypeIssues(dialect, table)));
+      const tableWarning = joinWarnings(...table.columns.map((c) => columnWarnings(dialect, c)), ...typeWarnings(tableTypeIssues(dialect, table, target.enums)));
       changes.push({ kind: 'createTable', id: `createTable:${table.id}`, category: 'create', tableName: table.name, summary: `${table.name} 테이블 생성`, table, warning: tableWarning });
       for (const check of table.checks ?? []) {
         changes.push({ kind: 'addCheck', id: `addCheck:${table.id}:${check.id}`, category: 'create', tableName: table.name, summary: `${table.name} CHECK 추가 (${check.expression})`, table, check });
@@ -186,7 +197,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
       }
       continue;
     }
-    diffTable(dialect, before, table, changes);
+    diffTable(dialect, before, table, changes, target.enums);
   }
 
   for (const table of base.tables) {
@@ -240,11 +251,39 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
   return { base, target, changes };
 }
 
+/** 사용자 정의 타입 비교 (이름으로 맞춘다 — 대소문자·따옴표 무시) */
+function diffEnums(base: Schema, target: Schema, changes: Change[]): void {
+  const before = new Map((base.enums ?? []).map((e) => [enumKey(e.name), e]));
+  const after = new Map((target.enums ?? []).map((e) => [enumKey(e.name), e]));
+  for (const [k, e] of after) {
+    const old = before.get(k);
+    if (!old) {
+      changes.push({ kind: 'createEnum', id: `createEnum:${k}`, category: 'create', tableName: e.name, summary: `타입 ${e.name} 생성 (ENUM ${e.values.join(', ')})`, enumType: e, warning: e.values.length ? undefined : '값이 없는 ENUM입니다' });
+      continue;
+    }
+    if (sameEnumValues(old.values, e.values)) continue;
+    const added = enumAdditions(old.values, e.values);
+    const removed = old.values.filter((v) => !e.values.includes(v));
+    const usages = enumUsages(target, e).map((u) => ({ table: u.table, column: u.column }));
+    const summary = added
+      ? `타입 ${e.name} 값 추가 (${added.map((a) => a.value).join(', ')})`
+      : `타입 ${e.name} 값 변경 (${old.values.join(', ')} → ${e.values.join(', ')})`;
+    const warning = added
+      ? undefined
+      : `값을 빼거나 순서를 바꾸면 타입을 다시 만들고 쓰는 컬럼(${usages.length}개)의 타입을 바꿉니다${removed.length ? ` — 지운 값(${removed.join(', ')})을 쓰는 행이 있으면 실패합니다` : ''}`;
+    changes.push({ kind: 'alterEnum', id: `alterEnum:${k}`, category: 'alter', tableName: e.name, summary, warning, before: old, after: e, usages });
+  }
+  for (const [k, e] of before) {
+    if (after.has(k)) continue;
+    changes.push({ kind: 'dropEnum', id: `dropEnum:${k}`, category: 'drop', tableName: e.name, summary: `타입 ${e.name} 삭제`, warning: '이 타입을 쓰는 컬럼이 남아 있으면 실패합니다', enumType: e });
+  }
+}
+
 function columnList(table: Table, ids: string[]): string {
   return ids.map((id) => table.columns.find((c) => c.id === id)?.name ?? id).join(', ');
 }
 
-function diffTable(dialect: Dialect, before: Table, after: Table, changes: Change[]): void {
+function diffTable(dialect: Dialect, before: Table, after: Table, changes: Change[], enums?: EnumType[]): void {
   const name = after.name;
 
   if (before.name !== after.name) {
@@ -289,7 +328,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       changes.push({
         kind: 'addColumn', id: `addColumn:${after.id}:${column.id}`, category: 'alter', tableName: name,
         summary: `${name}.${column.name} 컬럼 추가`,
-        warning: joinWarnings(needsDefault ? '기존 행이 있으면 NOT NULL 컬럼 추가에 기본값이 필요합니다' : undefined, ...typeWarnings(columnTypeIssues(dialect, column))),
+        warning: joinWarnings(needsDefault ? '기존 행이 있으면 NOT NULL 컬럼 추가에 기본값이 필요합니다' : undefined, ...typeWarnings(columnTypeIssues(dialect, column, enums))),
         table: after, column, previous: i > 0 ? after.columns[i - 1] : null,
       });
       return;
@@ -319,7 +358,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
     changes.push({
       kind: 'alterColumn', id: `alterColumn:${after.id}:${column.id}`, category: 'alter', tableName: name,
       summary: `${name}.${column.name} 변경: ${detail}`,
-      warning: joinWarnings(columnWarning(old, column, fields), ...typeWarnings(columnTypeIssues(dialect, column))),
+      warning: joinWarnings(columnWarning(old, column, fields), ...typeWarnings(columnTypeIssues(dialect, column, enums))),
       table: after, before: old, after: column, fields, beforeTable: before,
     });
   });

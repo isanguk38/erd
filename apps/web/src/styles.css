@@ -1026,3 +1026,18 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .naming-panel__help { margin: 0; line-height: 1.5; }
 @media (max-width: 720px) { .topbar .naming-badge { display: none; } }
 .column-grid__row input.naming-off, .form-grid input.naming-off { border-color: var(--warning); border-style: dashed; }
+
+/* 사용자 정의 타입(ENUM) 창 */
+.enum-help { margin: 0 0 12px; line-height: 1.6; }
+.enum-new { display: grid; grid-template-columns: 200px 1fr auto; gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); margin-bottom: 14px; }
+.enum-new label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.enum-new input, .enum-new textarea { width: 100%; box-sizing: border-box; font-size: 13px; color: var(--text); }
+.enum-new textarea { resize: vertical; min-height: 58px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.enum-empty { margin: 8px 0; }
+.enum-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.enum-row { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 6px; background: var(--panel); }
+.enum-row__head { display: flex; align-items: center; gap: 8px; }
+.enum-row__name { flex: 1; min-width: 0; font-weight: 700; font-size: 13px; }
+.enum-row__values { width: 100%; box-sizing: border-box; resize: vertical; font-size: 12px; line-height: 1.5; }
+.enum-row__usages { margin: 0; word-break: break-all; }
+@media (max-width: 720px) { .enum-new { grid-template-columns: 1fr; } }

@@ -105,7 +105,8 @@ export function relationTables(schema: Schema, relation: Relation): { from: Tabl
 
 export function typeWithLength(type: string, length: string): string {
   const t = type.trim().toUpperCase();
-  const len = length.replace(/\s+/g, '');
+  // 따옴표 밖의 공백만 지운다 (ENUM('in progress', 'done')의 값 안 공백은 남긴다)
+  const len = length.replace(/\s+(?=([^']*'[^']*')*[^']*$)/g, '');
   if (!len) return t;
   // DECIMAL UNSIGNED + 10,2 → DECIMAL(10,2) UNSIGNED
   const [base, ...modifiers] = t.split(' ').filter(Boolean);

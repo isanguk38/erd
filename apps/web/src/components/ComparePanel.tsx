@@ -42,6 +42,11 @@ function tableIdOf(c: Change): string | undefined {
     case 'addForeignKey':
     case 'dropForeignKey':
       return c.relation.fromTableId;
+    // 사용자 정의 타입은 테이블이 아니다
+    case 'createEnum':
+    case 'dropEnum':
+    case 'alterEnum':
+      return undefined;
     default:
       return c.table.id;
   }

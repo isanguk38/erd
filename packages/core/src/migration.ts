@@ -19,6 +19,10 @@ export interface Statement {
  */
 const PHASE: Record<ChangeKind, number> = {
   dropForeignKey: 1,
+  // 사용자 정의 타입은 테이블·컬럼보다 먼저 만들고(값 추가 포함), 테이블을 다 지운 뒤에 지운다
+  createEnum: 3.5,
+  alterEnum: 3.6,
+  dropEnum: 12,
   dropCheck: 2,
   dropIndex: 2,
   renameTable: 3,
@@ -68,6 +72,9 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect, chose
     case 'dropForeignKey': return dialect.dropForeignKey(diff.base, change.relation);
     case 'addCheck': return dialect.addCheck ? dialect.addCheck(change.table, change.check) : [addCheckSql(dialect.quote, change.table, change.check)];
     case 'dropCheck': return dialect.dropCheck ? dialect.dropCheck(change.table, change.check) : [`ALTER TABLE ${dialect.quote(change.table.name)} DROP CONSTRAINT ${dialect.quote(checkName(change.table, change.check))}`];
+    case 'createEnum': return dialect.createEnum?.(change.enumType) ?? [];
+    case 'dropEnum': return dialect.dropEnum?.(change.enumType) ?? [];
+    case 'alterEnum': return dialect.alterEnum?.(change.before, change.after, change.usages) ?? [];
   }
 }
 

@@ -1,6 +1,7 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
 import { quoteExpression, columnNames, literal, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect } from './types';
+import { enumAdditions, pgEnumTypeName } from '../enums';
 
 const TYPE_MAP: Record<string, string> = {
   DATETIME: 'TIMESTAMP',
@@ -46,7 +47,21 @@ function q(name: string): string {
   return '"' + name.replace(/"/g, '""') + '"';
 }
 
+/**
+ * 따옴표로 감싼 사용자 타입 ("BillingStatus")은 대소문자를 구분하므로 그대로 둔다.
+ * 다만 소문자만이면 따옴표가 없는 것과 같으므로 다른 타입처럼 대문자로 맞춘다 ("mood" = mood).
+ */
+function quotedType(type: string): string | null {
+  const t = type.trim().replace(/^public\./i, '');
+  const m = t.match(/^"((?:[^"]|"")+)"(\[\])?$/);
+  if (!m) return null;
+  const inner = m[1]!;
+  return /^[a-z_][a-z0-9_]*$/.test(inner) ? `${inner.toUpperCase()}${m[2] ?? ''}` : t;
+}
+
 function renderType(column: Column): string {
+  const quoted = quotedType(column.type);
+  if (quoted) return quoted;
   // PostgreSQL에는 UNSIGNED가 없다
   const raw = column.type.trim().toUpperCase().replace(/\s+(UNSIGNED|ZEROFILL)\b/g, '');
   const type = TYPE_MAP[raw] ?? raw;
@@ -98,8 +113,8 @@ export const postgresql: Dialect = {
   normalizeAction: (action) => action,
   normalizeDefault(value) {
     if (value === null) return null;
-    // 'Y'::character varying → 'Y'
-    const stripped = value.replace(/::[a-z ]+(\[\])?$/i, '');
+    // 'Y'::character varying → 'Y', 'ISSUED'::"BillingStatus" → 'ISSUED'
+    const stripped = value.replace(/::([a-z_ ]+|"(?:[^"]|"")+")(\[\])?$/i, '');
     const v = normalizeDefaultCommon(stripped);
     if (v === 'NOW()') return 'CURRENT_TIMESTAMP';
     return v;
@@ -186,5 +201,30 @@ export const postgresql: Dialect = {
   dropForeignKey(schema, relation) {
     const { from } = relationTables(schema, relation);
     return [`ALTER TABLE ${q(from.name)} DROP CONSTRAINT ${q(relationName(schema, relation))}`];
+  },
+
+  createEnum: (e) => [`CREATE TYPE ${pgEnumTypeName(e.name)} AS ENUM (${e.values.map((v) => literal(v)).join(', ')})`],
+  dropEnum: (e) => [`DROP TYPE ${pgEnumTypeName(e.name)}`],
+  alterEnum(before, after, usages) {
+    const name = pgEnumTypeName(after.name);
+    const added = enumAdditions(before.values, after.values);
+    // 값 추가만: ALTER TYPE ... ADD VALUE (위치 지정)
+    if (added) {
+      return added.map((a) => `ALTER TYPE ${name} ADD VALUE ${literal(a.value)}${a.before ? ` BEFORE ${literal(a.before)}` : a.after ? ` AFTER ${literal(a.after)}` : ''}`);
+    }
+    // 값을 빼거나 순서를 바꾸면: 옛 타입 이름을 바꾸고 새로 만든 뒤, 쓰는 컬럼을 새 타입으로 옮기고 옛 타입을 지운다
+    const old = pgEnumTypeName(`${after.name.replace(/"/g, '')}_old`);
+    const statements = [`ALTER TYPE ${name} RENAME TO ${old}`, `CREATE TYPE ${name} AS ENUM (${after.values.map((v) => literal(v)).join(', ')})`];
+    for (const u of usages) {
+      const c = q(u.column.name);
+      const t = q(u.table);
+      const def = u.column.defaultValue?.trim();
+      // 기본값이 옛 타입을 가리키면 타입을 바꿀 수 없어 잠깐 지웠다가 다시 건다
+      if (def) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} DROP DEFAULT`);
+      statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} TYPE ${name} USING ${c}::text::${name}`);
+      if (def) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} SET DEFAULT ${def}`);
+    }
+    statements.push(`DROP TYPE ${old}`);
+    return statements;
   },
 };

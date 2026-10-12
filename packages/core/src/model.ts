@@ -111,9 +111,23 @@ export interface Area {
   positions?: Record<string, { x: number; y: number }>;
 }
 
+/**
+ * 사용자 정의 타입 (ENUM): 허용 값 목록. 컬럼 타입 칸에 이 이름을 적어 쓴다 (enums.ts).
+ * PostgreSQL은 CREATE TYPE으로 만들고, MySQL·MariaDB는 컬럼마다 ENUM(...)으로, ENUM이 없는 DB는 VARCHAR로 만든다.
+ */
+export interface EnumType {
+  id: string;
+  name: string;
+  values: string[];
+  /** 설명 (ERD에만 저장) */
+  comment?: string;
+}
+
 export interface Schema {
   tables: Table[];
   relations: Relation[];
+  /** 사용자 정의 타입 (ENUM). enums를 빼고 저장하면 기존 타입은 그대로 둔다 */
+  enums?: EnumType[];
   /** 주제영역 (없으면 영역을 쓰지 않음). areas를 빼고 저장하면 기존 영역은 그대로 둔다 */
   areas?: Area[];
 }

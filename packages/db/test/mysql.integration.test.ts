@@ -103,6 +103,25 @@ async function remaining(config: ConnectionConfig, schema: Schema) {
 }
 
 describe.skipIf(!url)('MySQL 실제 서버', () => {
+  it('사용자 정의 타입(ENUM)은 컬럼마다 ENUM(...)으로 만들고, 다시 읽으면 0건, 값을 바꾸면 컬럼 타입 변경', async () => {
+    const config = await freshDatabase();
+    let schema = applyCommands(emptySchema(), [
+      { op: 'createEnum', name: 'order_status', values: ['READY', 'in progress', "it's done"] },
+      { op: 'createTable', name: 'orders', columns: [{ name: 'id', type: 'INT', primaryKey: true }, { name: 'status', type: 'order_status', nullable: false, default: "'READY'" }] },
+    ]).schema;
+    const first = await push(config, schema);
+    expect(first.result.results.filter((r) => !r.ok)).toEqual([]);
+    expect(await remaining(config, schema)).toEqual([]);
+    // DB에는 ENUM 객체가 없으므로 가져오기에서 ERD의 타입을 지우지 않는다
+    const db = (await mysqlConnector.introspect(config)).schema;
+    expect(planPull(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+    schema = applyCommands(schema, [{ op: 'updateEnum', enum: 'order_status', values: ['READY', 'in progress', "it's done", 'CANCELED'] }]).schema;
+    const second = await push(config, schema);
+    expect(second.plan.diff.changes.map((c) => c.kind)).toEqual(['alterColumn']);
+    expect(second.result.results.filter((r) => !r.ok)).toEqual([]);
+    expect(await remaining(config, schema)).toEqual([]);
+  }, 60000);
+
   it('DB가 바꿔 쓴 식은 내보낼 때 짝으로 기억해 다음 비교에서 같다고 본다 (표준화 규칙 없이)', async () => {
     const config = await freshDatabase();
     // MySQL은 NOT x = 0을 (`x` <> 0)으로 바꿔 저장한다 (표준화 규칙으로는 같다고 볼 수 없는 모양)

@@ -364,6 +364,8 @@ export const useStore = create<State>()(
             draft.tables = copy.tables;
             draft.relations = copy.relations;
             if (copy.areas) draft.areas = copy.areas;
+            // 타입 정보를 가진 스키마(PostgreSQL DB·CREATE TYPE이 든 DDL·ERD)면 타입도 바꾼다
+            if (copy.enums) draft.enums = copy.enums;
           });
           set({ selection: null, selectedTables: [], inspectorOpen: false });
         },

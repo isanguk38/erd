@@ -267,6 +267,46 @@ describe('MCP', () => {
     expect(approved.dictionaryAdded).toEqual(['배송메모=DLV_MEMO']);
   }, 30_000);
 
+  it('사용자 정의 타입(ENUM): AI가 만들고 컬럼에 쓰면 DB별 SQL로, 제안으로 승인해도 타입이 들어간다', async () => {
+    const { erd, url } = await start();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await client.callTool({ name, arguments: args });
+      if ((r as ToolResult).isError) throw new Error(textOf(r));
+      const t = textOf(r);
+      return t.startsWith('{') ? JSON.parse(t) : t;
+    };
+    const created = await call('create_project', { name: '타입', dialect: 'postgresql' });
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'apply' } });
+    const edited = await call('edit_schema', {
+      project: '타입',
+      commands: [
+        { op: 'createEnum', name: 'order_status', values: ['READY', 'PAID'] },
+        { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_id', logicalName: '주문번호', type: 'BIGINT', primaryKey: true }, { name: 'status', logicalName: '상태', type: 'ORDER_STATUS', nullable: false }] },
+      ],
+    });
+    expect(edited.messages[0]).toBe('타입 order_status 생성 (ENUM READY, PAID)');
+    const schema = await call('get_schema', { project: '타입' });
+    expect(schema.enums).toEqual([{ name: 'order_status', values: ['READY', 'PAID'] }]);
+    expect(schema.tables[0].columns[1].type).toBe('order_status');
+    expect(await call('export_sql', { project: '타입' })).toContain(`CREATE TYPE order_status AS ENUM ('READY', 'PAID')`);
+    expect(await call('export_sql', { project: '타입', dialect: 'mysql' })).toContain("`status` ENUM('READY','PAID') NOT NULL");
+    // 설계 검사: ENUM 이름을 모르는 타입이라고 하지 않는다
+    const lint = await call('check_design', { project: '타입' });
+    expect(JSON.stringify(lint)).not.toContain('모르는 타입');
+
+    // 제안 모드: 값 추가를 제안하고 사람이 승인하면 반영
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'propose' } });
+    const proposed = await call('edit_schema', { project: '타입', commands: [{ op: 'updateEnum', enum: 'order_status', values: ['READY', 'PAID', 'CANCELED'] }] });
+    expect(proposed.pendingChanges.map((c: { summary: string }) => c.summary)).toEqual(['타입 order_status 값 추가 (CANCELED)']);
+    await erd.app.inject({ method: 'POST', url: `/api/projects/${created.id}/proposals/${proposed.proposalId}/apply`, payload: {} });
+    expect(erd.projects.schema(created.id).enums?.[0].values).toEqual(['READY', 'PAID', 'CANCELED']);
+  }, 30_000);
+
   it('로컬(stdio와 같은 경로): AI가 테이블을 만들고 관계를 잇고 SQL을 뽑는다', async () => {
     const { erd, url } = await start();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

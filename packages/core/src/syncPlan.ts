@@ -16,6 +16,7 @@ import { applyExpressionPairs, rememberExpressions, withExpressionPairs, type Ba
 import type { Dialect } from './dialects/types';
 import { cloneSchema, type Column, type Schema, type Table } from './model';
 import { alignToCurrent } from './sync';
+import { enumKey } from './enums';
 
 export type ChangeOrigin = 'db' | 'erd' | 'conflict' | 'unknown';
 
@@ -88,6 +89,11 @@ export function changeKey(change: Change): string {
     case 'addCheck':
     case 'dropCheck':
       return `k:${change.check.id}`;
+    case 'createEnum':
+    case 'dropEnum':
+      return `e:${enumKey(change.enumType.name)}`;
+    case 'alterEnum':
+      return `e:${enumKey(change.after.name)}`;
   }
 }
 

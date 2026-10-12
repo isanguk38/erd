@@ -2,7 +2,8 @@
 // 규칙은 아래 RULES 표에 한 줄씩 있다. 새 규칙은 표에 추가하면 설계 검사·편집 창·DB 내보내기 경고에 함께 쓰인다.
 
 import { getDialect, type Dialect, type DialectId } from './dialects';
-import type { Column, Table } from './model';
+import type { Column, EnumType, Table } from './model';
+import { enumOfType, resolveEnumColumn } from './enums';
 
 export type TypeIssueSeverity = 'error' | 'warning' | 'info';
 /** 문제가 있는 편집 칸 (편집 창에서 표시할 곳) */
@@ -155,9 +156,11 @@ const RULES: Rule[] = [
   {
     code: 'unknown-type',
     dialects: 'all',
-    check({ dialect, base }) {
+    check({ dialect, base, column }) {
       const first = base.replace(/\[\]$/, '').split(/\s+/)[0] ?? '';
       if (!first || KNOWN_TYPES[dialect].has(first) || ENUM_LIKE.has(first)) return undefined;
+      // PostgreSQL: 따옴표로 감싼 타입은 직접 만든 타입 (CREATE TYPE)
+      if (dialect === 'postgresql' && column.type.includes('"')) return undefined;
       return {
         severity: 'warning',
         field: 'type',
@@ -460,15 +463,23 @@ function runRules(dialect: Dialect, column: Column, only?: (rule: Rule) => boole
   return issues;
 }
 
-/** 컬럼 하나의 타입 문제 */
-export function columnTypeIssues(dialect: Dialect | DialectId | string, column: Column): TypeIssue[] {
-  return runRules(asDialect(dialect), column).map(({ autoFix: _autoFix, ...issue }) => issue);
+/**
+ * 컬럼 하나의 타입 문제. enums를 주면 ENUM을 쓰는 컬럼은 이 DB에서 실제로 만들 타입으로 보고 검사한다
+ * (PostgreSQL은 CREATE TYPE으로 만든 타입이라 검사하지 않음)
+ */
+export function columnTypeIssues(dialect: Dialect | DialectId | string, column: Column, enums?: EnumType[]): TypeIssue[] {
+  const d = asDialect(dialect);
+  if (enumOfType(enums, column.type)) {
+    if (d.id === 'postgresql') return [];
+    column = resolveEnumColumn(column, enums, d.id);
+  }
+  return runRules(d, column).map(({ autoFix: _autoFix, ...issue }) => issue);
 }
 
 /** 테이블의 타입 문제 (컬럼별 + 테이블 단위: 자동 증가 컬럼 개수, MySQL 자동 증가 컬럼의 인덱스) */
-export function tableTypeIssues(dialect: Dialect | DialectId | string, table: Table): TableTypeIssue[] {
+export function tableTypeIssues(dialect: Dialect | DialectId | string, table: Table, enums?: EnumType[]): TableTypeIssue[] {
   const d = asDialect(dialect);
-  const issues: TableTypeIssue[] = table.columns.flatMap((c) => columnTypeIssues(d, c).map((i) => ({ ...i, columnId: c.id, columnName: c.name })));
+  const issues: TableTypeIssue[] = table.columns.flatMap((c) => columnTypeIssues(d, c, enums).map((i) => ({ ...i, columnId: c.id, columnName: c.name })));
   const auto = table.columns.filter((c) => c.autoIncrement && !c.generated?.expression.trim());
   if (auto.length > 1 && d.id !== 'postgresql') {
     for (const c of auto.slice(1)) {

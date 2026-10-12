@@ -1,4 +1,4 @@
-import type { CheckConstraint, Column, Index, ReferentialAction, Relation, Schema, Table } from '../model';
+import type { CheckConstraint, Column, EnumType, Index, ReferentialAction, Relation, Schema, Table } from '../model';
 
 /** 새 DB를 추가하려면 이 목록에 id를 넣고 Dialect를 구현해 registry에 등록한다. */
 export type DialectId = 'mysql' | 'mariadb' | 'postgresql' | 'oracle' | 'mssql';
@@ -51,6 +51,10 @@ export interface Dialect {
   /** CHECK 제약 추가/삭제 (없으면 ALTER TABLE ... ADD/DROP CONSTRAINT) */
   addCheck?(table: Table, check: CheckConstraint): string[];
   dropCheck?(table: Table, check: CheckConstraint): string[];
+  /** 사용자 정의 타입 (ENUM 객체가 있는 DB만 — PostgreSQL). usages: 그 타입을 쓰는 컬럼 */
+  createEnum?(enumType: EnumType): string[];
+  dropEnum?(enumType: EnumType): string[];
+  alterEnum?(before: EnumType, after: EnumType, usages: { table: string; column: Column }[]): string[];
   /** 계산 컬럼에서 쓸 수 있는 방식: virtual(값을 저장하지 않음)·stored(저장) */
   generatedSupport?: { virtual?: boolean; stored?: boolean; /** false면 계산 컬럼의 타입을 DB가 정한다 (SQL Server) → 타입은 비교하지 않는다 */ typed?: boolean };
 }

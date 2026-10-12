@@ -11,7 +11,7 @@
 import * as Y from 'yjs';
 import type { AiReview } from './aiReview';
 import { namingSettingValue, readNamingSetting, type NamingSetting } from './naming';
-import type { Area, CheckConstraint, Column, Index, Relation, Schema, Table } from './model';
+import type { Area, CheckConstraint, Column, EnumType, Index, Relation, Schema, Table } from './model';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
 const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'onUpdate', 'generated', 'comment'] as const;
@@ -42,6 +42,10 @@ function tablesMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 
 function relationsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return child(rootMap(doc), 'relations', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
+}
+
+function enumsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return child(rootMap(doc), 'enums', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
 }
 
 function areasMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
@@ -128,6 +132,24 @@ export function writeSchema(doc: Y.Doc, schema: Schema): void {
     for (const f of RELATION_FIELDS) setIfChanged(map, f, relation[f]);
   }
 
+  // 사용자 정의 타입: enums를 넘긴 경우에만 맞춘다 (모르는 쪽이 저장해도 타입은 남는다)
+  if (schema.enums && (schema.enums.length || rootMap(doc).has('enums'))) {
+    const enums = enumsMap(doc);
+    const wanted = new Set(schema.enums.map((e) => e.id));
+    for (const id of [...enums.keys()]) if (!wanted.has(id)) enums.delete(id);
+    schema.enums.forEach((e, order) => {
+      let map = enums.get(e.id);
+      if (!map) {
+        map = new Y.Map();
+        enums.set(e.id, map);
+      }
+      setIfChanged(map, 'name', e.name);
+      setIfChanged(map, 'values', e.values);
+      setIfChanged(map, 'comment', e.comment?.trim() ? e.comment : undefined);
+      setIfChanged(map, 'order', order);
+    });
+  }
+
   // 영역: areas를 넘긴 경우에만 맞춘다 (영역을 모르는 쪽 — DB 가져오기·SQL 붙여넣기 등 — 이 저장해도 영역은 남는다)
   if (schema.areas) {
     const areas = areasMap(doc);
@@ -206,7 +228,19 @@ export function readSchema(doc: Y.Doc): Schema {
   });
   areas.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 
+  const enumsY = root.get('enums') as Y.Map<Y.Map<unknown>> | undefined;
+  const enums: (EnumType & { order: number })[] = [];
+  enumsY?.forEach((map, id) => {
+    const e: EnumType & { order: number } = { id, name: (map.get('name') as string) ?? '', values: [...((map.get('values') as string[]) ?? [])], order: (map.get('order') as number) ?? 0 };
+    const comment = map.get('comment') as string | undefined;
+    if (comment) e.comment = comment;
+    enums.push(e);
+  });
+  enums.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
   const schema: Schema = { tables: tables.map(({ order: _order, ...t }) => t), relations };
+  // ERD 문서는 타입 정보를 늘 가진다 (없으면 []). 비교할 때 '타입을 모르는 쪽'(MySQL DB 등)과 구분한다
+  schema.enums = enums.map(({ order: _order, ...e }) => e);
   if (areas.length) schema.areas = areas.map(({ order: _order, ...a }) => a);
   return schema;
 }

@@ -27,6 +27,7 @@ const PATHS: Record<string, string> = {
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   list: 'M4 6h16M4 12h16M4 18h10',
   note: 'M5 3h14v11l-7 7H5zM12 21v-7h7',
+  tag: 'M3 12V4h8l10 10-8 8zM7.5 7.5h.01',
   book: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z',
 };
 

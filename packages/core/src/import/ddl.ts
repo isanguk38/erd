@@ -1,5 +1,5 @@
 // DDL(CREATE TABLE 등)을 읽어 스키마 모델로 바꾼다. MySQL과 PostgreSQL 문법을 함께 지원한다.
-// 지원: CREATE TABLE, CREATE [UNIQUE] INDEX, ALTER TABLE ... ADD (컬럼/제약조건), COMMENT ON TABLE/COLUMN
+// 지원: CREATE TABLE, CREATE [UNIQUE] INDEX, ALTER TABLE ... ADD (컬럼/제약조건), COMMENT ON TABLE/COLUMN, CREATE TYPE ... AS ENUM (PostgreSQL)
 // 나머지 문장(INSERT, SET, DROP 등)은 건너뛰고 warnings에 남긴다.
 
 import type { DialectId } from '../dialects/types';
@@ -16,6 +16,7 @@ import {
   type Table,
 } from '../model';
 import { splitStatements, tokenize, type Token } from './tokenizer';
+import { createEnum, enumKey, enumOfType, parseEnumValueList } from '../enums';
 
 export interface DdlImportOptions {
   /** 'auto'면 문법을 보고 추측한다 */
@@ -173,6 +174,15 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
           parseCreateIndex(c, unique);
           continue;
         }
+        // PostgreSQL 사용자 정의 타입: CREATE TYPE 이름 AS ENUM ('a', 'b')
+        if (!unique && c.accept('TYPE')) {
+          const name = c.qualifiedName();
+          if (c.accept('AS', 'ENUM')) {
+            const values = parseEnumValueList(c.skipParens());
+            schema.enums = [...(schema.enums ?? []).filter((e) => enumKey(e.name) !== enumKey(name)), createEnum({ name, values })];
+            continue;
+          }
+        }
       } else if (c.is('ALTER') && c.is('TABLE', 1)) {
         c.pos += 2;
         parseAlterTable(c);
@@ -225,6 +235,14 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
       table.indexes = table.indexes.filter(
         (i) => i.unique || i.expression || !fks.some((r) => r.name === i.name && r.fromColumnIds.join() === i.columnIds.join()),
       );
+    }
+  }
+
+  // ENUM을 쓰는 컬럼의 타입은 ENUM에 적힌 이름 그대로
+  for (const t of schema.tables) {
+    for (const col of t.columns) {
+      const e = enumOfType(schema.enums, col.type);
+      if (e) col.type = e.name;
     }
   }
 
@@ -374,7 +392,9 @@ export function parseDdl(sql: string, options: DdlImportOptions = {}): DdlImport
 
   /** 타입 읽기: 여러 단어 타입, 길이, UNSIGNED, 배열, SERIAL 처리 */
   function readType(c: Cursor, column: Column) {
-    let type = c.next().value.toUpperCase();
+    const first = c.next();
+    // PostgreSQL: 따옴표로 감싼 타입("BillingStatus")은 대소문자를 구분하므로 그대로 둔다
+    let type = first.type === 'quoted' && dialect === 'postgresql' && /[^a-z0-9_]/.test(first.value) ? `"${first.value}"` : first.value.toUpperCase();
     const two = (a: string, b: string) => type === a && c.is(b);
     if (two('DOUBLE', 'PRECISION') || two('CHARACTER', 'VARYING') || two('CHAR', 'VARYING') || two('BIT', 'VARYING')) {
       type += ' ' + c.next().value.toUpperCase();

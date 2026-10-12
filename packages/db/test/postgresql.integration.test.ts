@@ -132,6 +132,62 @@ describe.skipIf(!url)('PostgreSQL 실제 서버', () => {
     await logicalNameRoundTrip(await freshDatabase(), dialect, postgresConnector);
   }, 60000);
 
+  it('사용자 정의 타입(ENUM): 만들고 → 다시 읽으면 0건, 값 추가·빼기(다시 만들기)·삭제가 실제로 된다', async () => {
+    const config = await freshDatabase();
+    let schema = applyCommands(emptySchema(), [
+      { op: 'createEnum', name: 'BillingStatus', values: ['ISSUED', 'PAID'] },
+      { op: 'createEnum', name: 'mood', values: ['ok', 'sad face'] },
+      {
+        op: 'createTable', name: 'bill',
+        columns: [
+          { name: 'id', type: 'INT', primaryKey: true },
+          { name: 'status', type: 'BillingStatus', nullable: false, default: "'ISSUED'" },
+          { name: 'feel', type: 'mood' },
+        ],
+      },
+    ]).schema;
+    const first = await push(config, schema);
+    expect(first.result.results.filter((r) => !r.ok)).toEqual([]);
+    const read = async () => (await postgresConnector.introspect(config)).schema;
+    let db = await read();
+    expect(db.enums?.map((e) => [e.name, e.values])).toEqual([['BillingStatus', ['ISSUED', 'PAID']], ['mood', ['ok', 'sad face']]]);
+    expect(db.tables[0].columns.map((c) => c.type)).toEqual(['INT', 'BillingStatus', 'mood']);
+    expect(planPush(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+    expect(planPull(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+    await postgresConnector.execute(config, ["INSERT INTO bill (id, status, feel) VALUES (1, 'PAID', 'ok')"]);
+
+    // 값 추가 (중간에)
+    schema = applyCommands(schema, [{ op: 'updateEnum', enum: 'BillingStatus', values: ['ISSUED', 'OVERDUE', 'PAID'] }]).schema;
+    let r = await push(config, schema);
+    expect(r.statements.map((s) => s.sql)).toEqual([`ALTER TYPE "BillingStatus" ADD VALUE 'OVERDUE' BEFORE 'PAID'`]);
+    expect(r.result.results.filter((x) => !x.ok)).toEqual([]);
+    expect((await read()).enums![0].values).toEqual(['ISSUED', 'OVERDUE', 'PAID']);
+
+    // 값 빼기 → 타입을 다시 만들고 컬럼을 옮긴다 (기본값 포함), 데이터는 남는다
+    schema = applyCommands(schema, [{ op: 'updateEnum', enum: 'BillingStatus', values: ['ISSUED', 'PAID'] }]).schema;
+    r = await push(config, schema);
+    expect(r.result.results.filter((x) => !x.ok)).toEqual([]);
+    db = await read();
+    expect(db.enums![0].values).toEqual(['ISSUED', 'PAID']);
+    expect(planPush(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+
+    // DB에서 직접 만든 타입은 가져오기로 ERD에 들어온다
+    await postgresConnector.execute(config, ["CREATE TYPE \"Grade\" AS ENUM ('A', 'B')"]);
+    db = await read();
+    const pull = planPull(schema, db, { dialect });
+    expect(pull.diff.changes.map((c) => c.summary)).toEqual(['타입 Grade 생성 (ENUM A, B)']);
+    schema = applyChanges(schema, pull.diff, pull.defaultSelected);
+    expect(schema.enums?.map((e) => e.name)).toEqual(['BillingStatus', 'mood', 'Grade']);
+
+    // 테이블과 타입을 함께 지우면 테이블 뒤에 DROP TYPE
+    schema = applyCommands(schema, [{ op: 'dropTable', table: 'bill' }, { op: 'dropEnum', enum: 'mood' }]).schema;
+    const plan = planPush(schema, await read(), { dialect });
+    const statements = generateStatements(plan.diff, dialect, new Set(plan.diff.changes.map((c) => c.id)));
+    expect(statements.map((s) => s.sql)).toEqual(['DROP TABLE bill', 'DROP TYPE mood']);
+    expect((await postgresConnector.execute(config, statements.map((s) => s.sql))).ok).toBe(true);
+    expect((await read()).enums?.map((e) => e.name)).toEqual(['BillingStatus', 'Grade']);
+  }, 120000);
+
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
     const config = await freshDatabase();
     const mismatches = await typeRuleMismatches('postgresql', async (sqls) => (await postgresConnector.execute(config, sqls)).results.find((r) => !r.ok)?.error ?? null);

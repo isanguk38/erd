@@ -20,7 +20,7 @@ import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary' | 'enums';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -214,6 +214,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const THEME_LABEL: Record<ThemeSetting, string> = { light: '라이트', dark: '다크' };
   const commentCount = useOpenCommentCount();
   const dictionarySize = useStore((s) => s.dictionary?.terms.length ?? 0);
+  const enumCount = useStore((s) => s.schema.enums?.length ?? 0);
   const templates = useTemplates((s) => s.templates);
   const defaultTemplateId = useTemplates((s) => s.defaultTemplateId);
   useEffect(() => void useTemplates.getState().load(), []);
@@ -311,6 +312,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <button className="btn btn-tool" disabled={!synced || readOnly} onClick={addNoteAtCenter} title="메모 붙이기: 설계 의도·주의 사항을 캔버스에 남깁니다 (SQL·DB에는 영향 없음, 영역 탭이면 그 탭에만)">
             <Icon name="note" />
             <span className="hide-narrow">메모</span>
+          </button>
+          <button className="btn btn-tool" onClick={() => onOpen('enums')} title="사용자 정의 타입(ENUM): 상태·구분처럼 값이 정해진 컬럼의 타입을 만들고 고칩니다">
+            <Icon name="tag" />
+            <span className="hide-narrow">타입{enumCount ? ` ${enumCount}` : ''}</span>
           </button>
           <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
             {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>관계: {t.label}</option>)}

@@ -213,7 +213,7 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
   // 타입 검사 (DB별 규칙은 typeRules.ts)
   const typeRule = { error: 'type-error', warning: 'type-warning', info: 'type-ignored' } as const;
   for (const t of schema.tables) {
-    for (const i of tableTypeIssues(dialect || 'mysql', t)) {
+    for (const i of tableTypeIssues(dialect || 'mysql', t, schema.enums)) {
       const rule = typeRule[i.severity];
       issues.push({
         id: `${rule}:${t.id}:${i.columnId}:${i.code}`,
