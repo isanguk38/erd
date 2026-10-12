@@ -3,7 +3,7 @@ import type { DialectId } from '@erd/core';
 import { api, type Connection, type ConnectionInput } from '../lib/api';
 import { useStore } from '../store';
 import { useDialect } from '../lib/hooks';
-import { DB_INFO, DB_ORDER, dbLabel } from '../lib/dbInfo';
+import { DB_INFO, dbLabel } from '../lib/dbInfo';
 
 
 function emptyInput(dialect: DialectId): ConnectionInput {
@@ -21,12 +21,16 @@ export function ConnectionPicker({ onChange }: { onChange?: (connection: Connect
   const [connectionId, setConnectionId] = useState<string | null>(projectConnectionId);
   const projectDialect = useDialect();
   const [connections, setConnections] = useState<Connection[] | null>(null);
+  const [otherCount, setOtherCount] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [editing, setEditing] = useState<{ id?: string; input: ConnectionInput } | null>(null);
 
   const reload = async (selectId?: string | null) => {
     try {
-      const list = await api.listConnections();
+      // 프로젝트와 같은 DB 종류의 연결만 쓴다 (DB 종류는 프로젝트를 만들 때 정하며 바꿀 수 없다)
+      const all = await api.listConnections();
+      const list = all.filter((c) => c.dialect === projectDialect);
+      setOtherCount(all.length - list.length);
       setConnections(list);
       setLoadError('');
       const id = selectId !== undefined ? selectId : connectionId;
@@ -51,6 +55,10 @@ export function ConnectionPicker({ onChange }: { onChange?: (connection: Connect
 
   if (editing) {
     return (
+      <>
+        {!connections.length && otherCount > 0 && (
+          <p className="muted small">{dbLabel(projectDialect)} 연결이 없습니다. 다른 DB 종류의 연결 {otherCount}개는 이 프로젝트에서 쓸 수 없어 숨겼습니다 (DB 종류는 프로젝트를 만들 때 정합니다).</p>
+        )}
       <ConnectionForm
         id={editing.id}
         initial={editing.input}
@@ -65,6 +73,7 @@ export function ConnectionPicker({ onChange }: { onChange?: (connection: Connect
           await reload(null);
         }}
       />
+      </>
     );
   }
 
@@ -83,11 +92,14 @@ export function ConnectionPicker({ onChange }: { onChange?: (connection: Connect
           <option value="">연결 없음 (고르세요)</option>
           {connections.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name} · {dbLabel(c.dialect)} · {c.host}:{c.port}/{c.database}
+              {c.name} · {c.host}:{c.port}/{c.database}
             </option>
           ))}
         </select>
       </label>
+      <span className="muted small" title={otherCount ? `다른 DB 종류의 연결 ${otherCount}개는 이 프로젝트에서 쓸 수 없어 목록에서 뺐습니다` : undefined}>
+        {dbLabel(projectDialect)} 연결만{otherCount ? ` (다른 DB ${otherCount}개 숨김)` : ''}
+      </span>
       {selected && (
         <button className="btn btn-sm" onClick={() => setEditing({ id: selected.id, input: { ...selected, password: '' } })}>
           수정
@@ -142,13 +154,8 @@ function ConnectionForm({
       <h4>{id ? 'DB 연결 수정' : '새 DB 연결'}</h4>
       <div className="form-grid wide-label">
         <label>DB 종류</label>
-        <div className="segmented">
-          {DB_ORDER.map((d) => (
-            <button key={d} className={input.dialect === d ? 'active' : ''} onClick={() => set({ dialect: d, port: DB_INFO[d].port })}>
-              {dbLabel(d)}
-            </button>
-          ))}
-        </div>
+        {/* 프로젝트 DB 종류로 정해진다 (바꿀 수 없음) */}
+        <span className="dbms-fixed" title="프로젝트의 DB 종류로 정해집니다">{dbLabel(input.dialect)}</span>
         <label>이름</label>
         <input value={input.name} onChange={(e) => set({ name: e.target.value })} placeholder="예: 개발 DB" />
         <label>호스트</label>

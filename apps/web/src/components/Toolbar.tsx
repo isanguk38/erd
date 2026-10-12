@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addToArea, areaSchema, createColumn, dialectList, getDialect, tableTypeIssues, type ColumnTemplate, type DialectId } from '@erd/core';
+import { addToArea, areaSchema, getDialect, type ColumnTemplate } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
 import { useOpenCommentCount } from './Comments';
@@ -119,7 +119,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
   const readOnly = role === 'viewer' || comparing;
   const readOnlyTitle = comparing ? '버전 비교 중에는 편집할 수 없습니다 (비교 끝내기 후 편집)' : '보기 권한에서는 ERD를 바꿀 수 없습니다';
   const dbAvailable = useDbAvailable();
-  const { setDialect, setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
+  const { setViewMode, setRelationTool, edit, select, undo, redo, replaceSchema } = useStore.getState();
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const { status: dbStatus, error: dbError } = useDbStatus();
   const dbChanged = (dbStatus?.db ?? 0) + (dbStatus?.conflict ?? 0);
@@ -188,25 +188,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
       select({ type: 'table', id: t.id }, true);
     });
   };
-  // DB 종류 바꾸기: 테이블이 있으면 무엇이 달라지는지 알리고 확인한다 (타입은 SQL을 만들 때 그 DB에 맞게 바뀌고,
-  // 그 DB에 없는 타입은 설계 검사에 나온다)
-  const changeDialect = (next: DialectId) => {
-    const { schema, meta } = useStore.getState();
-    const target = getDialect(next);
-    const problems = schema.tables.reduce((n, t) => n + tableTypeIssues(target, t).filter((i) => i.severity !== 'info').length, 0);
-    if (schema.tables.length) {
-      const lines = [
-        `DB 종류를 ${target.label}로 바꿀까요?`,
-        '',
-        `컬럼 타입은 SQL을 만들 때 ${target.label}에 맞게 바뀝니다 (예: DATETIME → ${target.renderType(createColumn({ name: 'x', type: 'DATETIME', length: '' }))}).`,
-        problems ? `${target.label}에서 실패하거나 확인이 필요한 컬럼이 ${problems}개 있습니다. 바꾼 뒤 설계 검사에서 확인하세요.` : '',
-        meta.dbConnectionId ? '연결해 둔 DB와 종류가 다르면 가져오기·내보내기 비교가 맞지 않습니다.' : '',
-      ];
-      if (!confirm(lines.filter((l, i) => l || i === 1).join('\n'))) return;
-    }
-    setDialect(next);
-    if (problems) useStore.getState().showNotice({ text: `${target.label}에서 확인이 필요한 컬럼 ${problems}개 — 설계 검사에서 보세요` });
-  };
   const lintCount = useLintCount();
   const reviewPending = useReviewPending();
   const { setting: themeSetting, effective: theme } = useTheme();
@@ -229,9 +210,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </a>
         <img className="app-logo" src="/favicon.svg" alt="" />
         <ProjectNameInput />
-        <select className="chip-select" value={dialect} disabled={!synced || readOnly} onChange={(e) => changeDialect(e.target.value as DialectId)} title="이 프로젝트의 DB 종류">
-          {dialectList.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-        </select>
+        {/* DB 종류는 프로젝트를 만들 때 정하며 바꿀 수 없다 (바꾸거나 변환하면 문법·타입·기능이 달라 오류가 난다) */}
+        <span className="chip-select dbms-chip" title={`이 프로젝트의 DB 종류: ${getDialect(dialect).label} — 프로젝트를 만들 때 정하며 바꿀 수 없습니다`}>
+          {getDialect(dialect).label}
+        </span>
         <NamingBadge disabled={!synced || readOnly} />
         {role === 'viewer' && <span className="role-tag" title="이 프로젝트는 보기 권한입니다">보기 전용</span>}
         <span className="spacer" />

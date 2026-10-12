@@ -453,12 +453,12 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     'import_ddl',
     {
       title: 'DDL로 ERD 갱신',
-      description: 'CREATE TABLE 등 DDL을 읽어 ERD에 합친다. 같은 이름의 테이블은 갱신하고, DDL에 없는 테이블은 지우지 않는다.',
-      inputSchema: { project: projectArg, sql: z.string(), dialect: z.enum(['auto', 'mysql', 'postgresql']).optional(), mode },
+      description: 'CREATE TABLE 등 DDL을 읽어 ERD에 합친다. 같은 이름의 테이블은 갱신하고, DDL에 없는 테이블은 지우지 않는다. 프로젝트 DB 종류의 DDL만 받는다 (다른 DB의 DDL은 거절 — DB 종류는 바꾸거나 변환하지 않는다).',
+      inputSchema: { project: projectArg, sql: z.string(), mode },
     },
-    safe(async ({ project, sql, dialect, mode: m }: { project: string; sql: string; dialect?: string; mode?: string }) => {
+    safe(async ({ project, sql, mode: m }: { project: string; sql: string; mode?: string }) => {
       const p = await resolveProject(project);
-      const result = await api.request<Record<string, unknown>>('POST', `/api/projects/${p.id}/import-ddl`, { sql, dialect, mode: m, source: 'ai' });
+      const result = await api.request<Record<string, unknown>>('POST', `/api/projects/${p.id}/import-ddl`, { sql, mode: m, source: 'ai' });
       return text({ ...result, designReview: await reviewReminder(p.id) });
     }),
   );
@@ -467,14 +467,13 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     'export_sql',
     {
       title: 'SQL 만들기',
-      description: 'ERD로 SQL을 만든다. since_version을 주면 그 버전 이후 바뀐 부분만 ALTER/CREATE로 만든다 (CREATE/ALTER/DROP 구분 포함).',
-      inputSchema: { project: projectArg, dialect: dialectArg.optional(), since_version: z.string().optional().describe('버전 id (list_versions로 확인)') },
+      description: 'ERD로 SQL을 만든다 (프로젝트 DB 종류의 문법으로만). since_version을 주면 그 버전 이후 바뀐 부분만 ALTER/CREATE로 만든다 (CREATE/ALTER/DROP 구분 포함).',
+      inputSchema: { project: projectArg, since_version: z.string().optional().describe('버전 id (list_versions로 확인)') },
       annotations: { readOnlyHint: true },
     },
-    safe(async ({ project, dialect, since_version }: { project: string; dialect?: string; since_version?: string }) => {
+    safe(async ({ project, since_version }: { project: string; since_version?: string }) => {
       const p = await resolveProject(project);
       const q = new URLSearchParams();
-      if (dialect) q.set('dialect', dialect);
       if (since_version) q.set('since', since_version);
       const r = await api.request<{ script: string; changes: unknown[] }>('GET', `/api/projects/${p.id}/sql?${q}`);
       return text(r.script || '-- 변경 없음');

@@ -1060,3 +1060,7 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .type-cell__enum:hover { filter: brightness(0.95); }
 .enum-row.focused { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .type-cell:has(.type-cell__enum.missing) input { padding-right: 24px; }
+
+/* DB 종류: 프로젝트를 만들 때 정하며 바꿀 수 없다 (표시만) */
+.dbms-chip { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); cursor: default; white-space: nowrap; font-weight: 600; }
+.dbms-fixed { align-self: center; font-weight: 600; }

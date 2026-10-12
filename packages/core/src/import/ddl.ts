@@ -126,6 +126,14 @@ class Cursor {
   }
 }
 
+/** DDL에 어느 문법의 흔적이 분명히 있는지 (둘 다 없거나 둘 다 있으면 null) */
+export function ddlGrammarOf(sql: string): 'mysql' | 'postgresql' | null {
+  const pg = /\bSERIAL\b|\bBIGSERIAL\b|COMMENT\s+ON\s+(TABLE|COLUMN)|::|GENERATED\s+(ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY|\bJSONB\b|\bTIMESTAMPTZ\b|CREATE\s+TYPE\b/i.test(sql);
+  const my = /`|\bENGINE\s*=|\bAUTO_INCREMENT\b|\bUNSIGNED\b|\bCHARSET\b/i.test(sql);
+  if (pg === my) return null;
+  return pg ? 'postgresql' : 'mysql';
+}
+
 export function detectDialect(sql: string): DialectId {
   const pg = /\bSERIAL\b|\bBIGSERIAL\b|COMMENT\s+ON\s+(TABLE|COLUMN)|::|GENERATED\s+(ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY|\bJSONB\b|\bTIMESTAMPTZ\b/i.test(sql);
   const my = /`|\bENGINE\s*=|\bAUTO_INCREMENT\b|\bUNSIGNED\b|\bCHARSET\b/i.test(sql);

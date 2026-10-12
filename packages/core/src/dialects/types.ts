@@ -14,6 +14,8 @@ export interface Dialect {
   label: string;
   /** 화면의 타입 자동완성 목록 */
   typeSuggestions: string[];
+  /** SQL 붙여넣기(DDL 가져오기)에서 쓰는 문법. 없으면 이 DB의 DDL 가져오기는 지원하지 않는다 */
+  ddlGrammar?: 'mysql' | 'postgresql';
 
   quote(name: string): string;
   /** 비교용 타입 문자열 (예: VARCHAR(100)). 같은 의미면 같은 문자열이 나와야 한다. */

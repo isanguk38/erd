@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { appliedChanges, generateStatements, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
+import { appliedChanges, dbmsMismatch, generateStatements, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
@@ -41,7 +41,8 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
   >(null);
   const [ackFail, setAckFail] = useState(false);
 
-  const dialect = getDialect(db?.dialect ?? projectDialect);
+  // SQL은 프로젝트 DB 종류로만 만든다 (다른 DB 종류의 연결은 비교 전에 막는다)
+  const dialect = getDialect(projectDialect);
   const plan = useMemo(() => (db ? planPush(schema, db.schema, { dialect, baseline: baseline?.schema, links }) : null), [db, schema, dialect, baseline, links]);
   const diff = plan?.diff ?? null;
   // 새로 비교하거나 이름 변경을 확정하면 기본 선택(ERD에서 바뀐 것, DROP 제외)을 다시 정한다
@@ -55,6 +56,9 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
 
   const compare = async () => {
     if (!connection) return;
+    // 프로젝트와 다른 DB 종류의 연결은 쓸 수 없다
+    const mismatch = dbmsMismatch(projectDialect, connection.dialect);
+    if (mismatch) return setError(mismatch);
     setBusy(true);
     setError('');
     setResult(null);
@@ -157,9 +161,6 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
         <div className="toolbar-row">
           <button className="btn btn-primary" disabled={busy} onClick={compare}>{busy ? '읽는 중…' : db ? '다시 비교' : 'DB와 비교'}</button>
           {db && <span className="muted">{db.serverVersion} · DB 테이블 {db.schema.tables.length}개</span>}
-          {db && db.dialect !== projectDialect && (
-            <span className="warning-inline">프로젝트 DB 종류({getDialect(projectDialect).label})와 다릅니다. {dialect.label} 문법으로 만듭니다.</span>
-          )}
         </div>
       )}
       {error && <div className="error-box">{error}</div>}

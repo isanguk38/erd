@@ -102,6 +102,7 @@ function pkName(table: Table): string {
 export const postgresql: Dialect = {
   id: 'postgresql',
   label: 'PostgreSQL',
+  ddlGrammar: 'postgresql',
   typeSuggestions: [
     'BIGINT', 'INTEGER', 'SMALLINT', 'NUMERIC', 'DOUBLE PRECISION', 'REAL', 'BOOLEAN',
     'VARCHAR', 'CHAR', 'TEXT', 'DATE', 'TIMESTAMP', 'TIMESTAMPTZ', 'TIME',

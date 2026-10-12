@@ -294,7 +294,14 @@ describe('MCP', () => {
     expect(schema.enums).toEqual([{ name: 'order_status', values: ['READY', 'PAID'] }]);
     expect(schema.tables[0].columns[1].type).toBe('order_status');
     expect(await call('export_sql', { project: '타입' })).toContain(`CREATE TYPE order_status AS ENUM ('READY', 'PAID')`);
-    expect(await call('export_sql', { project: '타입', dialect: 'mysql' })).toContain("`status` ENUM('READY','PAID') NOT NULL");
+    // DB 종류는 바꾸거나 변환하지 않는다: 다른 DB로 SQL 만들기·DB 종류 바꾸기·다른 DB의 DDL 넣기는 거절
+    expect((await erd.app.inject({ method: 'GET', url: `/api/projects/${created.id}/sql?dialect=mysql` })).statusCode).toBe(400);
+    const patched = await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { dialect: 'mysql' } });
+    expect(patched.statusCode).toBe(400);
+    expect(patched.json().error).toContain('바꿀 수 없습니다');
+    expect(erd.projects.meta(created.id).dialect).toBe('postgresql');
+    const ddl = await client.callTool({ name: 'import_ddl', arguments: { project: '타입', sql: 'CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;' } });
+    expect(textOf(ddl)).toContain('MySQL DDL은(는) 쓸 수 없습니다');
     // 설계 검사: ENUM 이름을 모르는 타입이라고 하지 않는다
     const lint = await call('check_design', { project: '타입' });
     expect(JSON.stringify(lint)).not.toContain('모르는 타입');

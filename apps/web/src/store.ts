@@ -151,7 +151,6 @@ interface State extends LocalPrefs {
   setViewMode: (mode: ViewMode) => void;
   setRelationTool: (tool: RelationTool) => void;
   setUserName: (name: string) => void;
-  setDialect: (dialect: DialectId) => void;
   /** 이름 표기 기준, 테이블·컬럼 따로 (null인 쪽은 자동 — 사전 표기·많이 쓰는 표기) */
   setNamingStyle: (setting: NamingSetting | null) => boolean;
   setProjectName: (name: string) => void;
@@ -474,11 +473,6 @@ export const useStore = create<State>()(
         setUserName(userName) {
           set({ userName });
           publishPresence();
-        },
-        setDialect(dialect) {
-          const d = doc;
-          if (!get().synced || get().role === 'viewer') return;
-          d?.transact(() => writeMeta(d, { dialect }), LOCAL);
         },
         setNamingStyle(namingStyle) {
           const d = doc;

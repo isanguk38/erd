@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { applyChanges, getDialect, placeNewTables, planPull, syncedBaseline, type RenameLink, type Schema } from '@erd/core';
+import { applyChanges, dbmsMismatch, getDialect, placeNewTables, planPull, syncedBaseline, type RenameLink, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type IntrospectResult } from '../lib/api';
 import { useStore } from '../store';
-import { rememberIfInSync, saveVersion } from '../lib/hooks';
+import { rememberIfInSync, saveVersion, useDialect } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ChangeList, type GroupLabel } from './ChangeList';
 import { ConnectionPicker } from './ConnectionPicker';
@@ -19,6 +19,7 @@ const PULL_GROUPS: Record<'create' | 'alter' | 'drop', GroupLabel> = {
 export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone: (options?: { relayout?: boolean }) => void }) {
   const current = useStore((s) => s.schema);
   const projectId = useStore((s) => s.projectId)!;
+  const projectDialect = useDialect();
   const [connection, setConnection] = useState<Connection | null>(null);
   // DB 코멘트는 늘 논리명 (설명은 ERD 전용 상세 설명)
   const commentAs = 'logicalName' as const;
@@ -31,7 +32,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
   const isEmpty = current.tables.length === 0;
 
   const plan = useMemo(
-    () => (result && !isEmpty ? planPull(current, result.schema, { dialect: getDialect(result.dialect), baseline: baseline?.schema, links }) : null),
+    () => (result && !isEmpty ? planPull(current, result.schema, { dialect: getDialect(projectDialect), baseline: baseline?.schema, links }) : null),
     [result, current, isEmpty, baseline, links],
   );
   // 새로 읽거나 이름 변경을 확정하면 기본 선택을 다시 정한다
@@ -42,6 +43,9 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
 
   const read = async () => {
     if (!connection) return;
+    // 프로젝트와 다른 DB 종류의 연결은 쓸 수 없다
+    const mismatch = dbmsMismatch(projectDialect, connection.dialect);
+    if (mismatch) return setError(mismatch);
     setBusy(true);
     setError('');
     try {
@@ -61,7 +65,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
     if (!result || !connection) return;
     setBusy(true);
     try {
-      const { replaceSchema, setDialect } = useStore.getState();
+      const { replaceSchema } = useStore.getState();
       const label = `${connection.name} (${connection.database})`;
       if (isEmpty) {
         const schema = structuredClone(result.schema);
@@ -75,7 +79,6 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
         placeNewTables(next, plan.diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
         replaceSchema(next);
       }
-      setDialect(result.dialect);
       await saveVersion(`DB 가져오기 · ${label}`, 'db');
       // 지금 DB 상태를 기준 시점으로 저장 (다음 비교에서 누가 바꿨는지 구분)
       const erd = useStore.getState().schema;

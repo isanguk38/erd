@@ -49,6 +49,8 @@ import {
   type RenameLink,
   type Schema,
   type SyncPlan,
+  dbmsMismatch,
+  ddlGrammarOf,
 } from '@erd/core';
 import { autoLayout } from '@erd/core/layout';
 import { buildDefinitionXlsx } from '@erd/core/excel';
@@ -248,7 +250,8 @@ export function registerProjectRoutes(
     const b = req.body ?? {};
     const patch: Record<string, unknown> = {};
     if (typeof b.name === 'string' && b.name.trim()) patch.name = b.name.trim();
-    if (DIALECTS.includes(b.dialect as DialectId)) patch.dialect = b.dialect;
+    // DB 종류는 프로젝트를 만들 때 정하고 바꾸지 않는다
+    if (b.dialect !== undefined && b.dialect !== store.dialect(req.params.id)) throw badRequest(dbmsMismatch(store.dialect(req.params.id), String(b.dialect), 'DB 종류로 바꾸는 것')!);
     if (b.aiMode === 'apply' || b.aiMode === 'propose') patch.aiMode = b.aiMode;
     if (typeof b.aiAllowDbExecute === 'boolean') {
       // AI에게 DB 실행을 허용하는 것은 소유자만
@@ -352,8 +355,14 @@ export function registerProjectRoutes(
       const { sql, source = 'api' } = req.body ?? ({} as never);
       if (!sql?.trim()) throw badRequest('sql이 필요합니다');
       const current = store.schema(id);
-      const parsed = parseDdl(sql, { dialect: req.body.dialect ?? 'auto', context: current });
-      const diff = diffIncoming(current, parsed.schema, getDialect(parsed.dialect));
+      // 프로젝트 DB 종류의 문법으로만 읽는다 (다른 DB의 DDL을 바꿔 넣지 않는다)
+      const project = getDialect(store.dialect(id));
+      if (!project.ddlGrammar) throw badRequest(`${project.label} 프로젝트는 SQL 붙여넣기(DDL 가져오기)를 지원하지 않습니다. DB에서 가져오기를 쓰세요`);
+      const found = ddlGrammarOf(sql);
+      if (found && found !== project.ddlGrammar) throw badRequest(dbmsMismatch(project.id, found, 'DDL')!);
+      if (req.body.dialect && req.body.dialect !== 'auto' && req.body.dialect !== project.id) throw badRequest(dbmsMismatch(project.id, req.body.dialect, 'DDL')!);
+      const parsed = parseDdl(sql, { dialect: project.id, context: current });
+      const diff = diffIncoming(current, parsed.schema, project);
       // DDL에 없는 테이블은 지우지 않는다
       const selected = new Set(diff.changes.filter((c) => c.kind !== 'dropTable' && c.kind !== 'dropForeignKey').map((c) => c.id));
       const next = applyChanges(current, diff, selected);
@@ -461,7 +470,9 @@ export function registerProjectRoutes(
   // ── SQL / 배치 / 정의서 ─────────────────────────────
   app.get<{ Params: { id: string }; Querystring: { dialect?: DialectId; since?: string } }>('/api/projects/:id/sql', async (req) => {
     const { id } = req.params;
-    const dialect = getDialect(req.query.dialect ?? store.dialect(id));
+    // SQL은 프로젝트 DB 종류로만 만든다 (다른 DB로 변환하지 않는다)
+    if (req.query.dialect && req.query.dialect !== store.dialect(id)) throw badRequest(dbmsMismatch(store.dialect(id), req.query.dialect, 'SQL')!);
+    const dialect = getDialect(store.dialect(id));
     const base = req.query.since ? store.version(id, req.query.since).schema : emptySchema();
     const diff = diffSchemas(base, store.schema(id), dialect);
     const statements = generateStatements(diff, dialect);
@@ -529,6 +540,9 @@ export function registerProjectRoutes(
     if (!serverDb) throw desktopOnly();
     const saved = connections.get(connectionId, userId);
     const config = connections.config(connectionId, userId);
+    // 프로젝트와 다른 DB 종류의 연결은 쓸 수 없다
+    const mismatch = dbmsMismatch(store.dialect(id), config.dialect);
+    if (mismatch) throw badRequest(mismatch);
     await auth.assertAllowedDbHost(config.host);
     const db = await getConnector(config.dialect).introspect(config);
     // 이 프로젝트가 어느 DB와 연결돼 있는지 기억한다 (다른 사람·AI·차이 알림이 같은 DB를 본다)

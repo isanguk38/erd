@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { diffSchemas, dialectList, emptySchema, getDialect, type DialectId } from '@erd/core';
+import { diffSchemas, emptySchema, getDialect, type DialectId } from '@erd/core';
 import { useStore } from '../store';
 import { useDialect, useProjectName, useVersions, useVersionSchema } from '../lib/hooks';
 import { safeFileName } from '../lib/download';
@@ -14,7 +14,8 @@ export function SqlDialog({ onClose }: { onClose: () => void }) {
   const versions = useVersions().versions ?? [];
   const projectName = useProjectName();
   const projectDialect = useDialect();
-  const [dialectId, setDialectId] = useState<DialectId>(projectDialect);
+  // SQL은 프로젝트 DB 종류로만 만든다 (다른 DB로 변환하지 않는다)
+  const dialectId: DialectId = projectDialect;
   const [mode, setMode] = useState<Mode>('full');
   const [pickedId, setPickedId] = useState('');
   // 기본 시작점: 마지막으로 DB와 맞춘 버전 (그 뒤 ERD에서 바꾼 것 = DB에 아직 안 간 것)
@@ -38,12 +39,7 @@ export function SqlDialog({ onClose }: { onClose: () => void }) {
           <button className={mode === 'full' ? 'active' : ''} onClick={() => setMode('full')}>전체 CREATE</button>
           <button className={mode === 'changes' ? 'active' : ''} onClick={() => setMode('changes')}>변경분만 (ALTER)</button>
         </div>
-        <label className="inline-field">
-          DB
-          <select value={dialectId} onChange={(e) => setDialectId(e.target.value as DialectId)}>
-            {dialectList.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-          </select>
-        </label>
+        <span className="muted small" title="SQL은 프로젝트 DB 종류의 문법으로만 만듭니다">{dialect.label}</span>
         {mode === 'changes' && (
           <label className="inline-field" title="고른 버전(그 시점의 ERD)에서 지금 ERD까지 바뀐 부분을 SQL로 만듭니다">
             어느 버전부터

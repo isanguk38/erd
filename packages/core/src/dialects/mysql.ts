@@ -65,6 +65,7 @@ function autoIncrementKey(table: Table): Index | undefined {
 export const mysql: Dialect = {
   id: 'mysql',
   label: 'MySQL',
+  ddlGrammar: 'mysql',
   typeSuggestions: [
     'BIGINT', 'INT', 'SMALLINT', 'TINYINT', 'DECIMAL', 'DOUBLE', 'FLOAT', 'BOOLEAN',
     'VARCHAR', 'CHAR', 'TEXT', 'MEDIUMTEXT', 'LONGTEXT',
