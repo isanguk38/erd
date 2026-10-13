@@ -253,12 +253,58 @@ export function sameIndexMethod(a: string | undefined, b: string | undefined): b
   return norm(a) === norm(b);
 }
 
-/** 외래키 이름이 비어 있을 때 쓰는 기본 이름 */
-export function relationName(schema: Schema, relation: Relation): string {
-  if (relation.name) return relation.name;
+// ── 외래키 이름 ──────────────────────────────
+// 기본은 fk_자식_부모. 그 이름이 이미 있으면(같은 두 테이블 사이 두 번째 FK 등) fk_자식_FK컬럼, 그래도 있으면 _2, _3 ….
+// MySQL·Oracle·SQL Server는 DB 전체에서 제약 이름이 하나여야 하므로 프로젝트 전체에서 겹치지 않게 본다 (대소문자 무시).
+// 새 관계는 만들 때 이 이름을 저장한다 (다른 관계를 지우거나 더해도 이름이 바뀌지 않게).
+
+const fkKey = (name: string) => name.trim().toLowerCase();
+
+/** 겹치지 않는 외래키 이름 (taken: 이미 쓰는 이름들, fkKey로) */
+function freeRelationName(schema: Schema, relation: Relation, taken: Set<string>): string {
   const from = findTable(schema, relation.fromTableId);
   const to = findTable(schema, relation.toTableId);
-  return `fk_${from?.name ?? 'unknown'}_${to?.name ?? 'unknown'}`;
+  const child = from?.name ?? 'unknown';
+  const base = `fk_${child}_${to?.name ?? 'unknown'}`;
+  if (!taken.has(fkKey(base))) return base;
+  const columns = relation.fromColumnIds.map((id) => from?.columns.find((c) => c.id === id)?.name).filter(Boolean);
+  const byColumns = columns.length ? `fk_${child}_${columns.join('_')}` : base;
+  if (!taken.has(fkKey(byColumns))) return byColumns;
+  for (let i = 2; ; i++) if (!taken.has(fkKey(`${byColumns}_${i}`))) return `${byColumns}_${i}`;
+}
+
+/** 이름이 비어 있는 관계들의 기본 이름: 이름이 있는 관계를 피하고, 앞에 있는 관계가 먼저 이름을 가진다 */
+function defaultRelationNames(schema: Schema): Map<string, string> {
+  const taken = new Set(schema.relations.filter((r) => r.name).map((r) => fkKey(r.name)));
+  const names = new Map<string, string>();
+  for (const r of schema.relations) {
+    if (r.name) continue;
+    const name = freeRelationName(schema, r, taken);
+    taken.add(fkKey(name));
+    names.set(r.id, name);
+  }
+  return names;
+}
+
+/** 외래키 이름: 저장한 이름, 비어 있으면 겹치지 않는 기본 이름 */
+export function relationName(schema: Schema, relation: Relation): string {
+  if (relation.name) return relation.name;
+  return defaultRelationNames(schema).get(relation.id) ?? newRelationName(schema, relation);
+}
+
+/** 이 관계에 새로 붙일 이름: 다른 관계들이 쓰는 이름(저장한 것·기본 이름)과 겹치지 않게 */
+export function newRelationName(schema: Schema, relation: Relation): string {
+  const others = schema.relations.filter((r) => r.id !== relation.id);
+  const defaults = defaultRelationNames({ ...schema, relations: others });
+  return freeRelationName(schema, relation, new Set(others.map((r) => fkKey(r.name || defaults.get(r.id) || ''))));
+}
+
+/** 다른 관계가 이미 쓰는 외래키 이름이면 그 관계 (대소문자 무시) */
+export function relationNameOwner(schema: Schema, name: string, exceptId?: string): Relation | undefined {
+  const key = fkKey(name);
+  if (!key) return undefined;
+  const defaults = defaultRelationNames(schema);
+  return schema.relations.find((r) => r.id !== exceptId && fkKey(r.name || defaults.get(r.id) || '') === key);
 }
 
 export function cloneSchema(schema: Schema): Schema {

@@ -9,7 +9,9 @@ import {
   indexLabel,
   sameExpression,
   primaryKeyColumns,
+  relationName,
   type Cardinality,
+  type Relation,
   type Column,
   type ReferentialAction,
   type Schema,
@@ -27,6 +29,7 @@ import {
   removeTable,
   updateColumn,
   updateTable,
+  updateRelation,
 } from './operations';
 import { addToArea, createArea, moveToArea, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
@@ -75,7 +78,10 @@ export type Command =
       onDelete?: ReferentialAction;
       onUpdate?: ReferentialAction;
     }
-  | { op: 'dropRelation'; parent: string; child: string; dropColumns?: boolean }
+  /** name: 외래키 이름 — 같은 두 테이블 사이에 관계가 여럿일 때 고른다 */
+  | { op: 'dropRelation'; parent: string; child: string; name?: string; dropColumns?: boolean }
+  /** 관계 고치기. name: 지금 외래키 이름(여럿일 때 고름), newName: 새 외래키 이름 */
+  | { op: 'updateRelation'; parent: string; child: string; name?: string; newName?: string; cardinality?: Cardinality; onDelete?: ReferentialAction; onUpdate?: ReferentialAction }
   // 주제영역 (화면에서 나눠 보는 탭. SQL·DB에는 영향 없음)
   | { op: 'createArea'; name: string; tables?: string[]; color?: string }
   | { op: 'updateArea'; area: string; name?: string; color?: string }
@@ -249,10 +255,23 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
     case 'dropRelation': {
       const parent = tableByName(schema, command.parent);
       const child = tableByName(schema, command.child);
-      const relation = schema.relations.find((r) => r.toTableId === parent.id && r.fromTableId === child.id);
-      if (!relation) throw new Error(`${parent.name} → ${child.name} 관계가 없습니다`);
+      const relation = relationOf(schema, parent, child, command.name);
       removeRelation(schema, relation.id, command.dropColumns);
-      return `${parent.name} → ${child.name} 관계 삭제`;
+      return `${parent.name} → ${child.name} 관계 삭제 (${relationName(schema, relation)})`;
+    }
+    case 'updateRelation': {
+      const parent = tableByName(schema, command.parent);
+      const child = tableByName(schema, command.child);
+      const relation = relationOf(schema, parent, child, command.name);
+      const before = relationName(schema, relation);
+      const patch: Partial<Relation> = {};
+      if (command.newName !== undefined) patch.name = command.newName;
+      if (command.cardinality) patch.cardinality = command.cardinality;
+      if (command.onDelete) patch.onDelete = command.onDelete;
+      if (command.onUpdate) patch.onUpdate = command.onUpdate;
+      updateRelation(schema, relation.id, patch);
+      const after = relationName(schema, relation);
+      return `${parent.name} → ${child.name} 관계 수정${after !== before ? ` (외래키 이름 ${before} → ${after})` : ''}`;
     }
     case 'createArea': {
       const area = createArea(schema, { name: command.name, color: command.color, tableIds: (command.tables ?? []).map((n) => tableByName(schema, n).id) });
@@ -344,10 +363,24 @@ export function commandFeatures(command: Command): FeatureKey[] {
       column(command.changes);
       break;
     case 'addRelation':
+    case 'updateRelation':
       if (command.onUpdate && command.onUpdate !== 'NO ACTION') out.push('fkOnUpdate');
       break;
   }
   return out;
+}
+
+/** 부모→자식 관계 찾기. 여럿이면 외래키 이름(name)으로 고른다 */
+function relationOf(schema: Schema, parent: Table, child: Table, name?: string): Relation {
+  const list = schema.relations.filter((r) => r.toTableId === parent.id && r.fromTableId === child.id);
+  if (!list.length) throw new Error(`${parent.name} → ${child.name} 관계가 없습니다`);
+  if (name?.trim()) {
+    const found = list.find((r) => relationName(schema, r).toLowerCase() === name.trim().toLowerCase());
+    if (!found) throw new Error(`${parent.name} → ${child.name} 관계 중 외래키 이름 ${name}이(가) 없습니다 (있는 것: ${list.map((r) => relationName(schema, r)).join(', ')})`);
+    return found;
+  }
+  if (list.length > 1) throw new Error(`${parent.name} → ${child.name} 관계가 ${list.length}개입니다. name에 외래키 이름을 넣어 고르세요 (${list.map((r) => relationName(schema, r)).join(', ')})`);
+  return list[0];
 }
 
 /** 명령들을 차례로 적용한 새 스키마를 돌려준다. 하나라도 실패하면 CommandError. 새 테이블은 빈 자리에 배치한다.
@@ -418,6 +451,7 @@ export function describeSchema(schema: Schema) {
       const child = findTable(schema, r.fromTableId);
       const parent = findTable(schema, r.toTableId);
       return {
+        name: relationName(schema, r),
         parent: parent?.name,
         parentColumns: r.toColumnIds.map((id) => parent?.columns.find((c) => c.id === id)?.name),
         child: child?.name,

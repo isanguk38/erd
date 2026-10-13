@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { addIndex, addMissingTerms, autoFixColumnPatch, setDictEntry, updateTable, type DictTerm, findTable, LINT_RULES, lintSchema, removeRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
+import { addIndex, addMissingTerms, autoFixColumnPatch, setDictEntry, updateTable, type DictTerm, findTable, LINT_RULES, lintSchema, removeRelation, updateRelation, reviewItemState, unreviewedTables, updateColumn, type AiReviewItem, type AiReviewState, type LintIssue, type LintRule, type Schema } from '@erd/core';
 import { useStore } from '../store';
 import { useProjectName } from '../lib/hooks';
 import { Dropdown, Icon } from './ui';
@@ -317,6 +317,18 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                             }}
                           >
                             사전에 추가
+                          </button>
+                        )}
+                        {issue.fix?.kind === 'patchRelation' && !readOnly && (
+                          <button
+                            className="btn btn-ghost small"
+                            title="외래키 이름을 바꿉니다 (Ctrl+Z로 되돌리기)"
+                            onClick={() => {
+                              const f = issue.fix as Extract<LintIssue['fix'], { kind: 'patchRelation' }>;
+                              useStore.getState().edit((d) => void updateRelation(d, f.relationId, f.patch));
+                            }}
+                          >
+                            {issue.fix.label}
                           </button>
                         )}
                         {issue.fix?.kind === 'removeRelation' && !readOnly && (

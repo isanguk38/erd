@@ -547,7 +547,20 @@ function RelationEditor({ relation }: { relation: Relation }) {
       </ul>
       <div className="form-grid">
         <label>이름</label>
-        <TextInput value={relation.name} placeholder={relationName(schema, { ...relation, name: '' })} onCommit={(name) => set({ name })} />
+        <TextInput
+          value={relation.name}
+          placeholder={relationName(schema, { ...relation, name: '' })}
+          onCommit={(name) => {
+            // 다른 외래키가 쓰는 이름이면 바꾸지 않고 알린다 (DB에서 두 번째 외래키가 실패하므로)
+            try {
+              updateRelation(structuredClone(schema), relation.id, { name });
+            } catch (e) {
+              useStore.getState().showNotice({ text: e instanceof Error ? e.message : String(e) });
+              return;
+            }
+            set({ name });
+          }}
+        />
         <label>관계</label>
         <select value={relation.cardinality} onChange={(e) => set({ cardinality: e.target.value as Relation['cardinality'] })}>
           <option value="1:N">1 : N</option>

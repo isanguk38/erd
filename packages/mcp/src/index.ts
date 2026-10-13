@@ -6,7 +6,7 @@ export { registerErdTools, httpApi, type ErdApi, type ToolOptions } from './tool
 const INSTRUCTIONS = [
   'ERD(데이터베이스 설계도) 도구입니다.',
   '작업 순서: list_projects로 프로젝트를 찾고, get_schema로 지금 구조를 확인한 뒤, edit_schema로 고칩니다.',
-  'FK는 addRelation으로 만들면 자식 테이블에 FK 컬럼이 자동으로 생깁니다.',
+  'FK는 addRelation으로 만들면 자식 테이블에 FK 컬럼이 자동으로 생깁니다. 외래키 이름은 겹치지 않게 자동으로 정해집니다 (fk_자식_부모, 이미 있으면 fk_자식_FK컬럼). check_design에 "외래키 이름 겹침"이 나오면 updateRelation(newName)으로 안내한 이름으로 바꿉니다.',
   '테이블과 컬럼에는 한글 논리명(logicalName)도 함께 넣어 주세요.',
   'DB에 실제로 실행하는 db_push(execute=true)는 반드시 사용자에게 SQL을 보여주고 승인을 받은 뒤에만 호출합니다.',
   '설계 검토: 설계 작업(edit_schema 여러 번)을 마치면 한 번 check_design으로 기본 검사와 지난 AI 검토를 읽고, 직접 설계를 검토해 save_design_review로 오류(error)·경고(warning)·참고(info)를 저장합니다. 명령마다 검토하지 않습니다.',

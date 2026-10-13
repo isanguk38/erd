@@ -83,7 +83,17 @@ const command = z.discriminatedUnion('op', [
     onDelete: referentialAction.optional(),
     onUpdate: referentialAction.optional(),
   }),
-  z.object({ op: z.literal('dropRelation'), parent: z.string(), child: z.string(), dropColumns: z.boolean().optional() }),
+  z.object({ op: z.literal('dropRelation'), parent: z.string(), child: z.string(), name: z.string().optional().describe('외래키 이름 (같은 두 테이블 사이에 관계가 여럿일 때 고름)'), dropColumns: z.boolean().optional() }),
+  z.object({
+    op: z.literal('updateRelation'),
+    parent: z.string(),
+    child: z.string(),
+    name: z.string().optional().describe('지금 외래키 이름 (get_schema relations의 name. 같은 두 테이블 사이에 관계가 여럿일 때 고름)'),
+    newName: z.string().optional().describe('새 외래키 이름 (다른 외래키가 쓰는 이름은 안 됨)'),
+    cardinality: z.enum(['1:N', '1:1']).optional(),
+    onDelete: referentialAction.optional(),
+    onUpdate: referentialAction.optional(),
+  }),
   // 주제영역: 큰 ERD를 기능별로 나눠 보는 탭 (화면 구분일 뿐 SQL·DB에는 영향 없음). 같은 테이블을 여러 영역에 넣을 수 있다
   z.object({ op: z.literal('createArea'), name: z.string().describe('영역 이름 (예: 주문, 회원, 정산)'), tables: z.array(z.string()).optional().describe('처음 넣을 테이블') }),
   z.object({ op: z.literal('updateArea'), area: z.string(), name: z.string().optional().describe('새 이름') }),

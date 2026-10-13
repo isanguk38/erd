@@ -4,7 +4,7 @@ import type { DialectId } from './dialects/types';
 import { getDialect } from './dialects';
 import { FEATURE_LABEL } from './features';
 import { enumOfType } from './enums';
-import type { Column, Schema, Table } from './model';
+import { newRelationName, relationName, type Column, type Relation, type Schema, type Table } from './model';
 import { tableTypeIssues } from './typeRules';
 import { fitsStyle, isToolTable, namingIssues, namingRuleText, projectNamingStyles, stylesOf, type NameStyle, type NamingSetting } from './naming';
 import { checkColumnAgainstDictionary, checkTableAgainstDictionary, describeMatch, dictIndex, lookupPhysical, lookupTablePhysical, termFromTable, type DictTerm, type Dictionary } from './dictionary';
@@ -18,6 +18,7 @@ export type LintRule =
   | 'duplicate-index'
   | 'varchar-no-length'
   | 'duplicate-relation'
+  | 'duplicate-fk-name'
   | 'type-error'
   | 'type-warning'
   | 'type-ignored'
@@ -43,6 +44,7 @@ export interface LintIssue {
     | { kind: 'addIndex'; tableId: string; columnIds: string[] }
     | { kind: 'patchColumn'; tableId: string; columnId: string; label: string; patch: Partial<Column> }
     | { kind: 'removeRelation'; relationId: string }
+    | { kind: 'patchRelation'; relationId: string; label: string; patch: { name: string } }
     | { kind: 'addTerm'; term: DictTerm }
     | { kind: 'patchTable'; tableId: string; label: string; patch: Partial<Pick<Table, 'name' | 'logicalName'>> };
 }
@@ -56,6 +58,7 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'duplicate-index': { label: '중복 인덱스', severity: 'warning', description: '같은 컬럼 조합의 인덱스가 두 개 이상이면 저장 공간과 쓰기 속도만 낭비됩니다.' },
   'varchar-no-length': { label: '문자 길이 없음', severity: 'warning', description: 'VARCHAR/CHAR에 길이가 없으면 DB에 따라 오류가 나거나 의도와 다른 길이가 됩니다.' },
   'duplicate-relation': { label: '중복 관계', severity: 'error', description: '같은 FK 컬럼으로 같은 테이블을 가리키는 관계가 두 번 있습니다. DB로 내보내면 같은 외래키를 두 번 만들다 실패합니다.' },
+  'duplicate-fk-name': { label: '외래키 이름 겹침', severity: 'error', description: '두 관계(외래키)가 같은 이름을 씁니다. DB는 제약 이름이 겹치면 두 번째 외래키를 만들지 못합니다 (MySQL·Oracle·SQL Server는 DB 전체, PostgreSQL은 테이블 안에서). "이름 바꾸기"로 겹치지 않는 이름을 넣을 수 있습니다.' },
   'type-error': { label: 'DB에서 실패하는 타입', severity: 'error', description: '이 DB에서 허용하지 않는 타입·길이·자동 증가·기본값 조합입니다. 그대로 DB에 내보내면 실패합니다. (예: VARCHAR에 AUTO_INCREMENT, DATETIME(255))' },
   'type-warning': { label: '타입 주의', severity: 'warning', description: 'DB 설정에 따라 실패하거나 의도와 다르게 동작할 수 있는 타입 설정입니다.' },
   'dict-mismatch': { label: '표준 용어와 다름', severity: 'warning', description: '논리명이 표준 용어 사전에 있는데 물리명이나 타입·길이가 사전과 다릅니다. "표준대로" 버튼으로 맞출 수 있습니다.' },
@@ -214,6 +217,33 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
       tableName: child.name,
       message: `${child.name}(${names}) → ${parent.name}: 같은 관계가 두 번 있습니다`,
       fix: { kind: 'removeRelation', relationId: r.id },
+    });
+  }
+
+  // 외래키 이름 겹침 (직접 넣은 이름끼리 등. 비어 있는 이름은 자동으로 겹치지 않게 정해진다). 중복 관계로 이미 알린 것은 빼고
+  const flagged = new Set(issues.filter((i) => i.rule === 'duplicate-relation').map((i) => i.id.slice('duplicate-relation:'.length)));
+  const byFkName = new Map<string, Relation>();
+  for (const r of schema.relations) {
+    const child = schema.tables.find((t) => t.id === r.fromTableId);
+    const parent = schema.tables.find((t) => t.id === r.toTableId);
+    if (!child || !parent || flagged.has(r.id)) continue;
+    const name = relationName(schema, r);
+    const key = name.toLowerCase();
+    const first = byFkName.get(key);
+    if (!first) {
+      byFkName.set(key, r);
+      continue;
+    }
+    const other = schema.tables.find((t) => t.id === first.fromTableId);
+    const suggestion = newRelationName(schema, { ...r, name: '' });
+    issues.push({
+      id: `duplicate-fk-name:${r.id}`,
+      rule: 'duplicate-fk-name',
+      severity: LINT_RULES['duplicate-fk-name'].severity,
+      tableId: child.id,
+      tableName: child.name,
+      message: `${child.name} → ${parent.name}: 외래키 이름 ${name}을(를) ${other?.name ?? '?'}의 다른 외래키도 씁니다 — ${suggestion}처럼 바꾸세요`,
+      fix: { kind: 'patchRelation', relationId: r.id, label: `${suggestion}(으)로`, patch: { name: suggestion } },
     });
   }
 

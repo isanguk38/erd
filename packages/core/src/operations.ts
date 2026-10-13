@@ -8,7 +8,9 @@ import {
   createTable,
   findTable,
   primaryKeyColumns,
+  newRelationName,
   relationName,
+  relationNameOwner,
   type Cardinality,
   type Column,
   type Index,
@@ -263,6 +265,8 @@ export function connectTables(schema: Schema, options: ConnectOptions): Relation
     onDelete: options.onDelete ?? 'NO ACTION',
     onUpdate: options.onUpdate ?? 'NO ACTION',
   });
+  // 이름을 정해 저장한다 (겹치지 않게: fk_자식_부모 → 있으면 fk_자식_FK컬럼). 나중에 다른 관계가 바뀌어도 그대로
+  relation.name = newRelationName(schema, relation);
   schema.relations.push(relation);
   return relation;
 }
@@ -288,6 +292,11 @@ export function connectManyToMany(schema: Schema, aTableId: string, bTableId: st
 export function updateRelation(schema: Schema, relationId: string, patch: Partial<Omit<Relation, 'id'>>): Relation {
   const relation = schema.relations.find((r) => r.id === relationId);
   if (!relation) throw new Error(`관계를 찾을 수 없습니다: ${relationId}`);
+  if (patch.name?.trim()) {
+    const owner = relationNameOwner(schema, patch.name, relation.id);
+    if (owner) throw new Error(`외래키 이름 ${patch.name.trim()}은(는) 이미 ${findTable(schema, owner.fromTableId)?.name} → ${findTable(schema, owner.toTableId)?.name} 관계가 씁니다. 다른 이름을 넣으세요`);
+    patch = { ...patch, name: patch.name.trim() };
+  }
   Object.assign(relation, patch);
   return relation;
 }

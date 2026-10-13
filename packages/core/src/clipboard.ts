@@ -1,6 +1,6 @@
 // 테이블 복사·붙여넣기. 붙여넣으면 모든 id를 새로 만들고, 이름이 겹치면 _2, _3을 붙인다.
 
-import { newId, type Relation, type Schema, type Table } from './model';
+import { newId, newRelationName, type Relation, type Schema, type Table } from './model';
 import { uniqueTableName } from './operations';
 
 export interface Clip {
@@ -60,7 +60,7 @@ export function pasteTables(schema: Schema, clip: Clip, offset = { x: 40, y: 40 
     if (!parent) continue;
     const toColumnIds = source.toColumnIds.map((cid) => (copiedParent ? columnMap.get(cid) ?? cid : cid));
     if (!toColumnIds.every((cid) => parent.columns.some((c) => c.id === cid))) continue;
-    schema.relations.push({
+    const relation = {
       ...structuredClone(source),
       id: newId('rel'),
       name: '',
@@ -68,7 +68,10 @@ export function pasteTables(schema: Schema, clip: Clip, offset = { x: 40, y: 40 
       fromColumnIds: source.fromColumnIds.map((cid) => columnMap.get(cid) ?? cid),
       toTableId: parent.id,
       toColumnIds,
-    });
+    };
+    // 붙여 넣은 테이블 이름으로 겹치지 않는 외래키 이름을 정해 둔다
+    relation.name = newRelationName(schema, relation);
+    schema.relations.push(relation);
   }
   return created.map((t) => t.id);
 }
