@@ -11,7 +11,8 @@ function openReviewItems(items: AiReviewItem[] | undefined, schema: Schema): (Ai
 }
 
 /** 설계 문제 수 (도구 막대 배지용: 오류+경고, 기본 검사 + AI 검토) */
-export function useLintCount(): number {
+/** 툴바 숫자: 오류 + 경고 (참고는 세지 않는다). errors: 그중 오류 수 (숫자 색을 정한다) */
+export function useLintCount(): { count: number; errors: number } {
   const schema = useStore((s) => s.schema);
   const dialect = useStore((s) => s.meta.dialect);
   const ignored = useStore((s) => s.meta.lintIgnored);
@@ -20,9 +21,11 @@ export function useLintCount(): number {
   const dictionary = useStore((s) => s.dictionary);
   return useMemo(() => {
     const skip = new Set(ignored ?? []);
-    const basic = lintSchema(schema, dialect, { namingStyle, dictionary }).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
-    const ai = openReviewItems(review?.items, schema).filter((i) => i.severity !== 'info' && !skip.has(i.id)).length;
-    return basic + ai;
+    const items = [
+      ...lintSchema(schema, dialect, { namingStyle, dictionary }),
+      ...openReviewItems(review?.items, schema),
+    ].filter((i) => i.severity !== 'info' && !skip.has(i.id));
+    return { count: items.length, errors: items.filter((i) => i.severity === 'error').length };
   }, [schema, dialect, ignored, review, namingStyle, dictionary]);
 }
 
@@ -177,6 +180,7 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
           <span className="sev sev-warning">경고 {count('warning')}</span>
           <span className="sev sev-info">참고 {count('info')}</span>
         </span>
+        <span className="lint-count-note" title="툴바 설계 검사 버튼의 숫자는 고쳐야 할 오류와 경고만 셉니다. 참고는 넣지 않습니다">버튼 숫자 = 오류+경고 {count('error') + count('warning')}</span>
         <button className="icon-btn" onClick={onClose} title="닫기"><Icon name="close" size={14} /></button>
       </div>
       {/* AI 막대: AI 검토 상태 한 줄 + 요청 메뉴 하나 (검토만 / 검토하고 고치기 / 연결 방법) */}

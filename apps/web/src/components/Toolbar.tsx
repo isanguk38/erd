@@ -189,7 +189,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
       select({ type: 'table', id: t.id }, true);
     });
   };
-  const lintCount = useLintCount();
+  const { count: lintCount, errors: lintErrors } = useLintCount();
   const reviewPending = useReviewPending();
   const { setting: themeSetting, effective: theme } = useTheme();
   const THEME_NEXT: Record<ThemeSetting, ThemeSetting> = { light: 'dark', dark: 'light' };
@@ -227,11 +227,12 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         <button
           className="btn btn-ghost btn-with-badge"
           onClick={() => onOpen('lint')}
-          title={`설계 검사: 오류·경고 ${lintCount}개 (기본 검사 + AI 검토)${reviewPending ? ` · AI 검토 이후 바뀐 테이블 ${reviewPending}개 — 다시 검토가 필요합니다` : ''}`}
+          title={`설계 검사: 오류 ${lintErrors}개 · 경고 ${lintCount - lintErrors}개 (기본 검사 + AI 검토, 참고는 세지 않음)${reviewPending ? ` · AI 검토 이후 바뀐 테이블 ${reviewPending}개 — 다시 검토가 필요합니다` : ''}`}
         >
           <Icon name="check" />
           <span className="hide-narrow">설계 검사</span>
-          {lintCount > 0 && <span className="db-badge lint">{lintCount}</span>}
+          {/* 오류가 있으면 빨강, 경고만 있으면 노랑 */}
+          {lintCount > 0 && <span className={`db-badge lint${lintErrors ? ' has-error' : ''}`}>{lintCount}</span>}
           {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
           {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
         </button>
