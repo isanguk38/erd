@@ -10,7 +10,11 @@ import {
   dictionaryFromSchema,
   emptySchema,
   lintSchema,
+  checkDictDraft,
+  type Schema,
+  erdTermNotes,
   lookupPhysical,
+  termOverlaps,
   lookupTerm,
   notesOf,
   propagateColumnType,
@@ -141,7 +145,11 @@ describe('표준 용어 사전', () => {
     // 합치기에서도 기존 용어와 섞이면 막는다
     expect(() => writeDictionary(doc, { terms: [{ logical: '회원나이', physical: 'MBR_AGE' }] }, 'merge')).toThrow(/섞여/);
     expect(() => setDictEntry(doc, { logical: '회원나이', physical: 'mbrAge' })).toThrow(/snake_case.*mbr_age/);
-    expect(() => setDictEntry(doc, { logical: '회원고유번호', physical: 'mbr_no' })).toThrow(/이미 "회원번호"/);
+    // 논리명이 다르면 같은 물리명을 써도 된다 (결제상태·구독상태 → status처럼). 논리명이 같거나 논리명이 없으면 막는다
+    setDictEntry(doc, { logical: '회원고유번호', physical: 'mbr_no' });
+    expect(() => setDictEntry(doc, { logical: '', physical: 'mbr_no' })).toThrow(/이미 "회원번호"/);
+    expect(() => setDictEntry(doc, { logical: '회원고유번호', physical: 'member_key' })).toThrow(/이미 mbr_no/);
+    removeDictEntry(doc, { logical: '회원고유번호', physical: 'mbr_no' });
     setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'INT' });
     // 자기 자신을 고칠 때는 같은 물리명이어도 된다
     setDictEntry(doc, { logical: '회원나이', physical: 'mbr_age', type: 'SMALLINT' }, { logical: '회원나이', physical: 'mbr_age' });
@@ -150,7 +158,7 @@ describe('표준 용어 사전', () => {
     expect(readDictionary(doc)).toBeNull();
   });
 
-  it('AI가 만든 컬럼: 사전에 없는 용어는 넣고 (같은 논리명·물리명은 한 번만), 다른 표기·이미 있는 물리명은 넣지 않고 안내', () => {
+  it('AI가 만든 컬럼: 사전에 없는 용어는 넣고 (같은 논리명은 한 번만, 논리명이 다르면 물리명이 같아도 넣음), 다른 표기는 넣지 않고 안내', () => {
     const before = emptySchema();
     const { schema: after } = applyCommands(before, [
       { op: 'createTable', name: 'orders', columns: [
@@ -162,13 +170,15 @@ describe('표준 용어 사전', () => {
       { op: 'createTable', name: 'order_item', columns: [{ name: 'order_no', logicalName: '주문번호', type: 'VARCHAR(20)' }] },
     ]);
     const r = syncDictionaryForAi(dict, before, after);
-    expect(r.add).toEqual([{ logical: '주문번호', physical: 'order_no', type: 'VARCHAR', length: '20' }]);
+    expect(r.add).toEqual([{ logical: '주문번호', physical: 'order_no', type: 'VARCHAR', length: '20' }, { logical: '메모번호', physical: 'memory_id', type: 'BIGINT' }]);
     expect(r.notes.join('\n')).toContain('orderAmt: 이름 표기 기준(snake_case)과 다릅니다 — order_amt');
-    expect(r.notes.join('\n')).toContain('memory_id은(는) 사전에 "회원메모"');
     const doc = new Y.Doc();
     writeDictionary(doc, { terms: dict.terms });
-    expect(addMissingTerms(doc, [...r.add, ...r.add, { logical: '다른이름', physical: 'order_no' }]).map((t) => t.physical)).toEqual(['order_no']);
-    expect(readDictionary(doc)?.terms).toHaveLength(5);
+    expect(addMissingTerms(doc, [...r.add, ...r.add, { logical: '다른이름', physical: 'order_no' }, { logical: '', physical: 'order_no' }]).map((t) => t.logical)).toEqual(['주문번호', '메모번호', '다른이름']);
+    expect(readDictionary(doc)?.terms).toHaveLength(7);
+    // 여러 용어가 같은 물리명이면 물리명만으로는 어느 용어인지 모른다
+    expect(lookupPhysical(readDictionary(doc), 'order_no')).toBe(null);
+    expect(lookupPhysical(readDictionary(doc), 'mbr_no')?.logical).toBe('회원번호');
     expect(syncDictionaryForAi(null, before, after)).toEqual({ add: [], notes: [] });
   });
 
@@ -251,5 +261,55 @@ describe('ERD에서 사전 만들기 · 논리명 없는 용어', () => {
     const parsed = await parseDictionaryWorkbook(await dictionaryWorkbook({ terms }));
     expect(parsed.terms).toEqual(terms);
   });
-});
 
+  it('겹침: 같은 논리명만 겹침 (물리명만 같은 것은 괜찮음) — AI 편집도 사전 화면과 같은 검사', () => {
+    expect(termOverlaps([{ logical: '결제상태' }, { logical: '구독상태' }, { logical: '상품명' }, { logical: '상품 명' }, { logical: '' }, { logical: '' }])).toEqual([{ kind: 'column', value: '상품명', indexes: [2, 3] }]);
+
+    const { schema: before } = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'product', columns: [{ name: 'product_id', logicalName: '상품번호', type: 'BIGINT', primaryKey: true }, { name: 'name', logicalName: '상품명', type: 'VARCHAR(100)' }, { name: 'created_at', logicalName: '생성일시', type: 'DATETIME' }] },
+      { op: 'createTable', name: 'payment', columns: [{ name: 'payment_id', logicalName: '결제번호', type: 'BIGINT', primaryKey: true }, { name: 'status', logicalName: '결제상태', type: 'VARCHAR(20)' }, { name: 'created_at', logicalName: '생성일시', type: 'DATETIME' }] },
+    ]);
+    const { schema: after } = applyCommands(before, [
+      { op: 'createTable', name: 'subscription', columns: [
+        { name: 'subscription_id', logicalName: '구독번호', type: 'BIGINT', primaryKey: true },
+        { name: 'status', logicalName: '구독상태', type: 'VARCHAR(20)' }, // 논리명이 다르면 물리명이 같아도 됨
+        { name: 'reg_dt', logicalName: '생성일시', type: 'DATETIME' }, // 같은 뜻인데 다른 이름
+        { name: 'name', logicalName: '구독명', type: 'VARCHAR(100)' }, // product.name과 물리명만 같음 → 괜찮음
+      ] },
+    ]);
+    const notes = erdTermNotes(before, after);
+    expect(notes.map((n) => n.where)).toEqual(['subscription.reg_dt']);
+    expect(notes[0].message).toContain('created_at(으)로 맞추고');
+    // 이미 있던 것만 있으면 알리지 않는다 (이번에 바꾼 것만)
+    expect(erdTermNotes(after, after)).toEqual([]);
+  });
+
+  it('AI 편집 검사와 사전 화면 "ERD에서 만들기" 검사는 같은 규칙: AI 검사가 깨끗하면 사전에도 그대로 넣을 수 있다', () => {
+    const flagged = (schema: Schema) => {
+      const rows = dictionaryFromSchema(schema);
+      const c = checkDictDraft(rows, [], null, 'merge');
+      return c.styleOff.length + c.dup.length + c.variants.length;
+    };
+    const { schema: bad } = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'payment', columns: [{ name: 'payment_id', logicalName: '결제번호', type: 'BIGINT', primaryKey: true }, { name: 'created_at', logicalName: '생성일시', type: 'DATETIME' }, { name: 'pay_amt', logicalName: '결제금액', type: 'INT' }] },
+      { op: 'createTable', name: 'subscription', columns: [
+        { name: 'subscription_id', logicalName: '구독번호', type: 'BIGINT', primaryKey: true },
+        { name: 'createdAt', logicalName: '생성일시', type: 'DATETIME' }, // 같은 뜻 다른 이름 + 다른 표기
+        { name: 'pay_amt', logicalName: '결제금액', type: 'DECIMAL(12,2)' }, // 같은 이름 다른 타입
+      ] },
+    ]);
+    const notes = erdTermNotes(emptySchema(), bad);
+    expect(flagged(bad)).toBeGreaterThan(0);
+    expect(notes.length).toBeGreaterThan(0);
+    const text = notes.map((n) => n.message).join('\n');
+    expect(text).toContain('타입·길이를 맞추세요');
+    expect(text).toContain('created_at(으)로 맞추고');
+    // AI 안내대로 고치면 두 검사 모두 깨끗
+    const { schema: fixed } = applyCommands(bad, [
+      { op: 'updateColumn', table: 'subscription', column: 'createdAt', changes: { name: 'created_at' } },
+      { op: 'updateColumn', table: 'subscription', column: 'pay_amt', changes: { type: 'INT' } },
+    ]);
+    expect(erdTermNotes(emptySchema(), fixed)).toEqual([]);
+    expect(flagged(fixed)).toBe(0);
+  });
+});

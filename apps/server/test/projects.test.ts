@@ -258,3 +258,20 @@ describe('DB 작업 기록', () => {
     expect(JSON.stringify(log[0].connection)).not.toContain('127.0.0.1');
   });
 });
+
+describe('같은 뜻은 같은 이름 (사전이 없어도)', () => {
+  it('AI 편집 결과의 terms에 같은 논리명을 다른 물리명으로 쓴 곳이 나온다. 논리명이 다르면 물리명이 같아도 괜찮다', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app, 'apply');
+    const run = async (commands: Command[]) => (await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source: 'ai', commands } })).json();
+    await run([{ op: 'createTable', name: 'payment', columns: [{ name: 'payment_id', logicalName: '결제번호', type: 'BIGINT', primaryKey: true }, { name: 'status', logicalName: '결제상태', type: 'VARCHAR(20)' }, { name: 'created_at', logicalName: '생성일시', type: 'DATETIME' }] }]);
+    const r = await run([{ op: 'createTable', name: 'subscription', columns: [
+      { name: 'subscription_id', logicalName: '구독번호', type: 'BIGINT', primaryKey: true },
+      { name: 'status', logicalName: '구독상태', type: 'VARCHAR(20)' },
+      { name: 'reg_dt', logicalName: '생성일시', type: 'DATETIME' },
+    ] }]);
+    expect(r.terms).toHaveLength(1);
+    expect(r.terms[0]).toContain('subscription.reg_dt');
+    expect(r.terms[0]).toContain('created_at');
+  });
+});

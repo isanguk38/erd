@@ -1011,11 +1011,13 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .dict-table td.uses select { font-size: 12px; max-width: 220px; }
 .dict-table tr.excluded { opacity: 0.45; }
 .dict-table tr.bad-style td, .dict-table tr.bad-dup td { background: var(--danger-soft); }
+.dict-table tr.warn-shared td { background: var(--warning-soft); }
 .dict-table tr.no-logical input::placeholder { color: var(--warning); }
 .dict-table-wrap.tall { max-height: 46vh; }
 .dict-more { margin: 8px; }
 .lint-group__bulk { margin: 0 0 6px 10px; }
 .dict-check.warn-box { border-color: var(--warning); background: var(--warning-soft); }
+.dict-shared-warn { border: 1px solid var(--warning); background: var(--warning-soft); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .dict-form.with-kind { grid-template-columns: 80px 1.2fr 1.2fr 0.9fr 0.6fr 2fr auto; }
 .dict-kind { font-size: 12px; padding: 2px 4px; }
 .dict-table.edit input:disabled { opacity: 0.4; }

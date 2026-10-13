@@ -2,6 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import {
+  erdTermNotes,
   appliedChanges,
   buildReview,
   resolveReviewItems,
@@ -132,7 +133,9 @@ export function registerProjectRoutes(
     const styles = stylesOf(projectNamingStyles(store.meta(id).namingStyle, after, dict ? dictIndex(dict).styles : null));
     const naming = namingNotes(before, after, styles);
     const dictionary = syncDictionaryForAi(dict, before, after).notes;
-    return { ...(impact.length ? { impact } : {}), ...(naming.length ? { naming } : {}), ...(dictionary.length ? { dictionary } : {}) };
+    // 사전이 없어도: 지금 ERD로 사전 화면의 "ERD에서 만들기"를 했을 때 나올 문제 (사전 화면과 같은 규칙 checkDictDraft)
+    const terms = erdTermNotes(before, after, { dictionary: dict, saved: store.meta(id).namingStyle }).map((n) => n.message);
+    return { ...(impact.length ? { impact } : {}), ...(naming.length ? { naming } : {}), ...(dictionary.length ? { dictionary } : {}), ...(terms.length ? { terms } : {}) };
   }
 
   /**

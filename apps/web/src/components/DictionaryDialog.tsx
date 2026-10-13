@@ -15,15 +15,15 @@ import {
   dictIndex,
   dictionaryFromSchema,
   duplicatePhysicals,
-  dictKey,
+  sharedPhysicals,
   logicalFillsFromSchema,
-  mergedTerms,
   NAME_STYLE_LABEL,
   newTermsFromColumns,
   removeDictEntry,
   searchDictionary,
   setDictEntry,
   styleSuggestion,
+  checkDictDraft,
   termKey,
   toStyle,
   updateColumn,
@@ -50,9 +50,6 @@ type Row = DictTerm & { id: number; include: boolean; variants: DictVariant[] };
 /** 넣기 전 편집: 어디서 왔는지 + 줄들 */
 type Staged = { from: string; rows: Row[]; notes: string[] };
 
-const physKey = (p: string) => p.trim().toLowerCase();
-/** 같은 구분(테이블/컬럼) 안에서만 겹침을 본다 */
-const scoped = (r: Pick<DictTerm, 'kind'>, key: string) => `${r.kind === 'table' ? 't:' : ''}${key}`;
 
 /** 구분 선택 (테이블이면 타입·길이를 비운다) */
 function KindSelect({ value, onChange, disabled }: { value: DictTerm['kind']; onChange: (kind: DictTerm['kind']) => void; disabled?: boolean }) {
@@ -267,10 +264,22 @@ export function DictionaryDialog({ onClose, onOpenLint }: { onClose: () => void;
   );
 }
 
-/** 예전에 넣어 같은 물리명을 쓰는 용어가 있으면 알린다 (지금은 새로 넣을 때 막는다) */
+/** 예전에 넣어 물리명이 겹치는 용어(테이블 용어, 논리명 없는 용어)가 있으면 알린다 (지금은 새로 넣을 때 막는다) */
 function DuplicateNotice({ terms }: { terms: DictTerm[] }) {
   const groups = useMemo(() => duplicatePhysicals(terms), [terms]);
-  if (!groups.length) return null;
+  const shared = useMemo(() => sharedPhysicals(terms), [terms]);
+  if (!groups.length && !shared.length) return null;
+  if (!groups.length) {
+    return (
+      <div className="dict-check warn-box">
+        <span>
+          논리명이 다른데 물리명이 같은 용어가 {shared.length}곳 있습니다 (경고 — 같은 뜻이 아닌지 확인):{' '}
+          {shared.slice(0, 5).map((g) => `${g[0].physical} (${g.map((t) => t.logical).join('·')})`).join(', ')}
+          {shared.length > 5 ? ' …' : ''}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="dict-check warn-box">
       <span>
@@ -296,7 +305,7 @@ function StyleBadge({ terms, saved }: { terms: DictTerm[]; saved: NamingSetting 
   return <span className="dict-style-badge" title={`${saved ? '프로젝트 이름 표기 기준입니다 (위쪽 표기 배지).' : '기준을 정하지 않아 사전 용어들의 물리명을 보고 정했습니다 — 이 표기가 프로젝트 기준이 됩니다.'} 테이블 용어와 컬럼 용어는 따로 봅니다. 새 용어도 이 표기로만 넣을 수 있고, 다른 표기의 테이블·컬럼 이름은 설계 검사에서 경고합니다`}>{text}</span>;
 }
 
-type Filter = 'all' | 'table' | 'variants' | 'noLogical' | 'style' | 'dup';
+type Filter = 'all' | 'table' | 'variants' | 'noLogical' | 'style' | 'dup' | 'shared';
 
 /**
  * 넣기 전 편집 목록 (엑셀·이 ERD·다른 프로젝트 공통): 칸을 바로 고치고, 뺄 것은 체크를 풀고, 넣는다.
@@ -315,20 +324,14 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
   const included = rows.filter((r) => r.include && r.physical.trim());
   const terms: DictTerm[] = included.map(({ id: _id, include: _inc, variants: _v, ...t }) => t);
 
-  // 넣은 뒤의 사전으로 표기·겹침을 본다 (합치기면 기존 용어까지)
+  // 넣은 뒤의 사전으로 표기·겹침을 본다 (합치기면 기존 용어까지).
+  // AI 편집 검사(erdTermNotes)와 같은 규칙 하나(checkDictDraft)를 쓴다 — 규칙을 바꾸면 두 곳이 함께 바뀐다
   const problems = useMemo(() => {
-    const result = mergedTerms(current, terms, hasDictionary ? mode : 'replace');
-    const checks = detectTermStyles(result, saved);
-    const offKeys = new Set([...checks.table.offenders, ...checks.column.offenders].map((t) => termKey(t)));
-    const byPhys = new Map<string, number>();
-    for (const t of result) byPhys.set(scoped(t, physKey(t.physical)), (byPhys.get(scoped(t, physKey(t.physical))) ?? 0) + 1);
-    const logicals = new Map<string, number>();
-    for (const r of included) if (r.logical.trim()) logicals.set(scoped(r, dictKey(r.logical)), (logicals.get(scoped(r, dictKey(r.logical))) ?? 0) + 1);
-    const styleOff = included.filter((r) => offKeys.has(termKey(r)));
-    const dup = included.filter((r) => (byPhys.get(scoped(r, physKey(r.physical))) ?? 0) > 1 || (r.logical.trim() && (logicals.get(scoped(r, dictKey(r.logical))) ?? 0) > 1));
-    return { styles: { table: checks.table.style, column: checks.column.style } as NamingStyles, styleOff: new Set(styleOff.map((r) => r.id)), dup: new Set(dup.map((r) => r.id)) };
+    const check = checkDictDraft(included.map(({ id: _id, include: _inc, ...t }) => t), current, saved, mode);
+    const ids = (list: number[]) => new Set(list.map((i) => included[i].id));
+    return { styles: check.styles, styleOff: ids(check.styleOff), dup: ids(check.dup), shared: ids(check.shared) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, current, mode, hasDictionary, saved]);
+  }, [rows, current, mode, saved]);
 
   const counts: Record<Filter, number> = {
     all: rows.length,
@@ -337,6 +340,7 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
     noLogical: rows.filter((r) => r.include && !r.logical.trim()).length,
     style: problems.styleOff.size,
     dup: problems.dup.size,
+    shared: problems.shared.size,
   };
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -346,6 +350,7 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
       if (filter === 'noLogical' && (!r.include || r.logical.trim())) return false;
       if (filter === 'style' && !problems.styleOff.has(r.id)) return false;
       if (filter === 'dup' && !problems.dup.has(r.id)) return false;
+      if (filter === 'shared' && !problems.shared.has(r.id)) return false;
       return !q || r.logical.toLowerCase().includes(q) || r.physical.toLowerCase().includes(q);
     });
   }, [rows, filter, query, problems]);
@@ -377,12 +382,17 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
               <button className="btn btn-sm" onClick={fixAllStyle}>모두 {styleText}로 바꾸기</button>
             </div>
           )}
-          {counts.dup > 0 && <div><b>같은 물리명·논리명이 {counts.dup}줄에 겹칩니다</b> — 하나만 남기도록 고치거나 체크를 풀어 주세요{hasDictionary && mode === 'merge' ? ' (지금 사전의 용어와 겹치는 것 포함)' : ''}.</div>}
+          {counts.dup > 0 && <div><b>겹치는 용어가 {counts.dup}줄 있습니다</b> — 같은 논리명이 두 줄 이상이거나, 테이블·논리명 없는 용어의 물리명이 같습니다. 하나만 남기도록 고치거나 체크를 풀어 주세요{hasDictionary && mode === 'merge' ? ' (지금 사전의 용어와 겹치는 것 포함)' : ''}.</div>}
+        </div>
+      )}
+      {counts.shared > 0 && (
+        <div className="dict-shared-warn">
+          <b>논리명이 다른데 물리명이 같은 용어가 {counts.shared}줄 있습니다</b> — 넣을 수 있습니다. 같은 뜻을 다르게 부른 것이 아닌지만 확인하세요 (예: 결제상태·구독상태 → status는 괜찮음).
         </div>
       )}
       <div className="dict-tabs">
         <div className="segmented small">
-          {([['all', '전체'], ['table', '테이블'], ['variants', '다르게 쓴 곳'], ['noLogical', '논리명 없음'], ['style', '다른 표기'], ['dup', '겹침']] as [Filter, string][]).map(([f, label]) =>
+          {([['all', '전체'], ['table', '테이블'], ['variants', '다르게 쓴 곳'], ['noLogical', '논리명 없음'], ['style', '다른 표기'], ['dup', '겹침'], ['shared', '같은 물리명']] as [Filter, string][]).map(([f, label]) =>
             f === 'all' || counts[f] ? (
               <button key={f} className={filter === f ? 'active' : ''} onClick={() => { setFilter(f); setLimit(PAGE); }}>{label} {counts[f]}</button>
             ) : null,
@@ -411,8 +421,9 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
           <tbody>
             {filtered.slice(0, limit).map((r) => {
               const bad = problems.styleOff.has(r.id) ? 'style' : problems.dup.has(r.id) ? 'dup' : '';
+              const shared = !bad && problems.shared.has(r.id);
               return (
-                <tr key={r.id} className={`${r.include ? '' : 'excluded'}${bad ? ` bad-${bad}` : ''}`}>
+                <tr key={r.id} className={`${r.include ? '' : 'excluded'}${bad ? ` bad-${bad}` : ''}${shared ? ' warn-shared' : ''}`}>
                   <td className="narrow"><input type="checkbox" checked={r.include} onChange={(e) => update(r.id, { include: e.target.checked })} /></td>
                   <td><KindSelect value={r.kind} onChange={(kind) => update(r.id, kind === 'table' ? { kind, type: undefined, length: undefined } : { kind: undefined })} /></td>
                   <td><input value={r.logical} placeholder="(논리명 없음)" onChange={(e) => update(r.id, { logical: e.target.value })} /></td>
@@ -420,7 +431,7 @@ function StagedEditor({ staged, onChange, saved, current, onApply, onCancel }: {
                     <input
                       className="mono"
                       value={r.physical}
-                      title={bad === 'style' && problems.styles[kindOf(r)] ? `${NAME_KIND_LABEL[kindOf(r)]} 표기(${NAME_STYLE_LABEL[problems.styles[kindOf(r)]!]})와 다릅니다 → ${toStyle(r.physical, problems.styles[kindOf(r)]!)}` : bad === 'dup' ? '다른 줄(또는 지금 사전)과 물리명·논리명이 겹칩니다' : undefined}
+                      title={bad === 'style' && problems.styles[kindOf(r)] ? `${NAME_KIND_LABEL[kindOf(r)]} 표기(${NAME_STYLE_LABEL[problems.styles[kindOf(r)]!]})와 다릅니다 → ${toStyle(r.physical, problems.styles[kindOf(r)]!)}` : bad === 'dup' ? '다른 줄(또는 지금 사전)과 논리명이 같거나, 테이블·논리명 없는 용어끼리 물리명이 같습니다' : shared ? '논리명이 다른 용어와 물리명이 같습니다 (경고 — 넣을 수 있음)' : undefined}
                       onChange={(e) => update(r.id, { physical: e.target.value })}
                     />
                   </td>
