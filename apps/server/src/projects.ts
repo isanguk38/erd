@@ -78,6 +78,13 @@ export interface AiStep {
   after: Schema;
 }
 
+/** AI가 바로 적용한 작업의 이력 한 줄 (화면에서 무엇이 바뀌었는지 보여 주기용) */
+export interface AiLogEntry {
+  at: string;
+  messages: string[];
+  changes: { id: string; category: 'create' | 'alter' | 'drop'; tableName: string; summary: string; warning?: string }[];
+}
+
 export class ProjectStore {
   private readonly loaded = new Map<string, LoadedProject>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
@@ -272,6 +279,26 @@ export class ProjectStore {
 
   clearAiSteps(id: string): void {
     this.writeJson(this.path(id, 'ai-steps.json'), []);
+  }
+
+  /** 이번 AI 작업 묶음의 이력 (오래된 것부터) */
+  aiLog(id: string): AiLogEntry[] {
+    return this.readJson<AiLogEntry[]>(this.path(id, 'ai-log.json'), []);
+  }
+
+  /** fresh: 새 AI 작업 묶음이 시작되면 지난 이력을 지우고 새로 쌓는다 */
+  addAiLog(id: string, entry: AiLogEntry, fresh: boolean): void {
+    const log = fresh ? [] : this.aiLog(id);
+    this.writeJson(this.path(id, 'ai-log.json'), [...log, entry].slice(-100));
+  }
+
+  /** 가장 최근 AI 작업 한 번을 되돌렸을 때 그 이력도 뺀다 */
+  popAiLog(id: string): void {
+    this.writeJson(this.path(id, 'ai-log.json'), this.aiLog(id).slice(0, -1));
+  }
+
+  clearAiLog(id: string): void {
+    this.writeJson(this.path(id, 'ai-log.json'), []);
   }
 
   // ── 제안 (AI 제안 모드) ─────────────────────────────

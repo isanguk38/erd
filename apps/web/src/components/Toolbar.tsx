@@ -21,7 +21,7 @@ import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'aiLog' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },

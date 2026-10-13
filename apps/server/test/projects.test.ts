@@ -69,12 +69,25 @@ describe('AI 바로 적용 + 되돌리기', () => {
     const versions = (await app.inject({ method: 'GET', url: `/api/projects/${id}/versions` })).json();
     expect(versions.filter((v: { name: string }) => v.name.startsWith('AI 작업 전'))).toHaveLength(1);
 
+    // 바로 적용해도 무엇이 바뀌었는지 이력으로 볼 수 있다 (최근 것부터, 사람이 한 변경은 없음)
+    const log = (await app.inject({ method: 'GET', url: `/api/projects/${id}/ai/log` })).json();
+    expect(log.map((e: { changes: { summary: string }[] }) => e.changes.map((c) => c.summary))).toEqual([['orders 테이블 생성'], ['member.nickname 컬럼 추가']]);
+    expect(log[0].messages.length).toBeGreaterThan(0);
     // 화면의 AI 배너: 묶음 전체 되돌리기
     await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo`, payload: { scope: 'session' } });
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${id}/ai/log` })).json()).toEqual([]);
     project = (await app.inject({ method: 'GET', url: `/api/projects/${id}` })).json();
     expect(project.meta.aiSession).toBe(null);
     expect(project.schema.tables.map((t: { name: string }) => t.name)).toEqual(['member']);
     expect(project.schema.tables[0].columns.map((c: { name: string }) => c.name)).toEqual(['member_id', 'email']);
+
+    // "유지"를 눌러도 이력은 남고, 다음 AI 작업 묶음이 시작되면 새로 쌓는다
+    const summaries = async () => (await app.inject({ method: 'GET', url: `/api/projects/${id}/ai/log` })).json().map((e: { changes: { summary: string }[] }) => e.changes[0].summary);
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source: 'ai', commands: [{ op: 'addColumn', table: 'member', column: { name: 'memo', type: 'VARCHAR(100)' } }] } });
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/accept` });
+    expect(await summaries()).toEqual(['member.memo 컬럼 추가']);
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/commands`, payload: { source: 'ai', commands: [{ op: 'addColumn', table: 'member', column: { name: 'grade', type: 'VARCHAR(10)' } }] } });
+    expect(await summaries()).toEqual(['member.grade 컬럼 추가']);
   });
 
   it('MCP 되돌리기는 가장 최근 AI 작업 한 번만, 그 뒤 사람이 고친 것은 남긴다', async () => {
@@ -88,6 +101,8 @@ describe('AI 바로 적용 + 되돌리기', () => {
 
     const undo1 = (await app.inject({ method: 'POST', url: `/api/projects/${id}/ai/undo` })).json();
     expect(undo1.undone.map((c: { summary: string }) => c.summary)).toEqual(['orders 테이블 삭제']);
+    // 되돌린 작업은 이력에서도 빠진다
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${id}/ai/log` })).json()).toHaveLength(1);
     let t = await tables();
     expect(t.map((x) => x.name)).toEqual(['member']);
     expect(t[0].columns.map((c) => c.name)).toContain('phone'); // 사람 편집은 그대로

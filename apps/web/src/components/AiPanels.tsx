@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useReactFlow } from '@xyflow/react';
 import { useStore } from '../store';
-import { authApi, projectApi, type ChangeSummary, type ProposalInfo, type TokenInfo } from '../lib/api';
+import { authApi, projectApi, type AiLogEntry, type ChangeSummary, type ProposalInfo, type TokenInfo } from '../lib/api';
 import { Modal } from './Modal';
 
 /** AI가 바로 적용한 변경이 있으면 캔버스 위에 띄우는 알림 */
-export function AiBanner({ onOpenProposals }: { onOpenProposals: () => void }) {
+export function AiBanner({ onOpenProposals, onOpenLog }: { onOpenProposals: () => void; onOpenLog: () => void }) {
   const projectId = useStore((s) => s.projectId);
   const session = useStore((s) => s.meta.aiSession);
   const pending = useStore((s) => s.meta.pendingProposals ?? 0);
@@ -19,6 +20,7 @@ export function AiBanner({ onOpenProposals }: { onOpenProposals: () => void }) {
           <span>
             <b>AI가 ERD를 {session.changeCount}건 바꿨습니다.</b> <span className="muted">{new Date(session.startedAt).toLocaleTimeString()}부터</span>
           </span>
+          <button className="btn btn-sm" onClick={onOpenLog}>변경 내용 보기</button>
           <button
             className="btn btn-sm btn-danger"
             disabled={busy}
@@ -45,6 +47,71 @@ export function AiBanner({ onOpenProposals }: { onOpenProposals: () => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 바로 적용한 AI 변경 이력: 작업마다 무엇을 만들고·고치고·지웠는지. 테이블 이름을 누르면 그 테이블로 간다 */
+export function AiLogDialog({ onClose }: { onClose: () => void }) {
+  const projectId = useStore((s) => s.projectId)!;
+  const changeCount = useStore((s) => s.meta.aiSession?.changeCount ?? 0);
+  const tables = useStore((s) => s.schema.tables);
+  const { fitView } = useReactFlow();
+  const [log, setLog] = useState<AiLogEntry[] | null>(null);
+
+  useEffect(() => {
+    projectApi.aiLog(projectId).then(setLog).catch(() => setLog([]));
+    // AI가 이어서 바꾸면 다시 불러온다
+  }, [projectId, changeCount]);
+
+  const show = (tableName: string) => {
+    const table = tables.find((t) => t.name === tableName);
+    if (!table) return;
+    useStore.getState().select({ type: 'table', id: table.id }, true);
+    const switched = useStore.getState().revealTable(table.id);
+    setTimeout(() => fitView({ nodes: [{ id: table.id }], padding: 0.8, duration: 350, maxZoom: 1.3 }), switched ? 120 : 0);
+    onClose();
+  };
+  const total = log?.reduce((n, e) => n + e.changes.length, 0) ?? 0;
+
+  return (
+    <Modal title="AI가 바꾼 내용" onClose={onClose} wide>
+      <p className="muted small">바로 적용 모드에서 AI가 반영한 변경입니다. 다음 AI 작업 묶음이 시작될 때까지 남습니다. 되돌리려면 "AI 변경 되돌리기"를 쓰세요.</p>
+      {!log && <div className="muted">불러오는 중…</div>}
+      {log?.length === 0 && <div className="empty-state">AI가 바로 적용한 변경이 없습니다.</div>}
+      {log && log.length > 0 && <div className="muted small">작업 {log.length}번 · 변경 {total}건 (최근 것부터)</div>}
+      {log?.map((e, i) => (
+        <section key={`${e.at}-${i}`} className="proposal">
+          <div className="proposal__head">
+            <div>
+              <b>{new Date(e.at).toLocaleString()}</b>
+              <div className="muted small">변경 {e.changes.length}건</div>
+            </div>
+          </div>
+          {e.messages.length > 0 && (
+            <details className="proposal__messages">
+              <summary>AI가 한 작업 {e.messages.length}개</summary>
+              <ul>{e.messages.map((m, j) => <li key={j}>{m}</li>)}</ul>
+            </details>
+          )}
+          <ul className="ai-log__changes">
+            {e.changes.map((c) => {
+              const exists = tables.some((t) => t.name === c.tableName);
+              return (
+                <li key={c.id}>
+                  <span className={`tag tag-${c.category}`}>{CATEGORY[c.category]}</span>
+                  {exists ? (
+                    <button className="link-btn" title="이 테이블로 이동" onClick={() => show(c.tableName)}>{c.summary}</button>
+                  ) : (
+                    <span>{c.summary}</span>
+                  )}
+                  {c.warning && <div className="warning">⚠ {c.warning}</div>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </Modal>
   );
 }
 
@@ -216,7 +283,7 @@ function AiConnections() {
 }
 
 /** AI 연결 설정: 적용 방식, DB 실행 허용, MCP 연결 방법 */
-export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; onOpenProposals: () => void }) {
+export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () => void; onOpenProposals: () => void; onOpenLog: () => void }) {
   const projectId = useStore((s) => s.projectId)!;
   const meta = useStore((s) => s.meta);
   const role = useStore((s) => s.role);
@@ -263,7 +330,7 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
             <input type="radio" disabled={role === 'viewer'} checked={meta.aiMode !== 'propose'} onChange={() => projectApi.update(projectId, { aiMode: 'apply' })} />
             <div>
               <b>바로 적용</b>
-              <p className="muted small">AI가 고치면 화면에 바로 반영됩니다. 작업 전 상태가 자동 저장되어 "AI 변경 되돌리기"로 한 번에 되돌릴 수 있습니다.</p>
+              <p className="muted small">AI가 고치면 화면에 바로 반영됩니다. 무엇이 바뀌었는지는 "변경 내용 보기"에 남고, 작업 전 상태가 자동 저장되어 "AI 변경 되돌리기"로 한 번에 되돌릴 수 있습니다.</p>
             </div>
           </label>
           <label className={`choice${meta.aiMode === 'propose' ? ' active' : ''}`}>
@@ -281,6 +348,9 @@ export function AiDialog({ onClose, onOpenProposals }: { onClose: () => void; on
           </label>
         ) : (
           <p className="muted small">AI는 설계와 SQL 만들기까지 합니다. DB에 실행하는 것은 설치형 앱의 "DB로 내보내기"에서 사람이 직접 합니다.</p>
+        )}
+        {meta.aiMode !== 'propose' && (
+          <button className="btn btn-sm" onClick={onOpenLog}>AI가 바로 적용한 변경 내용 보기</button>
         )}
         {(meta.pendingProposals ?? 0) > 0 && (
           <button className="btn btn-primary btn-sm" onClick={() => { onClose(); onOpenProposals(); }}>

@@ -11,7 +11,7 @@ import { VersionsDialog } from './components/VersionsDialog';
 import { DbPullDialog } from './components/DbPullDialog';
 import { DbPushDialog } from './components/DbPushDialog';
 import { DefinitionDialog } from './components/DefinitionDialog';
-import { AiBanner, AiDialog, ProposalsDialog } from './components/AiPanels';
+import { AiBanner, AiDialog, AiLogDialog, ProposalsDialog } from './components/AiPanels';
 import { ProjectsPage } from './components/ProjectsPage';
 import { refreshDbStatus } from './lib/hooks';
 import { CompareBanner, ComparePanel } from './components/ComparePanel';
@@ -217,7 +217,7 @@ function Editor({ projectId }: { projectId: string }) {
           <div className="canvas-col">
           {synced && !isEmpty && !comparing && <AreaTabs />}
           <div className="canvas">
-            {comparing ? <CompareBanner /> : <AiBanner onOpenProposals={() => setDialog('proposals')} />}
+            {comparing ? <CompareBanner /> : <AiBanner onOpenProposals={() => setDialog('proposals')} onOpenLog={() => setDialog('aiLog')} />}
             {(!synced || openError) && (
               <div className="sync-overlay">
                 {openError ? (
@@ -257,8 +257,9 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'dbPull' && <DbPullDialog onClose={close} onDone={(o) => (o?.relayout ? setRelayoutRequest((n) => n + 1) : setFitRequest((n) => n + 1))} />}
         {dialog === 'dbPush' && <DbPushDialog onClose={close} />}
         {dialog === 'definition' && <DefinitionDialog onClose={close} />}
-        {dialog === 'ai' && <AiDialog onClose={close} onOpenProposals={() => setDialog('proposals')} />}
+        {dialog === 'ai' && <AiDialog onClose={close} onOpenProposals={() => setDialog('proposals')} onOpenLog={() => setDialog('aiLog')} />}
         {dialog === 'proposals' && <ProposalsDialog onClose={close} />}
+        {dialog === 'aiLog' && <AiLogDialog onClose={close} />}
         {dialog === 'share' && <ShareDialog onClose={close} />}
         {dialog === 'help' && <HelpDialog onClose={close} />}
         {dialog === 'image' && <ImageExportDialog onClose={close} />}

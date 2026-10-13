@@ -518,6 +518,11 @@ label.btn { display: inline-flex; align-items: center; }
 .proposal__messages ul { margin: 4px 0; padding-left: 18px; }
 .proposal__changes ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .proposal__changes li label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.ai-log__changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ai-log__changes li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ai-log__changes .warning { flex-basis: 100%; }
+.link-btn { background: none; border: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.link-btn:hover { color: var(--accent); text-decoration: underline; }
 .tag { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 4px; line-height: 18px; }
 .tag-create { color: var(--create); background: color-mix(in srgb, var(--create) 14%, transparent); }
 .tag-alter { color: var(--alter); background: color-mix(in srgb, var(--alter) 14%, transparent); }

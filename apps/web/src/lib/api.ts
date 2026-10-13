@@ -128,6 +128,13 @@ export interface ProposalInfo {
   changes: ChangeSummary[];
 }
 
+/** AI가 바로 적용한 작업 한 번의 이력 */
+export interface AiLogEntry {
+  at: string;
+  messages: string[];
+  changes: ChangeSummary[];
+}
+
 export const projectApi = {
   list: () => request<ProjectInfo[]>('GET', '/api/projects'),
   /** 그 프로젝트의 표준 용어 사전 (없으면 null) */
@@ -151,6 +158,8 @@ export const projectApi = {
   /** 화면의 AI 배너: 이번 AI 작업 묶음 전체를 되돌린다 */
   undoAi: (id: string) => request<{ restoredVersion: string }>('POST', `/api/projects/${id}/ai/undo`, { scope: 'session' }),
   acceptAi: (id: string) => request('POST', `/api/projects/${id}/ai/accept`),
+  /** 바로 적용한 AI 작업 이력 (최근 것부터) */
+  aiLog: (id: string) => request<AiLogEntry[]>('GET', `/api/projects/${id}/ai/log`),
   setDbConnection: (id: string, dbConnectionId: string | null) => request('PATCH', `/api/projects/${id}`, { dbConnectionId }),
   baseline: async (id: string, connectionId: string) =>
     (await request<{ baseline: { at: string; schema: Schema } | null }>('GET', `/api/projects/${id}/db/baseline?connectionId=${encodeURIComponent(connectionId)}`)).baseline,

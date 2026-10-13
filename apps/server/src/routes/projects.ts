@@ -109,12 +109,15 @@ export function registerProjectRoutes(
       const meta = store.meta(id);
       const now = new Date();
       const session = meta.aiSession;
-      if (!session || now.getTime() - new Date(session.lastAt).getTime() > AI_SESSION_IDLE_MS) {
+      const fresh = !session || now.getTime() - new Date(session.lastAt).getTime() > AI_SESSION_IDLE_MS;
+      if (fresh) {
         const version = store.saveVersion(id, `AI 작업 전 · ${now.toLocaleString('ko-KR')}`, 'auto', before);
         store.setMeta(id, { aiSession: { versionId: version.id, startedAt: now.toISOString(), lastAt: now.toISOString(), changeCount: changes.length } });
       } else {
         store.setMeta(id, { aiSession: { ...session, lastAt: now.toISOString(), changeCount: session.changeCount + changes.length } });
       }
+      // 바로 적용해도 무엇이 바뀌었는지는 화면에서 볼 수 있게 남긴다
+      store.addAiLog(id, { at: now.toISOString(), messages: options.messages, changes: summarize(changes) }, fresh);
     }
     if (options.source === 'ai' && changes.length) store.pushAiStep(id, before, next);
     store.setSchema(id, next, options.origin ?? (options.source === 'ai' ? 'ai' : 'api'));
@@ -386,6 +389,7 @@ export function registerProjectRoutes(
       store.setSchema(id, version.schema, 'restore');
       store.setMeta(id, { aiSession: null });
       store.clearAiSteps(id);
+      store.clearAiLog(id);
       return { ok: true, restoredVersion: version.name };
     }
     const step = store.popAiStep(id);
@@ -394,6 +398,7 @@ export function registerProjectRoutes(
     const reverse = diffSchemas(step.after, step.before, dialect);
     store.saveVersion(id, `AI 변경 되돌리기 전`, 'auto');
     store.setSchema(id, applyChanges(store.schema(id), reverse), 'restore');
+    store.popAiLog(id);
     const session = store.meta(id).aiSession;
     if (session) {
       const left = Math.max(0, session.changeCount - reverse.changes.length);
@@ -401,6 +406,9 @@ export function registerProjectRoutes(
     }
     return { ok: true, undone: summarize(reverse.changes), at: step.at };
   });
+
+  // 바로 적용한 AI 작업의 이력 (최근 것부터). "유지"를 눌러도 다음 AI 작업 묶음이 시작될 때까지 볼 수 있다
+  app.get<{ Params: { id: string } }>('/api/projects/:id/ai/log', async (req) => store.aiLog(req.params.id).reverse());
 
   app.post<{ Params: { id: string } }>('/api/projects/:id/ai/accept', async (req) => {
     store.setMeta(req.params.id, { aiSession: null });
