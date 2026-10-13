@@ -51,3 +51,8 @@ export function RenamePanel({ plan, links, onChange }: { plan: SyncPlan; links: 
     </div>
   );
 }
+
+/** DB 작업이 실패했을 때: 기록이 남았으니 AI에게 원인 분석을 맡길 수 있다고 알려 준다 */
+export function DbErrorHint() {
+  return <p className="muted small">이 오류는 DB 작업 기록에 남았습니다. 연결된 AI에게 "최근 DB 오류 원인 분석해줘"라고 하면 오류 내용·실패한 SQL·관련 테이블을 보고 원인을 찾아 줍니다.</p>;
+}

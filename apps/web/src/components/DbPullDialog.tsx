@@ -6,7 +6,7 @@ import { rememberIfInSync, saveVersion, useDialect } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ChangeList, type GroupLabel } from './ChangeList';
 import { ConnectionPicker } from './ConnectionPicker';
-import { BaselineInfo, RenamePanel } from './SyncParts';
+import { BaselineInfo, DbErrorHint, RenamePanel } from './SyncParts';
 import { loadModule } from '../lib/appVersion';
 
 const PULL_GROUPS: Record<'create' | 'alter' | 'drop', GroupLabel> = {
@@ -29,6 +29,8 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // 지금 보이는 오류가 DB 작업 기록에 남았는지 (AI 분석 안내를 띄울지)
+  const [logged, setLogged] = useState(false);
   const isEmpty = current.tables.length === 0;
 
   const plan = useMemo(
@@ -48,6 +50,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
     if (mismatch) return setError(mismatch);
     setBusy(true);
     setError('');
+    setLogged(false);
     try {
       const [r, b] = await Promise.all([api.introspect(connection.id, commentAs), projectApi.baseline(projectId, connection.id)]);
       setLinks([]);
@@ -56,6 +59,8 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
       setResult(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setLogged(true);
+      void projectApi.recordDbLog(projectId, connection, { action: 'pull', stage: 'compare', ok: false, error: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
@@ -90,6 +95,8 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setLogged(true);
+      void projectApi.recordDbLog(projectId, connection, { action: 'pull', stage: 'apply', ok: false, serverVersion: result.serverVersion, error: e instanceof Error ? e.message : String(e), warnings: result.warnings });
     } finally {
       setBusy(false);
     }
@@ -131,6 +138,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
         </div>
       )}
       {error && <div className="error-box">{error}</div>}
+      {error && logged && <DbErrorHint />}
       {result && (
         <>
           <div className="import-summary">

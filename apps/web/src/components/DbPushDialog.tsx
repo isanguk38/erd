@@ -7,7 +7,7 @@ import { rememberIfInSync, saveVersion, useDialect, useProjectName } from '../li
 import { Modal } from './Modal';
 import { ConnectionPicker } from './ConnectionPicker';
 import { MigrationPreview } from './MigrationPreview';
-import { BaselineInfo, RenamePanel } from './SyncParts';
+import { BaselineInfo, DbErrorHint, RenamePanel } from './SyncParts';
 
 type Step = 'compare' | 'confirm' | 'result';
 
@@ -29,6 +29,8 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
   const [confirmText, setConfirmText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // 지금 보이는 오류가 DB 작업 기록에 남았는지 (AI 분석 안내를 띄울지)
+  const [logged, setLogged] = useState(false);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   // DB 반영 전 안전 검사 (실행 확인 단계에서): running / done(변경별 안내) / unsupported(옛 설치형 앱) / error
   const [safety, setSafety] = useState<
@@ -60,6 +62,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
     if (mismatch) return setError(mismatch);
     setBusy(true);
     setError('');
+    setLogged(false);
     setResult(null);
     setStep('compare');
     try {
@@ -69,6 +72,8 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       setDb(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setLogged(true);
+      void projectApi.recordDbLog(projectId, connection, { action: 'push', stage: 'compare', ok: false, error: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
@@ -78,9 +83,20 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
     if (!connection) return;
     setBusy(true);
     setError('');
+    setLogged(false);
     try {
       await saveVersion(`DB 적용 전 · ${connection.name} (${connection.database})`, 'auto');
-      const r = await api.execute(connection.id, statements.map((s) => s.sql));
+      let r: ExecuteResult;
+      try {
+        r = await api.execute(connection.id, statements.map((s) => s.sql));
+      } catch (e) {
+        // 접속이 끊기는 등 문장을 실행하기 전에 실패
+        setLogged(true);
+        void projectApi.recordDbLog(projectId, connection, { action: 'push', stage: 'execute', ok: false, serverVersion: db?.serverVersion, error: e instanceof Error ? e.message : String(e), results: statements.map((s) => ({ sql: s.sql, ok: false, skipped: true })) });
+        throw e;
+      }
+      // 성공해도 남긴다 (실패했을 때 그 전에 무엇이 실행됐는지 AI가 함께 볼 수 있게)
+      void projectApi.recordDbLog(projectId, connection, { action: 'push', stage: 'execute', ok: r.ok, serverVersion: db?.serverVersion, results: r.results, rolledBack: r.rolledBack, appliedCount: r.appliedCount });
       setResult(r);
       setStep('result');
       if (r.ok) await saveVersion(`DB 적용 · ${connection.name} (${connection.database})`, 'db');
@@ -116,6 +132,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       setSafety({ state: 'done', checked: checks.length, findings });
     } catch (e) {
       setSafety({ state: 'error', message: e instanceof Error ? e.message : String(e) });
+      void projectApi.recordDbLog(projectId, connection, { action: 'push', stage: 'safety', ok: false, serverVersion: db?.serverVersion, error: e instanceof Error ? e.message : String(e) });
     }
   };
   const failCount = safety?.state === 'done' ? safety.findings.filter((f) => f.items.some((i) => i.level === 'fail')).length : 0;
@@ -165,6 +182,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
       {error && <div className="error-box">{error}</div>}
+      {error && logged && <DbErrorHint />}
 
       {step === 'compare' && plan && plan.diff.changes.length > 0 && <BaselineInfo plan={plan} baselineAt={baseline?.at ?? null} direction="push" />}
       {step === 'compare' && plan && <RenamePanel plan={plan} links={links} onChange={setLinks} />}
@@ -222,6 +240,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
               </li>
             ))}
           </ol>
+          {!result.ok && <DbErrorHint />}
         </div>
       )}
     </Modal>

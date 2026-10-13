@@ -473,4 +473,54 @@ describe('MCP', () => {
     expect(list.map((p: { name: string }) => p.name)).toEqual(['remote']);
     await client.close();
   });
+  it('DB 작업 오류: 화면이 남긴 실패 기록을 AI가 읽고, 실패한 SQL에 나온 테이블 정의를 함께 받는다', async () => {
+    const { erd, url } = await start();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(textOf(await client.callTool({ name, arguments: args })));
+    const created = await call('create_project', { name: '오류', dialect: 'mysql' });
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${created.id}`, payload: { aiMode: 'apply' } });
+    await call('edit_schema', {
+      project: '오류',
+      commands: [
+        { op: 'createTable', name: 'member', columns: [{ name: 'member_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'createTable', name: 'orders', columns: [{ name: 'order_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'createTable', name: 'coupon', columns: [{ name: 'coupon_id', type: 'BIGINT', primaryKey: true }] },
+        { op: 'addRelation', parent: 'member', child: 'orders' },
+      ],
+    });
+    expect(await call('get_db_errors', { project: '오류' })).toMatchObject({ entries: [], message: '최근 DB 작업 오류가 없습니다.' });
+
+    const log = (payload: object) => erd.app.inject({ method: 'POST', url: `/api/projects/${created.id}/db/log`, payload });
+    const connection = { name: '개발 DB', dialect: 'mysql', database: 'shop', serverVersion: 'MySQL 8.0.36' };
+    await log({ action: 'pull', stage: 'compare', ok: true, connection });
+    await log({
+      action: 'push', stage: 'execute', ok: false, connection, rolledBack: false, appliedCount: 1,
+      results: [
+        { sql: 'ALTER TABLE `member` ADD COLUMN `grade` VARCHAR(10)', ok: true },
+        { sql: 'ALTER TABLE `orders` ADD CONSTRAINT `fk_orders_member` FOREIGN KEY (`member_id`) REFERENCES `member` (`member_id`)', ok: false, error: "Cannot add foreign key constraint (mysql://root:secret@db:3306)" },
+        { sql: 'CREATE INDEX `ix_a` ON `orders` (`order_id`)', ok: false, skipped: true },
+      ],
+    });
+    expect((await log({ action: 'drop', stage: 'execute', ok: false, connection })).statusCode).toBe(400);
+
+    const r = await call('get_db_errors', { project: '오류' });
+    expect(r.entries).toHaveLength(1); // 실패한 것만
+    const [e] = r.entries;
+    expect(e).toMatchObject({ action: 'DB로 내보내기', stage: 'SQL 실행', ok: false, appliedCount: 1, rolledBack: false, totals: { statements: 3, succeeded: 1, notRun: 1 } });
+    expect(e.failedStatements).toHaveLength(1);
+    expect(e.failedStatements[0].index).toBe(2);
+    expect(e.failedStatements[0].error).not.toContain('secret'); // 오류에 섞인 비밀번호는 가린다
+    expect(e.executedBefore).toEqual(['ALTER TABLE `member` ADD COLUMN `grade` VARCHAR(10)']);
+    expect(e.note).toContain('일부 문장');
+    // 실패한 SQL에 나온 테이블(orders·member)과 관계만, 상관없는 coupon은 빠진다
+    expect(r.relatedTables.tables.map((t: { name: string }) => t.name).sort()).toEqual(['member', 'orders']);
+    expect(r.relatedTables.relations).toHaveLength(1);
+    // 성공한 것도 함께
+    expect((await call('get_db_errors', { project: '오류', include_success: true, limit: 5 })).entries).toHaveLength(2);
+    await client.close();
+  });
 });

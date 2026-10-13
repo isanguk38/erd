@@ -20,6 +20,7 @@ const INSTRUCTIONS = [
   '사용자 정의 타입(ENUM): 상태·구분처럼 값이 정해진 컬럼은 edit_schema의 createEnum으로 타입을 만들고 컬럼 type에 그 이름을 씁니다 (PostgreSQL은 CREATE TYPE, MySQL·MariaDB는 컬럼별 ENUM, Oracle·SQL Server는 VARCHAR로 만들어짐). get_schema의 enums에 있는 타입을 먼저 확인하고, 같은 값 목록의 타입을 또 만들지 않습니다.',
   'DB 기능: get_schema의 project.features.notAvailable에 있는 기능(예: Oracle의 ENUM, MySQL의 부분 인덱스)은 그 DB에 없어 명령이 거절됩니다. available에 있는 기능만 씁니다.',
   'DB 종류: 프로젝트의 DB 종류(get_schema의 project.dialect)는 만들 때 정하며 바꿀 수 없습니다. 그 DB에 있는 타입·기능으로만 설계하고, 다른 DB로 변환하지 않습니다. db_pull·db_push는 같은 DB 종류의 연결만 씁니다.',
+  'DB 오류 분석: 사용자가 DB 가져오기·내보내기 오류를 물으면 get_db_errors로 실패한 SQL·DB 오류 메시지·관련 테이블 정의를 읽고 원인을 쉬운 말로 설명합니다. ERD를 고쳐야 하면 edit_schema로 고치고(또는 방법을 제안하고), 다시 실행은 사람이 화면에서 하거나 승인받은 뒤 db_push로 합니다.',
   '논리명·설명: DB comment에는 테이블·컬럼의 논리명(logicalName)이 들어가고, comment(설명)는 ERD에만 저장되는 상세 설명입니다. 논리명은 꼭 넣고, 설명은 필요할 때만 자세히 씁니다.',
   '메모: 사용자가 설계 설명·주의 사항을 캔버스에 남겨 달라고 하면 edit_notes(add)로 메모를 붙입니다 (영역 탭이면 area). 메모는 SQL·DB에 영향이 없습니다.',
 ].join('\n');

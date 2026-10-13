@@ -128,6 +128,19 @@ export interface ProposalInfo {
   changes: ChangeSummary[];
 }
 
+/** DB 가져오기·내보내기 기록 한 번 (AI가 오류 원인을 분석할 수 있게 서버에 남긴다. 접속 주소·비밀번호는 넣지 않음) */
+export interface DbLogInput {
+  action: 'pull' | 'push';
+  stage: 'compare' | 'safety' | 'execute' | 'apply';
+  ok: boolean;
+  serverVersion?: string;
+  error?: string;
+  results?: Pick<StatementResult, 'sql' | 'ok' | 'skipped' | 'error'>[];
+  rolledBack?: boolean;
+  appliedCount?: number;
+  warnings?: string[];
+}
+
 /** AI가 바로 적용한 작업 한 번의 이력 */
 export interface AiLogEntry {
   at: string;
@@ -158,6 +171,9 @@ export const projectApi = {
   /** 화면의 AI 배너: 이번 AI 작업 묶음 전체를 되돌린다 */
   undoAi: (id: string) => request<{ restoredVersion: string }>('POST', `/api/projects/${id}/ai/undo`, { scope: 'session' }),
   acceptAi: (id: string) => request('POST', `/api/projects/${id}/ai/accept`),
+  /** DB 작업 기록을 남긴다. 기록이 실패해도 화면 작업은 그대로 둔다 */
+  recordDbLog: (id: string, connection: Connection, { serverVersion, ...entry }: DbLogInput) =>
+    request('POST', `/api/projects/${id}/db/log`, { ...entry, connection: { name: connection.name, dialect: connection.dialect, database: connection.database, serverVersion } }).catch(() => {}),
   /** 바로 적용한 AI 작업 이력 (최근 것부터) */
   aiLog: (id: string) => request<AiLogEntry[]>('GET', `/api/projects/${id}/ai/log`),
   setDbConnection: (id: string, dbConnectionId: string | null) => request('PATCH', `/api/projects/${id}`, { dbConnectionId }),

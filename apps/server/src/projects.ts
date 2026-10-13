@@ -85,6 +85,31 @@ export interface AiLogEntry {
   changes: { id: string; category: 'create' | 'alter' | 'drop'; tableName: string; summary: string; warning?: string }[];
 }
 
+/**
+ * DB 가져오기·내보내기 한 번의 기록 (AI가 오류 원인을 분석할 수 있게 남긴다).
+ * 접속 정보(주소·비밀번호)는 넣지 않는다.
+ */
+export interface DbLogEntry {
+  id: string;
+  at: string;
+  /** 실행한 사람 이름 */
+  by?: string;
+  /** pull: DB에서 가져오기, push: DB로 내보내기 */
+  action: 'pull' | 'push';
+  /** compare: DB 읽기·비교, safety: 실행 전 안전 검사, execute: SQL 실행, apply: ERD에 반영 */
+  stage: 'compare' | 'safety' | 'execute' | 'apply';
+  /** screen: 화면(설치형 앱이 DB에 접속), server: 서버가 직접 접속 (AI·로컬 모드) */
+  via: 'screen' | 'server';
+  ok: boolean;
+  connection: { name: string; dialect: string; database: string; serverVersion?: string };
+  error?: string;
+  /** 실행한 SQL과 문장별 결과 (execute) */
+  results?: { sql: string; ok: boolean; skipped?: boolean; error?: string }[];
+  rolledBack?: boolean;
+  appliedCount?: number;
+  warnings?: string[];
+}
+
 export class ProjectStore {
   private readonly loaded = new Map<string, LoadedProject>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
@@ -279,6 +304,18 @@ export class ProjectStore {
 
   clearAiSteps(id: string): void {
     this.writeJson(this.path(id, 'ai-steps.json'), []);
+  }
+
+  /** DB 가져오기·내보내기 기록 (최근 것부터) */
+  dbLog(id: string): DbLogEntry[] {
+    return this.readJson<DbLogEntry[]>(this.path(id, 'db-log.json'), []);
+  }
+
+  addDbLog(id: string, entry: Omit<DbLogEntry, 'id' | 'at'>): DbLogEntry {
+    this.requireProject(id);
+    const saved = { id: randomUUID(), at: new Date().toISOString(), ...entry };
+    this.writeJson(this.path(id, 'db-log.json'), [saved, ...this.dbLog(id)].slice(0, 50));
+    return saved;
   }
 
   /** 이번 AI 작업 묶음의 이력 (오래된 것부터) */

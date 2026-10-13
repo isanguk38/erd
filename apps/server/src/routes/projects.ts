@@ -59,6 +59,7 @@ import { getConnector } from '@erd/db';
 import type { ConnectionStore } from '../connections';
 import type { Origin, ProjectStore } from '../projects';
 import { DESKTOP_ONLY_MESSAGE, type Auth } from '../auth';
+import { cleanDbLog, scrubSecret } from '../dbLog';
 
 const DIALECTS = Object.keys(dialects) as DialectId[];
 /** 이 시간 동안 AI 변경이 없으면 다음 변경은 새 AI 작업으로 본다 (되돌리기 기준 버전을 새로 만든다) */
@@ -449,6 +450,23 @@ export function registerProjectRoutes(
     return summarize(diffSchemas(from, to, getDialect(store.dialect(id))).changes);
   });
 
+  // ── DB 작업 기록 (가져오기·내보내기 오류를 AI가 분석할 수 있게) ─────────────────────────────
+  // 웹 서비스에서는 설치형 앱이 DB에 접속하므로, 화면이 결과를 여기에 남긴다
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/projects/:id/db/log', async (req) => {
+    try {
+      return { id: store.addDbLog(req.params.id, cleanDbLog(req.body ?? {}, req.user.name, 'screen')).id };
+    } catch (e) {
+      if ((e as { statusCode?: number }).statusCode) throw e;
+      throw badRequest(e instanceof Error ? e.message : String(e));
+    }
+  });
+  /** failed=1이면 실패한 것만, limit(기본 10) */
+  app.get<{ Params: { id: string }; Querystring: { failed?: string; limit?: string } }>('/api/projects/:id/db/log', async (req) => {
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const failed = req.query.failed === '1' || req.query.failed === 'true';
+    return store.dbLog(req.params.id).filter((e) => !failed || !e.ok || e.results?.some((r) => !r.ok && !r.skipped)).slice(0, limit);
+  });
+
   // ── 제안 ─────────────────────────────
   app.get<{ Params: { id: string } }>('/api/projects/:id/proposals', async (req) => {
     const { id } = req.params;
@@ -545,7 +563,8 @@ export function registerProjectRoutes(
   const STATUS_CACHE_MS = 60_000;
   const statusCache = new Map<string, { at: number; name: string; database: string; dialect: ReturnType<typeof getDialect>; schema: Schema }>();
 
-  async function readDb(id: string, connectionId: string, userId: string) {
+  /** log: 가져오기·내보내기에서 DB를 읽다 실패하면 DB 작업 기록에 남긴다 (AI가 원인을 볼 수 있게) */
+  async function readDb(id: string, connectionId: string, userId: string, log?: { action: 'pull' | 'push'; by?: string }) {
     if (!serverDb) throw desktopOnly();
     const saved = connections.get(connectionId, userId);
     const config = connections.config(connectionId, userId);
@@ -553,7 +572,16 @@ export function registerProjectRoutes(
     const mismatch = dbmsMismatch(store.dialect(id), config.dialect);
     if (mismatch) throw badRequest(mismatch);
     await auth.assertAllowedDbHost(config.host);
-    const db = await getConnector(config.dialect).introspect(config);
+    let db;
+    try {
+      db = await getConnector(config.dialect).introspect(config);
+    } catch (e) {
+      if (log) {
+        const error = scrubSecret(e instanceof Error ? e.message : String(e));
+        store.addDbLog(id, { by: log.by, action: log.action, stage: 'compare', via: 'server', ok: false, connection: { name: saved.name, dialect: config.dialect, database: saved.database }, error });
+      }
+      throw e;
+    }
     // 이 프로젝트가 어느 DB와 연결돼 있는지 기억한다 (다른 사람·AI·차이 알림이 같은 DB를 본다)
     if (store.meta(id).dbConnectionId !== connectionId) store.setMeta(id, { dbConnectionId: connectionId });
     return { saved, config, dialect: getDialect(config.dialect), db };
@@ -635,7 +663,7 @@ export function registerProjectRoutes(
   }>('/api/projects/:id/db/pull', async (req) => {
     const { id } = req.params;
     const { connectionId, apply = false, includeRemovals = false, source = 'api' } = req.body ?? ({} as never);
-    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id);
+    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id, { action: 'pull', by: req.user.name });
     const current = store.schema(id);
     const baseline = store.baseline(id, connectionId)?.schema;
     const first = planPull(current, db.schema, { dialect, baseline });
@@ -668,7 +696,7 @@ export function registerProjectRoutes(
   }>('/api/projects/:id/db/push', async (req) => {
     const { id } = req.params;
     const { connectionId, execute = false, includeDrop = false, confirmDatabase, source = 'api' } = req.body ?? ({} as never);
-    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id);
+    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id, { action: 'push', by: req.user.name });
     const schema = store.schema(id);
     const baseline = store.baseline(id, connectionId)?.schema;
     const first = planPush(schema, db.schema, { dialect, baseline });
@@ -687,6 +715,7 @@ export function registerProjectRoutes(
     store.saveVersion(id, `DB 적용 전 · ${saved.name}`, 'auto');
     const result = await getConnector(config.dialect).execute(config, statements.map((s) => s.sql));
     executeLog({ at: new Date().toISOString(), project: id, connection: saved.name, database: saved.database, source, ok: result.ok, results: result.results });
+    store.addDbLog(id, cleanDbLog({ action: 'push', stage: 'execute', ok: result.ok, connection: { name: saved.name, dialect: config.dialect, database: saved.database, serverVersion: db.serverVersion }, results: result.results, rolledBack: result.rolledBack, appliedCount: result.appliedCount }, req.user.name, 'server'));
     if (result.ok) store.saveVersion(id, `DB 적용 · ${saved.name}`, 'db');
     // 일부만 성공했어도 DB는 바뀌었으므로 지금 DB 상태를 기준 시점으로 다시 잡는다
     if (result.appliedCount > 0) {

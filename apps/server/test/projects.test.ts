@@ -241,3 +241,20 @@ async function waitFor(check: () => boolean, timeout = 3000) {
     await new Promise((r) => setTimeout(r, 20));
   }
 }
+
+describe('DB 작업 기록', () => {
+  it('서버가 DB를 읽다 실패하면 기록에 남는다 (접속 정보는 넣지 않음)', async () => {
+    const { app } = setup();
+    const { id } = await createProject(app);
+    // 아무도 듣지 않는 포트: 접속 실패
+    const conn = (await app.inject({ method: 'POST', url: '/api/connections', payload: { name: '없는 DB', dialect: 'mysql', host: '127.0.0.1', port: 1, user: 'root', database: 'shop', password: 's3cret' } })).json();
+    const pull = await app.inject({ method: 'POST', url: `/api/projects/${id}/db/pull`, payload: { connectionId: conn.id } });
+    expect(pull.statusCode).toBeGreaterThanOrEqual(400);
+    const log = (await app.inject({ method: 'GET', url: `/api/projects/${id}/db/log?failed=1` })).json();
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({ action: 'pull', stage: 'compare', via: 'server', ok: false, connection: { name: '없는 DB', dialect: 'mysql', database: 'shop' } });
+    expect(log[0].error).toBeTruthy();
+    expect(JSON.stringify(log[0])).not.toContain('s3cret');
+    expect(JSON.stringify(log[0].connection)).not.toContain('127.0.0.1');
+  });
+});

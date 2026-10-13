@@ -114,6 +114,72 @@ const command = z.discriminatedUnion('op', [
   }),
 ]);
 
+/** DB 가져오기·내보내기 기록 (서버 /db/log) */
+interface DbLogEntry {
+  id: string;
+  at: string;
+  by?: string;
+  action: 'pull' | 'push';
+  stage: 'compare' | 'safety' | 'execute' | 'apply';
+  via: 'screen' | 'server';
+  ok: boolean;
+  connection: { name: string; dialect: string; database: string; serverVersion?: string };
+  error?: string;
+  results?: { sql: string; ok: boolean; skipped?: boolean; error?: string }[];
+  rolledBack?: boolean;
+  appliedCount?: number;
+  warnings?: string[];
+}
+
+const DB_STAGE = { compare: 'DB 읽기·비교', safety: '실행 전 안전 검사', execute: 'SQL 실행', apply: 'ERD에 반영' } as const;
+
+/** AI가 읽기 좋게: 실패한 문장과 그 전에 실행된 문장, 실행되지 않은 문장 수 */
+function describeDbLog(e: DbLogEntry) {
+  const results = e.results ?? [];
+  const failedAt = results.findIndex((r) => !r.ok && !r.skipped);
+  const ran = results.filter((r) => r.ok);
+  return {
+    at: e.at,
+    by: e.by,
+    action: e.action === 'pull' ? 'DB에서 가져오기' : 'DB로 내보내기',
+    stage: DB_STAGE[e.stage],
+    via: e.via === 'screen' ? '화면(설치형 앱이 DB에 접속)' : '서버(AI 등)',
+    ok: e.ok,
+    connection: e.connection,
+    error: e.error,
+    failedStatements: results.filter((r) => !r.ok && !r.skipped).map((r) => ({ index: results.indexOf(r) + 1, sql: r.sql, error: r.error })),
+    // 실패 바로 앞에 실행된 문장 몇 개 (순서가 원인일 때 보이게)
+    executedBefore: failedAt > 0 ? results.slice(Math.max(0, failedAt - 5), failedAt).filter((r) => r.ok).map((r) => r.sql) : undefined,
+    totals: results.length ? { statements: results.length, succeeded: ran.length, notRun: results.filter((r) => r.skipped).length } : undefined,
+    rolledBack: e.rolledBack,
+    appliedCount: e.appliedCount,
+    note: e.rolledBack === false && (e.appliedCount ?? 0) > 0 && !e.ok ? '일부 문장은 DB에 반영된 채 멈췄습니다 (이 DB는 DDL을 되돌리지 못함). 다시 비교하면 남은 변경만 나옵니다.' : undefined,
+    warnings: e.warnings,
+  };
+}
+
+const escapeRegex = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** 오류 문장·SQL에 이름이 나온 테이블과, 그 테이블과 관계로 이어진 테이블의 지금 ERD 정의 */
+export function relatedSchema(schema: Schema, text: string) {
+  const mentioned = new Set(
+    schema.tables.filter((t) => new RegExp(`(^|[^A-Za-z0-9_$])${escapeRegex(t.name)}([^A-Za-z0-9_$]|$)`, 'i').test(text)).map((t) => t.id),
+  );
+  if (!mentioned.size) return undefined;
+  const ids = new Set(mentioned);
+  for (const r of schema.relations) {
+    if (mentioned.has(r.fromTableId)) ids.add(r.toTableId);
+    if (mentioned.has(r.toTableId)) ids.add(r.fromTableId);
+  }
+  const { areas: _areas, ...described } = describeSchema({
+    ...schema,
+    tables: schema.tables.filter((t) => ids.has(t.id)),
+    relations: schema.relations.filter((r) => ids.has(r.fromTableId) && ids.has(r.toTableId)),
+    areas: [],
+  });
+  return described;
+}
+
 const mode = z.enum(['apply', 'propose']).optional().describe('apply: 바로 반영(되돌리기 가능), propose: 제안으로 모아 사람이 승인. 생략하면 프로젝트 설정을 따른다');
 const projectArg = z.string().describe('프로젝트 id 또는 이름');
 const dialectArg = z.enum(Object.keys(dialects) as [DialectId, ...DialectId[]]).describe('DB 종류: mysql, mariadb, postgresql, oracle, mssql');
@@ -555,6 +621,37 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     safe(async ({ project }: { project: string }) => {
       const p = await resolveProject(project);
       return text(await api.request('POST', `/api/projects/${p.id}/ai/undo`));
+    }),
+  );
+
+  server.registerTool(
+    'get_db_errors',
+    {
+      title: 'DB 작업 오류 보기',
+      description: [
+        'DB에서 가져오기·DB로 내보내기에서 난 오류를 읽는다 (화면·설치형 앱에서 사람이 한 작업과 db_pull·db_push 모두).',
+        '실패한 SQL과 DB 오류 메시지, 그 전에 실행된 문장, 되돌림 여부, DB 버전, 오류에 나온 테이블의 지금 ERD 정의(relatedTables)를 함께 준다.',
+        '사용자가 DB 오류 원인을 물으면 이것으로 원인을 분석해 쉬운 말로 설명하고, ERD를 고쳐야 하면 edit_schema로 고치는 방법을 제안한다.',
+        '다시 실행은 사람이 화면의 "DB로 내보내기"에서 하거나, db_push(execute=true)는 SQL을 보여 주고 승인받은 뒤에만 한다.',
+      ].join(' '),
+      inputSchema: {
+        project: projectArg,
+        include_success: z.boolean().optional().describe('성공한 작업도 함께 (기본: 실패한 것만)'),
+        limit: z.number().int().min(1).max(20).optional().describe('최근 몇 건 (기본 3)'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async (a: { project: string; include_success?: boolean; limit?: number }) => {
+      const p = await resolveProject(a.project);
+      const entries = await api.request<DbLogEntry[]>('GET', `/api/projects/${p.id}/db/log?limit=${a.limit ?? 3}${a.include_success ? '' : '&failed=1'}`);
+      if (!entries.length) return text({ project: p.name, entries: [], message: a.include_success ? 'DB 작업 기록이 없습니다.' : '최근 DB 작업 오류가 없습니다.' });
+      const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
+      const failedText = entries.flatMap((e) => [e.error ?? '', ...(e.results ?? []).filter((r) => !r.ok && !r.skipped).flatMap((r) => [r.sql, r.error ?? ''])]).join('\n');
+      return text({
+        project: { name: meta.name, dialect: meta.dialect },
+        entries: entries.map(describeDbLog),
+        relatedTables: relatedSchema(schema, failedText),
+      });
     }),
   );
 
