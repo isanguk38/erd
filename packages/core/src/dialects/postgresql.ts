@@ -101,6 +101,16 @@ function pkName(table: Table): string {
 }
 
 /** PostgreSQL 타입 정보 (컬럼 타입 검사가 쓴다) */
+/**
+ * 직접 만든 타입(ENUM 등)인지: 따옴표로 감싼 타입이거나 PostgreSQL 기본 타입이 아닌 것.
+ * 이런 타입끼리는 바로 바꾸는 캐스트가 없어(예: 한 ENUM → 다른 ENUM) 글자(text)를 거쳐 바꿔야 한다.
+ */
+function isUserType(column: Column): boolean {
+  if (quotedType(column.type)) return true;
+  const raw = column.type.trim().toUpperCase().replace(/\[\]$/, '').split(/[\s(]/)[0] ?? '';
+  return Boolean(raw) && !postgresTypes.known.has(TYPE_MAP[raw] ?? raw);
+}
+
 const postgresTypes: TypeProfile = {
   known: typeWords(
     'SMALLINT INTEGER INT INT2 INT4 INT8 BIGINT DECIMAL NUMERIC REAL DOUBLE FLOAT FLOAT4 FLOAT8 SMALLSERIAL SERIAL BIGSERIAL SERIAL2 SERIAL4 SERIAL8 MONEY ' +
@@ -189,9 +199,14 @@ export const postgresql: Dialect = {
     if (changed.includes('name')) statements.push(`ALTER TABLE ${t} RENAME COLUMN ${q(before.name)} TO ${q(after.name)}`);
     const c = q(after.name);
     const actions: string[] = [];
+    // 직접 만든 타입(ENUM)으로·에서 바꾸면: 글자(text)를 거쳐 바꾸고, 옛 타입을 쓰는 기본값은 잠깐 지웠다가 다시 건다
+    // (PostgreSQL에는 ENUM 사이의 캐스트가 없고, 옛 타입의 기본값은 새 타입으로 바뀌지 않아 실패한다)
+    const viaText = changed.includes('type') && (isUserType(before) || isUserType(after));
+    const keepDefault = viaText && before.defaultValue?.trim() && !changed.includes('defaultValue') && !after.autoIncrement ? after.defaultValue?.trim() : '';
+    if (viaText && before.defaultValue?.trim()) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} DROP DEFAULT`);
     if (changed.includes('type')) {
       const type = renderType(after);
-      actions.push(`ALTER COLUMN ${c} TYPE ${type} USING ${c}::${type}`);
+      actions.push(`ALTER COLUMN ${c} TYPE ${type} USING ${c}::${viaText ? 'text::' : ''}${type}`);
     }
     if (changed.includes('autoIncrement')) {
       if (after.autoIncrement) {
@@ -209,6 +224,7 @@ export const postgresql: Dialect = {
       actions.push(v ? `ALTER COLUMN ${c} SET DEFAULT ${v}` : `ALTER COLUMN ${c} DROP DEFAULT`);
     }
     if (actions.length) statements.push(`ALTER TABLE ${t} ${actions.join(', ')}`);
+    if (keepDefault) statements.push(`ALTER TABLE ${t} ALTER COLUMN ${c} SET DEFAULT ${keepDefault}`);
     if (changed.includes('comment')) statements.push(columnComment(table, after));
     return statements;
   },

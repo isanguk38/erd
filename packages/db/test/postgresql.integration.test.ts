@@ -188,6 +188,39 @@ describe.skipIf(!url)('PostgreSQL 실제 서버', () => {
     expect((await read()).enums?.map((e) => e.name)).toEqual(['BillingStatus', 'Grade']);
   }, 120000);
 
+  it('컬럼 타입을 다른 ENUM·VARCHAR로 바꾸기: 글자를 거쳐 바꾸고, 기본값과 데이터는 남는다', async () => {
+    const config = await freshDatabase();
+    let schema = applyCommands(emptySchema(), [
+      { op: 'createEnum', name: 'LIAR_WINDOW_STATUS', values: ['OPEN', 'CLOSED'] },
+      { op: 'createEnum', name: 'INTERROGATION_STATUS', values: ['OPEN', 'CLOSED', 'DONE'] },
+      { op: 'createTable', name: 'interrogation', columns: [{ name: 'id', type: 'INT', primaryKey: true }, { name: 'status', type: 'LIAR_WINDOW_STATUS', nullable: false, default: "'OPEN'" }] },
+    ]).schema;
+    expect((await push(config, schema)).result.ok).toBe(true);
+    await postgresConnector.execute(config, ["INSERT INTO interrogation (id, status) VALUES (1, 'CLOSED')"]);
+    const read = async () => (await postgresConnector.introspect(config)).schema;
+
+    // ENUM → 다른 ENUM (예전에는 status::INTERROGATION_STATUS 로 바로 바꿔 실패)
+    schema = applyCommands(schema, [{ op: 'updateColumn', table: 'interrogation', column: 'status', changes: { type: 'INTERROGATION_STATUS' } }]).schema;
+    let r = await push(config, schema);
+    expect(r.result.results.filter((x) => !x.ok)).toEqual([]);
+    expect(r.statements.map((s) => s.sql).join('\n')).toContain('USING status::text::');
+    let db = await read();
+    expect(db.tables[0].columns[1].type).toBe('INTERROGATION_STATUS');
+    expect(db.tables[0].columns[1].defaultValue).toBe("'OPEN'");
+    expect(planPush(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+
+    // ENUM → VARCHAR → ENUM
+    schema = applyCommands(schema, [{ op: 'updateColumn', table: 'interrogation', column: 'status', changes: { type: 'VARCHAR(20)' } }]).schema;
+    r = await push(config, schema);
+    expect(r.result.results.filter((x) => !x.ok)).toEqual([]);
+    schema = applyCommands(schema, [{ op: 'updateColumn', table: 'interrogation', column: 'status', changes: { type: 'LIAR_WINDOW_STATUS' } }]).schema;
+    r = await push(config, schema);
+    expect(r.result.results.filter((x) => !x.ok)).toEqual([]);
+    db = await read();
+    expect(db.tables[0].columns[1].type).toBe('LIAR_WINDOW_STATUS');
+    expect(planPush(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+  }, 120000);
+
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
     const config = await freshDatabase();
     const mismatches = await typeRuleMismatches('postgresql', async (sqls) => (await postgresConnector.execute(config, sqls)).results.find((r) => !r.ok)?.error ?? null);
