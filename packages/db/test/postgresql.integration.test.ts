@@ -4,7 +4,7 @@
 
 import { afterAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
-import { appliedChanges, applyChanges, applyCommands, emptySchema, generateStatements, getDialect, planPull, planPush, syncedBaseline, type Schema } from '@erd/core';
+import { appliedChanges, applyChanges, applyCommands, emptySchema, generateStatements, getDialect, planPull, planPush, skippedChanges, summarizePlan, syncedBaseline, type Schema } from '@erd/core';
 import type { ConnectionConfig } from '../src';
 import { postgresConnector } from '../src/postgresql';
 import { typeRuleMismatches } from './typeCases';
@@ -79,6 +79,26 @@ async function push(config: ConnectionConfig, schema: Schema, baseline?: Schema 
   const statements = generateStatements(plan.diff, dialect, plan.defaultSelected);
   const result = await postgresConnector.execute(config, statements.map((s) => s.sql));
   return { plan, statements, result };
+}
+
+/** DB로 내보내기 화면과 같은 순서: 비교 → 기본 선택(DROP 제외) 실행 → 다시 읽어 기준 시점 저장 */
+async function pushLikeDialog(config: ConnectionConfig, erd: Schema, baseline: Schema | null, all = false) {
+  const db = (await postgresConnector.introspect(config)).schema;
+  const plan = planPush(erd, db, { dialect, baseline: baseline ?? undefined });
+  const selected = all ? new Set(plan.diff.changes.map((c) => c.id)) : new Set(plan.defaultSelected);
+  const statements = generateStatements(plan.diff, dialect, selected);
+  const result = await postgresConnector.execute(config, statements.map((s) => s.sql));
+  const after = (await postgresConnector.introspect(config)).schema;
+  const applied = appliedChanges(plan.diff.changes, statements, result.results);
+  const skipped = skippedChanges(plan.diff.changes, applied);
+  const next = syncedBaseline(after, erd, { applied, previous: baseline, skipped, dialect, direction: 'push' });
+  return { plan, statements, result, next, selected };
+}
+
+async function status(config: ConnectionConfig, erd: Schema, baseline: Schema) {
+  const db = (await postgresConnector.introspect(config)).schema;
+  const plan = planPull(erd, db, { dialect, baseline });
+  return { summary: summarizePlan(plan), changes: plan.diff.changes.map((c) => `${c.summary} [${plan.origins[c.id]}]`) };
 }
 
 describe.skipIf(!url)('PostgreSQL 실제 서버', () => {
@@ -219,6 +239,39 @@ describe.skipIf(!url)('PostgreSQL 실제 서버', () => {
     db = await read();
     expect(db.tables[0].columns[1].type).toBe('LIAR_WINDOW_STATUS');
     expect(planPush(schema, db, { dialect }).diff.changes.map((c) => c.summary)).toEqual([]);
+  }, 120000);
+
+  it('DROP 빼고 ALTER만 내보내면: 남은 것은 체크를 푼 DROP뿐 (ERD에서 바뀜), 가져오기 배지(DB에서 바뀜·둘 다)는 0', async () => {
+    const config = await freshDatabase();
+    let erd = applyCommands(emptySchema(), [
+      { op: 'createEnum', name: 'LIAR_WINDOW_STATUS', values: ['OPEN', 'CLOSED'] },
+      { op: 'createEnum', name: 'INTERROGATION_STATUS', values: ['OPEN', 'CLOSED', 'DONE'] },
+      { op: 'createTable', name: 'hand_player', columns: [{ name: 'hand_player_id', type: 'BIGINT', primaryKey: true, autoIncrement: true }, { name: 'nick', type: 'VARCHAR(20)' }] },
+      { op: 'createTable', name: 'interrogation', columns: [{ name: 'interrogation_id', type: 'BIGINT', primaryKey: true, autoIncrement: true }, { name: 'status', type: 'LIAR_WINDOW_STATUS', nullable: false, default: "'OPEN'" }, { name: 'created_at', type: 'TIMESTAMPTZ', nullable: false, default: 'CURRENT_TIMESTAMP' }] },
+      { op: 'createTable', name: 'legacy', columns: [{ name: 'legacy_id', type: 'BIGINT', primaryKey: true }] },
+      { op: 'addRelation', parent: 'hand_player', child: 'interrogation' },
+    ]).schema;
+    // 처음: 전부 내보내 맞춘다
+    let r = await pushLikeDialog(config, erd, null, true);
+    expect(r.result.ok).toBe(true);
+    let baseline = r.next;
+    let s = await status(config, erd, baseline);
+    expect(s.summary.total).toBe(0);
+
+    // ERD에서: ENUM 타입 바꾸기, 컬럼 추가·타입 변경, 인덱스, 테이블 삭제, ENUM 삭제(안 쓰게 된 것)
+    erd = applyCommands(erd, [
+      { op: 'updateColumn', table: 'interrogation', column: 'status', changes: { type: 'INTERROGATION_STATUS' } },
+      { op: 'updateColumn', table: 'hand_player', column: 'nick', changes: { type: 'VARCHAR(50)' } },
+      { op: 'addColumn', table: 'interrogation', column: { name: 'memo', type: 'TEXT' } },
+      { op: 'addIndex', table: 'interrogation', columns: ['created_at'] },
+      { op: 'dropTable', table: 'legacy' },
+      { op: 'dropEnum', enum: 'LIAR_WINDOW_STATUS' },
+    ]).schema;
+    r = await pushLikeDialog(config, erd, baseline);
+    baseline = r.next;
+    s = await status(config, erd, baseline);
+    expect(s.summary.db + s.summary.conflict).toBe(0);
+    expect(s.changes).toEqual(['타입 LIAR_WINDOW_STATUS 생성 (ENUM OPEN, CLOSED) [erd]', 'legacy 테이블 생성 [erd]']);
   }, 120000);
 
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {
