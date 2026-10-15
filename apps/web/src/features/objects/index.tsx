@@ -13,7 +13,8 @@ function ObjectsToolbarButton() {
   return (
     <button className="btn btn-tool" onClick={() => useStore.getState().setObjectsDialog({})} title="DB 객체: 뷰·함수·프로시저·트리거 등을 DDL로 보고 고칩니다 (DB로 내보내기로 반영)">
       <Icon name="code" />
-      <span className="hide-narrow">객체{count ? ` ${count}` : ''}</span>
+      <span className="hide-mid">객체</span>
+      {count > 0 && <span className="tool-count">{count}</span>}
     </button>
   );
 }

@@ -13,7 +13,8 @@ function EnumToolbarButton() {
   return (
     <button className="btn btn-tool" onClick={() => useStore.getState().setEnumDialog({})} title="사용자 정의 타입(ENUM): 상태·구분처럼 값이 정해진 컬럼의 타입을 만들고 고칩니다">
       <Icon name="tag" />
-      <span className="hide-narrow">타입{count ? ` ${count}` : ''}</span>
+      <span className="hide-mid">타입</span>
+      {count > 0 && <span className="tool-count">{count}</span>}
     </button>
   );
 }

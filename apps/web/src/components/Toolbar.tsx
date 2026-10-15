@@ -203,7 +203,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
 
   return (
     <header className="toolbar">
-      {/* 위: 프로젝트 · 함께하는 사람 · 검색 · 도움말 · AI · 공유 · 내 계정 */}
+      {/* 위: 이 프로젝트(이름·DB·표기) · 검색 · 함께 일하기(사람·댓글) · 프로젝트 전체(버전·추출) · AI·공유 · 화면·도움말 · 내 계정 */}
       <div className="topbar">
         <a className="icon-btn back" href="#/" title="프로젝트 목록">
           <Icon name="back" size={18} />
@@ -217,46 +217,36 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         <NamingBadge disabled={!synced || readOnly} />
         {role === 'viewer' && <span className="role-tag" title="이 프로젝트는 보기 권한입니다">보기 전용</span>}
         <span className="spacer" />
-        <Participants />
-        <span className="divider" />
-        <button className="btn btn-ghost" onClick={() => useStore.getState().setSearchOpen(true)} title="테이블·컬럼 찾기 (Ctrl+F)">
+        {/* 검색은 입력 칸처럼 보이게 가운데에 */}
+        <button className="search-trigger" onClick={() => useStore.getState().setSearchOpen(true)} title="테이블·컬럼 찾기 (Ctrl+F)">
           <Icon name="search" />
-          <span className="hide-narrow">검색</span>
-          <kbd className="hide-narrow">Ctrl F</kbd>
+          <span className="search-trigger__text">테이블·컬럼 검색</span>
+          <kbd>Ctrl F</kbd>
         </button>
-        <button
-          className="btn btn-ghost btn-with-badge"
-          onClick={() => onOpen('lint')}
-          title={`설계 검사: 오류 ${lintErrors}개 · 경고 ${lintCount - lintErrors}개 (기본 검사 + AI 검토, 참고는 세지 않음)${reviewPending ? ` · AI 검토 이후 바뀐 테이블 ${reviewPending}개 — 다시 검토가 필요합니다` : ''}`}
-        >
-          <Icon name="check" />
-          <span className="hide-narrow">설계 검사</span>
-          {/* 오류가 있으면 빨강, 경고만 있으면 노랑 */}
-          {lintCount > 0 && <span className={`db-badge lint${lintErrors ? ' has-error' : ''}`}>{lintCount}</span>}
-          {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
-          {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
-        </button>
-        <button className="btn btn-ghost" onClick={() => onOpen('dictionary')} title={dictionarySize ? `표준 용어 사전: 용어 ${dictionarySize}개` : '표준 용어 사전: 엑셀로 올리거나 지금 ERD로 만들면, 논리명으로 물리명·타입을 채우고 다르면 알려 줍니다'}>
-          <Icon name="book" />
-          <span className="hide-narrow">용어 사전</span>
-        </button>
+        <span className="spacer" />
+        <Participants />
         <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
           <Icon name="comment" />
           <span className="hide-narrow">댓글</span>
           {commentCount > 0 && <span className="db-badge comment">{commentCount}</span>}
         </button>
-        <button
-          className="btn btn-ghost icon-only"
-          onClick={() => setThemeSetting(THEME_NEXT[themeSetting])}
-          title={`화면 테마: ${THEME_LABEL[themeSetting]} (누르면 ${THEME_LABEL[THEME_NEXT[themeSetting]]})`}
-          aria-label="화면 테마 바꾸기"
-        >
-          <Icon name={theme === 'dark' ? 'moon' : 'sun'} />
+        {/* 프로젝트 전체에 하는 일: 버전(저장·비교·복원)과 추출(SQL·정의서·도면) */}
+        <button className="btn btn-ghost" onClick={() => onOpen('versions')} title="버전 저장·비교·복원">
+          <Icon name="history" />
+          <span className="hide-narrow">버전</span>
         </button>
-        <button className="btn btn-ghost icon-only" onClick={() => onOpen('help')} title="사용 방법 · 단축키">
-          <Icon name="help" />
-        </button>
-        <button className={`btn btn-ghost btn-ai${pendingProposals ? ' has-badge' : ''}`} onClick={() => onOpen(pendingProposals ? 'proposals' : 'ai')} title="AI(MCP) 연결과 제안">
+        <Dropdown
+          label="추출"
+          icon="download"
+          title="SQL·테이블 정의서·ERD 도면(HTML·이미지)으로 추출"
+          items={[
+            { label: 'SQL 추출', hint: 'CREATE / 변경분 ALTER', onClick: () => onOpen('sql') },
+            { label: '테이블 정의서', hint: 'Excel', disabled: isEmpty, onClick: () => onOpen('definition') },
+            { label: 'ERD 도면', hint: 'HTML · PNG · SVG', disabled: isEmpty, onClick: () => onOpen('image') },
+          ]}
+        />
+        <span className="divider" />
+        <button className={`btn btn-ghost btn-ai${pendingProposals ? ' has-badge' : ''}`} onClick={() => onOpen(pendingProposals ? 'proposals' : 'ai')} title={pendingProposals ? `AI 제안 ${pendingProposals}건이 검토를 기다립니다` : 'AI(MCP) 연결·적용 방식'}>
           <Icon name="sparkles" />
           <span>AI</span>
           {pendingProposals ? <span className="badge-count">{pendingProposals}</span> : null}
@@ -265,13 +255,35 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           <Icon name="share" />
           <span>공유</span>
         </button>
+        <span className="divider" />
+        <button
+          className="btn btn-ghost icon-only"
+          onClick={() => setThemeSetting(THEME_NEXT[themeSetting])}
+          title={`화면 테마: ${THEME_LABEL[themeSetting]} (누르면 ${THEME_LABEL[THEME_NEXT[themeSetting]]})`}
+          aria-label="화면 테마 바꾸기"
+        >
+          <Icon name={theme === 'dark' ? 'moon' : 'sun'} />
+        </button>
+        <button className="btn btn-ghost icon-only" onClick={() => onOpen('help')} title="사용 방법 · 단축키" aria-label="도움말">
+          <Icon name="help" />
+        </button>
         <DesktopUpdateButton />
         <UserMenu />
       </div>
 
-      {/* 아래: 편집 도구 · DB · 버전 · 내보내기 */}
+      {/* 아래: 일하는 순서대로 — 되돌리기 · 만들기 · 보기 · 검토 | DB와 주고받기 */}
       <div className="toolstrip">
-        <div className="tool-group">
+        <div className="tool-group" aria-label="되돌리기">
+          <button className="btn btn-tool icon-only" title="되돌리기 (Ctrl+Z) · 내가 한 변경만" aria-label="되돌리기" disabled={!canUndo || readOnly} onClick={undo}>
+            <Icon name="undo" />
+          </button>
+          <button className="btn btn-tool icon-only" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행" disabled={!canRedo || readOnly} onClick={redo}>
+            <Icon name="redo" />
+          </button>
+        </div>
+        <span className="divider" />
+
+        <div className="tool-group" aria-label="만들기">
           <div className="split-btn">
             <button className="btn btn-primary" disabled={!synced || readOnly} onClick={() => addTableAtCenter()} title={`테이블 추가 (빈 곳 더블클릭으로도 추가)${defaultTemplateId ? ' · 기본 템플릿이 들어갑니다' : ''}`}>
               <Icon name="plus" />
@@ -294,32 +306,16 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
           </div>
           <button className="btn btn-tool" disabled={!synced || readOnly} onClick={addNoteAtCenter} title="메모 붙이기: 설계 의도·주의 사항을 캔버스에 남깁니다 (SQL·DB에는 영향 없음, 영역 탭이면 그 탭에만)">
             <Icon name="note" />
-            <span className="hide-narrow">메모</span>
+            <span className="hide-mid">메모</span>
           </button>
-          {/* 기능 모듈 버튼 (ENUM 타입 등 — 프로젝트 DB에 있는 기능만) */}
+          {/* 기능 모듈 버튼 (ENUM 타입·DB 객체 등 — 프로젝트 DB에 있는 기능만) */}
           <Slot name="toolstrip" />
-          <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
-            {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>관계: {t.label}</option>)}
-          </select>
-        </div>
-        <span className="divider" />
-        <div className="segmented" title="이름 표시 방식">
-          {VIEW_MODES.map((m) => (
-            <button key={m.id} className={viewMode === m.id ? 'active' : ''} onClick={() => setViewMode(m.id)}>{m.label}</button>
-          ))}
-        </div>
-        <span className="divider" />
-        <div className="tool-group">
-          <button className="btn btn-tool" disabled={isEmpty || readOnly} onClick={arrange} title="관계를 보고 테이블을 자동으로 배치합니다">
-            <Icon name="layout" />
-            <span className="hide-narrow">자동 정렬</span>
-          </button>
-          <button className="btn btn-tool icon-only" title="되돌리기 (Ctrl+Z) · 내가 한 변경만" disabled={!canUndo || readOnly} onClick={undo}>
-            <Icon name="undo" />
-          </button>
-          <button className="btn btn-tool icon-only" title="다시 실행 (Ctrl+Y)" disabled={!canRedo || readOnly} onClick={redo}>
-            <Icon name="redo" />
-          </button>
+          <label className="tool-select-wrap" title="테이블 오른쪽 점을 끌어 관계를 만들 때의 종류">
+            <span className="tool-select-label">관계</span>
+            <select className="tool-select" value={relationTool} disabled={readOnly} onChange={(e) => setRelationTool(e.target.value as RelationTool)} aria-label="새로 만들 관계의 종류">
+              {RELATION_TOOLS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </label>
           {isEmpty && synced && !readOnly && (
             <button
               className="btn btn-tool"
@@ -332,21 +328,56 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
             </button>
           )}
         </div>
+        <span className="divider" />
+
+        <div className="tool-group" aria-label="보기">
+          <div className="segmented" title="테이블에 보일 이름">
+            {VIEW_MODES.map((m) => (
+              <button key={m.id} className={viewMode === m.id ? 'active' : ''} onClick={() => setViewMode(m.id)}>{m.label}</button>
+            ))}
+          </div>
+          <button className="btn btn-tool" disabled={isEmpty || readOnly} onClick={arrange} title="관계를 보고 테이블을 자동으로 배치합니다">
+            <Icon name="layout" />
+            <span className="hide-mid">자동 정렬</span>
+          </button>
+        </div>
+        <span className="divider" />
+
+        <div className="tool-group" aria-label="검토">
+          <button
+            className="btn btn-tool btn-with-badge"
+            onClick={() => onOpen('lint')}
+            title={`설계 검사: 오류 ${lintErrors}개 · 경고 ${lintCount - lintErrors}개 (기본 검사 + AI 검토, 참고는 세지 않음)${reviewPending ? ` · AI 검토 이후 바뀐 테이블 ${reviewPending}개 — 다시 검토가 필요합니다` : ''}`}
+          >
+            <Icon name="check" />
+            <span className="hide-narrow">설계 검사</span>
+            {/* 오류가 있으면 빨강, 경고만 있으면 노랑 */}
+            {lintCount > 0 && <span className={`db-badge lint${lintErrors ? ' has-error' : ''}`}>{lintCount}</span>}
+            {/* 숫자는 "문제 수"만. 검토가 밀린 것은 문제가 아니라 할 일이라 작은 점으로만 알린다 */}
+            {reviewPending > 0 && <span className="review-dot" aria-label={`AI 검토가 필요한 테이블 ${reviewPending}개`} />}
+          </button>
+          <button className="btn btn-tool" onClick={() => onOpen('dictionary')} title={dictionarySize ? `표준 용어 사전: 용어 ${dictionarySize}개` : '표준 용어 사전: 엑셀로 올리거나 지금 ERD로 만들면, 논리명으로 물리명·타입을 채우고 다르면 알려 줍니다'}>
+            <Icon name="book" />
+            <span className="hide-mid">용어 사전</span>
+          </button>
+        </div>
 
         <span className="spacer" />
 
-        <div className="tool-group">
+        {/* DB와 주고받기: "DB" 묶음 안에 가져오기·내보내기 (화살표 방향으로 구분) */}
+        <div className="tool-group db-group" aria-label="DB">
+          <span className="tool-group__label">DB</span>
           {dbAvailable ? (
             <>
               <button className="btn btn-tool btn-with-badge" disabled={readOnly} onClick={() => onOpen('dbPull')} title={readOnly ? readOnlyTitle : dbTitle}>
                 <Icon name="dbIn" />
-                <span><span className="hide-narrow">DB에서 </span>가져오기</span>
+                <span><span className="sr-only">DB에서 </span>가져오기</span>
                 {/* DB와 처음 맞추기 전(기준 시점 없음)에는 누가 바꿨는지 몰라 배지를 띄우지 않는다. 차이는 버튼 설명에만 */}
                 {dbChanged > 0 && <span className="db-badge" title={dbTitle}>{dbChanged}</span>}
               </button>
               <button className="btn btn-tool btn-with-badge" disabled={isEmpty} onClick={() => onOpen('dbPush')} title={dbStatus?.connected ? `ERD에서 바뀌고 아직 DB에 안 넣은 것 ${erdPending}건` : 'ERD와 DB를 비교해 바뀐 부분만 DB에 실행합니다'}>
                 <Icon name="dbOut" />
-                <span><span className="hide-narrow">DB로 </span>내보내기</span>
+                <span><span className="sr-only">DB로 </span>내보내기</span>
                 {erdPending > 0 && <span className="db-badge erd">{erdPending}</span>}
               </button>
             </>
@@ -355,11 +386,11 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               {/* 웹에서는 서버가 사용자의 사내망·PC DB에 접속할 수 없어 DB 연결은 설치형 앱에서만 */}
               <button className="btn btn-tool" disabled title={DESKTOP_ONLY_TITLE}>
                 <Icon name="dbIn" />
-                <span className="hide-narrow">DB에서 가져오기</span>
+                <span className="hide-narrow"><span className="sr-only">DB에서 </span>가져오기</span>
               </button>
               <button className="btn btn-tool" disabled title={DESKTOP_ONLY_TITLE}>
                 <Icon name="dbOut" />
-                <span className="hide-narrow">DB로 내보내기</span>
+                <span className="hide-narrow"><span className="sr-only">DB로 </span>내보내기</span>
               </button>
               <a className="btn btn-tool desktop-link" href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" title={DESKTOP_ONLY_TITLE}>
                 <Icon name="desktop" />
@@ -367,23 +398,6 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               </a>
             </>
           )}
-        </div>
-        <span className="divider" />
-        <div className="tool-group">
-          <button className="btn btn-tool" onClick={() => onOpen('versions')} title="버전 저장·비교·복원">
-            <Icon name="history" />
-            <span className="hide-narrow">버전</span>
-          </button>
-          <Dropdown
-            label="추출"
-            icon="download"
-            title="SQL·테이블 정의서·ERD 도면(HTML·이미지)으로 추출"
-            items={[
-              { label: 'SQL 추출', hint: 'CREATE / 변경분 ALTER', onClick: () => onOpen('sql') },
-              { label: '테이블 정의서', hint: 'Excel', disabled: isEmpty, onClick: () => onOpen('definition') },
-              { label: 'ERD 도면', hint: 'HTML · PNG · SVG', disabled: isEmpty, onClick: () => onOpen('image') },
-            ]}
-          />
         </div>
       </div>
     </header>

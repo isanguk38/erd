@@ -1091,3 +1091,26 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .objects-editor__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .objects-ddl { width: 100%; min-height: 340px; resize: vertical; font-size: 12.5px; line-height: 1.5; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; white-space: pre; tab-size: 2; }
 @media (max-width: 720px) { .objects-layout { grid-template-columns: 1fr; } .objects-list { border-right: none; padding-right: 0; max-height: 200px; } }
+
+/* 도구 막대: 위는 프로젝트·검색·함께 일하기, 아래는 일하는 순서(되돌리기·만들기·보기·검토 | DB·버전·추출) */
+.search-trigger {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; min-width: 240px; max-width: 360px; flex: 0 1 320px;
+  padding: 0 8px 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--muted);
+  font: inherit; font-size: 13px; cursor: text; text-align: left;
+}
+.search-trigger:hover { border-color: var(--accent); color: var(--text); }
+.search-trigger__text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-trigger kbd { font-size: 10px; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; background: var(--panel); }
+.toolstrip { flex-wrap: nowrap; }
+.toolstrip .tool-group { flex: none; }
+.tool-select-wrap { display: inline-flex; align-items: center; height: 32px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.tool-select-label { font-size: 12px; color: var(--muted); padding: 0 6px 0 10px; white-space: nowrap; }
+.tool-select-wrap .tool-select { border: none; background: transparent; height: 30px; padding-left: 2px; width: auto; max-width: 118px; }
+.tool-group__label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); padding: 0 2px 0 4px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* 좁아지면 덜 중요한 글자부터 아이콘만 (설명은 마우스를 올리면) */
+@media (max-width: 1380px) { .hide-mid { display: none !important; } }
+@media (max-width: 1180px) { .search-trigger { min-width: 0; flex-basis: 40px; } .search-trigger__text, .search-trigger kbd { display: none; } .tool-select-label { display: none; } }
+/* 아주 좁은 화면에서는 줄을 넘긴다 (버튼이 잘리지 않게) */
+@media (max-width: 900px) { .toolstrip { flex-wrap: wrap; } }
+.tool-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
