@@ -180,6 +180,8 @@ export const oracle: Dialect = {
   },
 
   // ENUM·부분 인덱스·인덱스 방식·외래키 ON UPDATE는 없다 (모듈을 넣지 않는다)
+  // 따옴표 없이 쓰는 이름(q가 따옴표를 안 붙이는 것)은 대문자로 저장된다
+  storedName: (name) => (q(name).startsWith('"') ? name : name.toUpperCase()),
   features: {
     // DB 객체: 뷰·함수·프로시저·트리거·패키지(명세·본문). 모두 CREATE OR REPLACE로 바꾸고, PL/SQL 끝의 ;는 남긴다
     objects: dbObjectsModule({

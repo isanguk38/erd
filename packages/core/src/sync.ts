@@ -14,6 +14,24 @@ import { objectKey } from './dbObjects';
 const key = (name: string) => name.toLowerCase();
 
 /**
+ * 이름으로 짝 찾기: 이름이 똑같은 것을 먼저, 없으면 대소문자만 다른 것을 — 단 그런 후보가 하나뿐일 때만.
+ * MySQL(리눅스)·PostgreSQL(따옴표)은 TB_TAX와 tb_tax를 서로 다른 테이블로 둘 수 있어서, 대소문자를 무시하고 맞추면 둘이 한 테이블로 합쳐진다.
+ */
+function nameMatcher<T>(items: T[], nameOf: (item: T) => string) {
+  const used = new Set<T>();
+  return (name: string): T | undefined => {
+    const free = items.filter((i) => !used.has(i));
+    const exact = free.find((i) => nameOf(i) === name);
+    const loose = free.filter((i) => key(nameOf(i)) === key(name));
+    // 같은 이름(대소문자 무시)이 여러 개면 똑같은 이름만 짝으로 본다
+    const ambiguous = items.filter((i) => key(nameOf(i)) === key(name)).length > 1;
+    const found = exact ?? (!ambiguous && loose.length === 1 ? loose[0] : undefined);
+    if (found) used.add(found);
+    return found;
+  };
+}
+
+/**
  * 들어온 스키마(incoming)의 id를 지금 ERD(current)에 맞춘다.
  * - 테이블·컬럼: 이름(대소문자 무시)이 같으면 같은 것으로 본다.
  * - 인덱스: 이름이 같거나, 컬럼 구성과 UNIQUE 여부가 같으면 같은 것으로 본다.
@@ -25,12 +43,17 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema, opti
   const inheritNames = options.names !== false;
   const incoming = cloneSchema(incomingInput);
   const current = normalizeSchema(currentInput);
-  const currentTables = new Map(current.tables.map((t) => [key(t.name), t]));
+  const matchTable = nameMatcher(current.tables, (t) => t.name);
+  // 같은 이름(대소문자 무시)이 들어온 쪽에 여럿이면(TB_TAX·tb_tax) 똑같은 이름끼리만 짝짓게, 똑같은 이름부터 먼저 맞춘다
+  const incomingOrder = [...incoming.tables].sort((a, b) => Number(!current.tables.some((t) => t.name === a.name)) - Number(!current.tables.some((t) => t.name === b.name)));
   const tableIdMap = new Map<string, string>();
   const columnIdMap = new Map<string, string>();
 
-  for (const table of incoming.tables) {
-    const match = currentTables.get(key(table.name));
+  const incomingNames = (name: string) => incoming.tables.filter((t) => key(t.name) === key(name)).length;
+  for (const table of incomingOrder) {
+    const candidate = matchTable(table.name);
+    // 들어온 쪽에 대소문자만 다른 테이블이 여럿이면 이름이 똑같을 때만 짝
+    const match = candidate && (candidate.name === table.name || incomingNames(table.name) === 1) ? candidate : undefined;
     if (!match) continue;
     tableIdMap.set(table.id, match.id);
     table.id = match.id;
@@ -40,9 +63,9 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema, opti
     // 설명은 ERD에만 있으므로 DB에서 읽은 쪽에 늘 이어 붙인다 (가져와도 지워지지 않게)
     table.comment = match.comment;
 
-    const currentColumns = new Map(match.columns.map((c) => [key(c.name), c]));
-    for (const column of table.columns) {
-      const m = currentColumns.get(key(column.name));
+    const matchColumn = nameMatcher(match.columns, (c) => c.name);
+    for (const column of [...table.columns].sort((a, b) => Number(!match.columns.some((c) => c.name === a.name)) - Number(!match.columns.some((c) => c.name === b.name)))) {
+      const m = matchColumn(column.name);
       if (!m) continue;
       columnIdMap.set(column.id, m.id);
       column.id = m.id;

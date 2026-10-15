@@ -26,6 +26,14 @@ export function ObjectsDialog({ feature, focus, onClose }: { feature: DbObjectsF
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  // 접은 종류 (함수·프로시저가 많을 때 목록을 접어 둔다). 찾는 중에는 모두 펼친다
+  const [collapsed, setCollapsed] = useState<Set<DbObjectKind>>(new Set());
+  const toggle = (kind: DbObjectKind) => setCollapsed((cur) => {
+    const next = new Set(cur);
+    if (next.has(kind)) next.delete(kind);
+    else next.add(kind);
+    return next;
+  });
   const current = objects.find((o) => o.id === selected) ?? null;
   const isNew = selected === 'new';
 
@@ -100,9 +108,21 @@ export function ObjectsDialog({ feature, focus, onClose }: { feature: DbObjectsF
               {feature.kinds.map((k) => <option key={k} value={k}>{DB_OBJECT_LABEL[k]}</option>)}
             </select>
           )}
-          {groups.map((g) => (
+          {objects.length > 0 && !query.trim() && (
+            <button className="link-btn small objects-fold-all" onClick={() => setCollapsed(collapsed.size ? new Set() : new Set(feature.kinds))}>
+              {collapsed.size ? '모두 펼치기' : '모두 접기'}
+            </button>
+          )}
+          {groups.map((g) => {
+            const open = Boolean(query.trim()) || !collapsed.has(g.kind);
+            return (
             <section key={g.kind}>
-              <h5>{DB_OBJECT_LABEL[g.kind]} <span className="muted">{g.items.length}</span></h5>
+              <h5>
+                <button className="objects-group" aria-expanded={open} onClick={() => toggle(g.kind)}>
+                  <span className={`objects-caret${open ? ' open' : ''}`}>▸</span> {DB_OBJECT_LABEL[g.kind]} <span className="muted">{g.items.length}</span>
+                </button>
+              </h5>
+              {open && (
               <ul>
                 {g.items.map((o) => (
                   <li key={o.id}>
@@ -114,8 +134,10 @@ export function ObjectsDialog({ feature, focus, onClose }: { feature: DbObjectsF
                 ))}
                 {!g.items.length && <li className="muted small">없음</li>}
               </ul>
+              )}
             </section>
-          ))}
+            );
+          })}
         </aside>
         <div className="objects-editor">
           {!current && !isNew ? (

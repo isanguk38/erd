@@ -21,6 +21,11 @@ export interface Dialect {
   quote(name: string): string;
   /** 비교용 타입 문자열 (예: VARCHAR(100)). 같은 의미면 같은 문자열이 나와야 한다. */
   renderType(column: Column): string;
+  /**
+   * 이 이름을 SQL에 쓰면 DB가 실제로 저장하는 이름 (비교용). 없으면 쓴 그대로.
+   * 예) Oracle은 따옴표 없이 쓴 member를 MEMBER로 저장한다 → ERD member와 DB MEMBER는 같은 이름 (이름을 바꾸지 않는다)
+   */
+  storedName?(name: string): string;
   /** 비교용 기본값. 의미가 같으면 같은 문자열이 나와야 한다. */
   normalizeDefault(value: string | null): string | null;
   /** 비교용 참조 동작. 의미가 같으면 같은 값 (MySQL은 RESTRICT와 NO ACTION이 같다) */

@@ -21,6 +21,9 @@ import {
 import { getConnector } from '../src';
 import { mariadb, mssql, mysql56Target, mysqlTarget, oracle, postgres } from './targets';
 
+/** 이름 비교 (Oracle은 DB에 있는 대문자 이름 그대로 읽는다) */
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
 const base = (): Schema =>
   applyCommands(emptySchema(), [
     { op: 'createTable', name: 'member', columns: [
@@ -62,9 +65,9 @@ for (const target of [mysqlTarget, mysql56Target, mariadb, postgres, oracle, mss
       // DB를 읽은 구조에서 ERD를 고친다 (id가 같아야 같은 테이블·컬럼으로 맞는다)
       const db = (await connector.introspect(config)).schema;
       const erd = cloneSchema(db);
-      const member = erd.tables.find((t) => t.name === 'member')!;
-      const orders = erd.tables.find((t) => t.name === 'orders')!;
-      const col = (t: typeof member, n: string) => t.columns.find((c) => c.name === n)!;
+      const member = erd.tables.find((t) => same(t.name, 'member'))!;
+      const orders = erd.tables.find((t) => same(t.name, 'orders'))!;
+      const col = (t: typeof member, n: string) => t.columns.find((c) => same(c.name, n))!;
       addIndex(erd, member.id, { columnIds: [col(member, 'email').id], unique: true, name: 'ux_member_email' });
       updateColumn(erd, member.id, col(member, 'email').id, { nullable: false });
       updateColumn(erd, member.id, col(member, 'nick').id, { length: '5' });
@@ -96,7 +99,7 @@ for (const target of [mysqlTarget, mysql56Target, mariadb, postgres, oracle, mss
 
       // 검사는 읽기만 했다
       const after = (await connector.introspect(config)).schema;
-      expect(after.tables.find((t) => t.name === 'member')!.columns.map((c) => c.name)).toEqual(['member_id', 'email', 'code', 'nick', 'qty_text']);
+      expect(after.tables.find((t) => same(t.name, 'member'))!.columns.map((c) => c.name.toLowerCase())).toEqual(['member_id', 'email', 'code', 'nick', 'qty_text']);
       expect(after.relations).toEqual([]);
     }, 120000);
   });

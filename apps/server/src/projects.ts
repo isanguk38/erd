@@ -318,6 +318,25 @@ export class ProjectStore {
     return saved;
   }
 
+  /**
+   * 제안으로 쌓인 DB 가져오기: 승인되면 그때 DB 구조로 기준 시점을 저장하려고 DB 구조를 맡아 둔다 (제안 id별).
+   * 제안 모드에서도 승인한 뒤에는 화면의 가져오기처럼 "DB에서 바뀜·ERD에서 바뀜"을 구분하게
+   */
+  setPendingPull(id: string, proposalId: string, pull: { connectionId: string; connectionName: string; db: Schema }): void {
+    const all = this.readJson<Record<string, unknown>>(this.path(id, 'pull-pending.json'), {});
+    this.writeJson(this.path(id, 'pull-pending.json'), { ...all, [proposalId]: pull });
+  }
+
+  takePendingPull(id: string, proposalId: string): { connectionId: string; connectionName: string; db: Schema } | null {
+    const all = this.readJson<Record<string, { connectionId: string; connectionName: string; db: Schema }>>(this.path(id, 'pull-pending.json'), {});
+    const pull = all[proposalId] ?? null;
+    if (pull) {
+      delete all[proposalId];
+      this.writeJson(this.path(id, 'pull-pending.json'), all);
+    }
+    return pull;
+  }
+
   /** 이번 AI 작업 묶음의 이력 (오래된 것부터) */
   aiLog(id: string): AiLogEntry[] {
     return this.readJson<AiLogEntry[]>(this.path(id, 'ai-log.json'), []);

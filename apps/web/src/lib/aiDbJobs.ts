@@ -122,7 +122,8 @@ async function pullJob(job: DbJob): Promise<Record<string, unknown>> {
     db,
     apply: Boolean(p.apply),
     includeRemovals: Boolean(p.includeRemovals),
-    mode: p.mode === 'apply' ? 'apply' : 'propose',
+    // 따로 정하지 않으면 프로젝트의 AI 모드를 따른다 (바로 적용 프로젝트가 제안으로 바뀌지 않게)
+    mode: p.mode === 'apply' || p.mode === 'propose' ? p.mode : undefined,
     source: 'ai',
   });
   return { ok: true, connection: connection.name, database: connection.database, ...result, ...(Array.isArray(db.schema.objects) ? {} : { note: '이 설치형 앱 버전은 뷰·함수 등 DB 객체를 읽지 못해 테이블만 가져왔습니다 (앱을 업데이트하면 객체도)' }) };

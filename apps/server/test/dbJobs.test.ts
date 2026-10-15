@@ -168,4 +168,24 @@ describe('AI DB 작업은 사용자의 앱이 처리 (웹 서비스)', () => {
     const preview = await erd.app.inject({ method: 'POST', url: `/api/projects/${project.id}/db/pull-local`, payload: { connectionId: 'c1', db: { schema: dbSchema }, apply: false } });
     expect(preview.json().summary.total).toBe(0);
   });
+
+  it('제안 모드 가져오기: 모두 승인하면 그때 기준 시점이 생겨, 다음 비교부터 누가 바꿨는지 구분한다', async () => {
+    const { call, url, erd } = await start();
+    const project = JSON.parse(textOf(await call('create_project', { name: '제안 가져오기', dialect: 'mysql' })));
+    const table = (n: string) => ({ id: `db_t_${n}`, name: n, logicalName: '', comment: '', position: { x: 0, y: 0 }, columns: [{ id: `db_c_${n}.id`, name: 'id', logicalName: '', type: 'BIGINT', length: '', nullable: false, primaryKey: true, unique: false, autoIncrement: false, defaultValue: null, comment: '' }], indexes: [] });
+    const db = { schema: { tables: [table('TB_TAX'), table('tb_tax')], relations: [], objects: [] }, serverVersion: 'MySQL 5.6', warnings: [] };
+    const pulled = (await (await fetch(`${url}/api/projects/${project.id}/db/pull-local`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ connectionId: 'c1', connectionName: 'b2b', db, apply: true, source: 'ai' }) })).json()) as { mode: string; proposalId: string };
+    expect(pulled.mode).toBe('propose');
+    // 승인 전에는 기준 시점이 없다
+    expect((await erd.app.inject({ method: 'GET', url: `/api/projects/${project.id}/db/baseline?connectionId=c1` })).json().baseline).toBe(null);
+    await erd.app.inject({ method: 'POST', url: `/api/projects/${project.id}/proposals/${pulled.proposalId}/apply`, payload: {} });
+    const after = (await erd.app.inject({ method: 'GET', url: `/api/projects/${project.id}` })).json();
+    // 대소문자만 다른 두 테이블이 그대로 (이름을 바꾸지 않는다)
+    expect(after.schema.tables.map((t: { name: string }) => t.name).sort()).toEqual(['TB_TAX', 'tb_tax']);
+    expect(after.meta.dbConnectionId).toBe('c1');
+    expect((await erd.app.inject({ method: 'GET', url: `/api/projects/${project.id}/db/baseline?connectionId=c1` })).json().baseline).not.toBe(null);
+    const again = (await erd.app.inject({ method: 'POST', url: `/api/projects/${project.id}/db/pull-local`, payload: { connectionId: 'c1', db, apply: false } })).json();
+    expect(again.hasBaseline).toBe(true);
+    expect(again.summary.total).toBe(0);
+  });
 });

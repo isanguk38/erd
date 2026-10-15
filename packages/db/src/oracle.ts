@@ -12,9 +12,12 @@ import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, Int
 type Row = Record<string, any>;
 export type OracleQuery = (sql: string, binds: Record<string, string>) => Promise<Row[]>;
 
-/** 따옴표 없이 만든 이름은 Oracle이 대문자로 저장한다 → ERD에서는 소문자로 (다시 내보내면 같은 이름) */
+/**
+ * DB에 있는 이름 그대로 가져온다 (대소문자를 바꾸지 않는다 — MEMBER는 MEMBER).
+ * 예전에는 대문자 이름을 소문자로 바꿨다. 그때 가져온 ERD(member)와도 비교는 맞다 (Oracle은 따옴표 없는 member를 MEMBER로 저장 — dialect.storedName)
+ */
 export function fromOracleName(name: string): string {
-  return /^[A-Z][A-Z0-9_$#]*$/.test(name) ? name.toLowerCase() : name;
+  return name;
 }
 
 /** ALL_TAB_COLUMNS 한 행 → 타입·길이 */

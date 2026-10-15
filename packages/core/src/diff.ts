@@ -115,9 +115,12 @@ export function normalizeSchema(input: Schema): Schema {
 }
 
 /** 한쪽 이름이 비어 있으면(자동 이름) 같은 것으로 본다. */
-function sameName(a: string, b: string): boolean {
-  return !a || !b || a === b;
+function sameName(a: string, b: string, stored: (name: string) => string = (n) => n): boolean {
+  return !a || !b || stored(a) === stored(b);
 }
+
+/** DB에 실제로 저장되는 이름이 같은지 (예: Oracle은 따옴표 없는 member·MEMBER를 둘 다 MEMBER로 저장). 대소문자는 바꾸지 않고 비교만 한다 */
+const storedName = (dialect: Dialect) => (name: string) => dialect.storedName?.(name) ?? name;
 
 function sameList(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -248,7 +251,7 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
     sameList(a.toColumnIds, b.toColumnIds) &&
     dialect.normalizeAction(a.onDelete) === dialect.normalizeAction(b.onDelete) &&
     (!dialect.features.fkOnUpdate || dialect.normalizeAction(a.onUpdate) === dialect.normalizeAction(b.onUpdate)) &&
-    sameName(a.name, b.name);
+    sameName(a.name, b.name, storedName(dialect));
 
   for (const relation of base.relations) {
     const after = targetRelations.get(relation.id);
@@ -320,7 +323,8 @@ function columnList(table: Table, ids: string[]): string {
 function diffTable(dialect: Dialect, before: Table, after: Table, changes: Change[], enums?: EnumType[]): void {
   const name = after.name;
 
-  if (before.name !== after.name) {
+  const stored = storedName(dialect);
+  if (stored(before.name) !== stored(after.name)) {
     changes.push({ kind: 'renameTable', id: `renameTable:${after.id}`, category: 'alter', tableName: name, summary: `테이블 이름 변경 ${before.name} → ${after.name}`, before, after });
   }
   if (sqlComment(before) !== sqlComment(after)) {
@@ -332,7 +336,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
   const afterIndexes = byId(after.indexes);
   for (const index of before.indexes) {
     const next = afterIndexes.get(index.id);
-    if (!next || !sameIndex(index, next)) {
+    if (!next || !sameIndex(index, next, stored)) {
       changes.push({ kind: 'dropIndex', id: `dropIndex:${after.id}:${index.id}`, category: 'alter', tableName: name, summary: `${name} 인덱스 삭제 (${indexLabel(before, index)})`, table: before, index });
     }
   }
@@ -368,7 +372,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
       return;
     }
     const fields: ColumnField[] = [];
-    if (old.name !== column.name) fields.push('name');
+    if (storedName(dialect)(old.name) !== storedName(dialect)(column.name)) fields.push('name');
     const untypedGenerated = dialect.features.generated?.typed === false && Boolean(column.generated?.expression.trim() && old.generated?.expression.trim());
     if (!untypedGenerated && dialect.renderType(old) !== dialect.renderType(column)) fields.push('type');
     if (effectiveNullable(old) !== effectiveNullable(column)) fields.push('nullable');
@@ -418,7 +422,7 @@ function diffTable(dialect: Dialect, before: Table, after: Table, changes: Chang
 
   for (const index of after.indexes) {
     const old = beforeIndexes.get(index.id);
-    if (!old || !sameIndex(old, index)) {
+    if (!old || !sameIndex(old, index, stored)) {
       changes.push({
         kind: 'addIndex', id: `addIndex:${after.id}:${index.id}`, category: 'alter', tableName: name,
         summary: `${name} 인덱스 생성 (${index.unique ? 'UNIQUE ' : ''}${indexLabel(after, index)})`,
@@ -444,11 +448,11 @@ function sameGenerated(dialect: Dialect, a: Column, b: Column): boolean {
   return sameExpression(ga.expression, gb.expression) && (!both || Boolean(ga.stored) === Boolean(gb.stored));
 }
 
-function sameIndex(a: Index, b: Index): boolean {
+function sameIndex(a: Index, b: Index, stored?: (name: string) => string): boolean {
   return (
     a.unique === b.unique &&
     sameList(a.columnIds, b.columnIds) &&
-    sameName(a.name, b.name) &&
+    sameName(a.name, b.name, stored) &&
     sameExpression(a.expression, b.expression) &&
     sameIndexMethod(a.method, b.method) &&
     sameExpression(a.where, b.where)

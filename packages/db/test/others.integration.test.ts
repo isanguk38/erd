@@ -12,6 +12,9 @@ import { mariadb, mssql, oracle } from './targets';
 import { typeRuleMismatches } from './typeCases';
 import { logicalNameRoundTrip } from './logicalNameCase';
 
+/** 이름 비교 (Oracle은 DB에 있는 대문자 이름 그대로 읽는다) */
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
 function erd(): Schema {
   return applyCommands(emptySchema(), [
     {
@@ -149,10 +152,11 @@ for (const target of [mariadb, oracle, mssql]) {
       expect(await remaining(config, schema)).toEqual([]);
 
       const { schema: read } = await connector.introspect(config);
-      const member = read.tables.find((t) => t.name === 'member')!;
+      const member = read.tables.find((t) => same(t.name, 'member'))!;
       expect(member.logicalName).toBe('회원');
-      expect(member.columns.find((c) => c.name === 'email')?.logicalName).toBe('이메일');
-      expect(member.columns[0]).toMatchObject({ name: 'member_id', primaryKey: true, autoIncrement: true });
+      expect(member.columns.find((c) => same(c.name, 'email'))?.logicalName).toBe('이메일');
+      expect(member.columns[0]).toMatchObject({ primaryKey: true, autoIncrement: true });
+      expect(same(member.columns[0].name, 'member_id')).toBe(true);
       expect(read.relations[0]).toMatchObject({ onDelete: 'CASCADE' });
     }, 120_000);
 
@@ -163,14 +167,14 @@ for (const target of [mariadb, oracle, mssql]) {
       await target.run(config, "INSERT INTO member (email) VALUES ('a@a.com')");
 
       const next = cloneSchema(schema);
-      const member = next.tables.find((t) => t.name === 'member')!;
-      const orders = next.tables.find((t) => t.name === 'orders')!;
-      member.columns.find((c) => c.name === 'email')!.length = '200'; // UNIQUE가 걸린 컬럼
-      member.columns.find((c) => c.name === 'grade')!.defaultValue = "'GOLD'";
-      member.columns.find((c) => c.name === 'created_at')!.nullable = true;
+      const member = next.tables.find((t) => same(t.name, 'member'))!;
+      const orders = next.tables.find((t) => same(t.name, 'orders'))!;
+      member.columns.find((c) => same(c.name, 'email'))!.length = '200'; // UNIQUE가 걸린 컬럼
+      member.columns.find((c) => same(c.name, 'grade'))!.defaultValue = "'GOLD'";
+      member.columns.find((c) => same(c.name, 'created_at'))!.nullable = true;
       const phone = addColumn(next, member.id, { name: 'phone', logicalName: '전화번호', type: 'VARCHAR', length: '20' });
       addIndex(next, member.id, { columnIds: [phone.id] });
-      orders.columns.find((c) => c.name === 'memo')!.name = 'note';
+      orders.columns.find((c) => same(c.name, 'memo'))!.name = 'note';
       orders.indexes = [];
 
       const first = await connector.introspect(config);
@@ -186,15 +190,15 @@ for (const target of [mariadb, oracle, mssql]) {
     it.skipIf(dialect.id !== 'oracle' && dialect.id !== 'mssql')('함수 기반 인덱스(Oracle)·필터 인덱스(SQL Server)를 만들고 다시 읽으면 ERD와 같다', async () => {
       const config = await target.fresh();
       const schema = erd();
-      const member = schema.tables.find((t) => t.name === 'member')!;
+      const member = schema.tables.find((t) => same(t.name, 'member'))!;
       if (dialect.id === 'oracle') addIndex(schema, member.id, { name: 'ix_member_email_upper', columnIds: [], expression: 'UPPER("EMAIL")' });
-      else addIndex(schema, member.id, { name: 'ix_member_grade_live', columnIds: [member.columns.find((c) => c.name === 'grade')!.id], where: 'created_at IS NOT NULL' });
+      else addIndex(schema, member.id, { name: 'ix_member_grade_live', columnIds: [member.columns.find((c) => same(c.name, 'grade'))!.id], where: 'created_at IS NOT NULL' });
       const { result } = await push(config, schema);
       expect(result.results.filter((r) => !r.ok)).toEqual([]);
       expect(await remaining(config, schema)).toEqual([]);
       const { schema: read, warnings } = await connector.introspect(config);
       expect(warnings).toEqual([]);
-      const index = read.tables.find((t) => t.name === 'member')!.indexes.find((i) => /ix_member_(email_upper|grade_live)/.test(i.name))!;
+      const index = read.tables.find((t) => same(t.name, 'member'))!.indexes.find((i) => /ix_member_(email_upper|grade_live)/i.test(i.name))!;
       if (dialect.id === 'oracle') expect(index).toMatchObject({ columnIds: [], expression: 'UPPER("EMAIL")' });
       else expect(index.where).toMatch(/created_at\]? IS NOT NULL/i);
     }, 120_000);
@@ -215,8 +219,8 @@ for (const target of [mariadb, oracle, mssql]) {
       expect(result.results.filter((r) => !r.ok)).toEqual([]);
       expect(await remaining(config, schema)).toEqual([]);
       const { schema: read } = await connector.introspect(config);
-      const item = read.tables.find((t) => t.name === 'item')!;
-      expect(item.columns.find((c) => c.name === 'total')!.generated?.expression).toMatch(/qty/i);
+      const item = read.tables.find((t) => same(t.name, 'item'))!;
+      expect(item.columns.find((c) => same(c.name, 'total'))!.generated?.expression).toMatch(/qty/i);
       expect(item.checks?.map((k) => k.name.toLowerCase())).toContain('ck_item_qty');
 
       const next = applyCommands(schema, [
@@ -239,10 +243,10 @@ for (const target of [mariadb, oracle, mssql]) {
       const schema = erd();
       await push(config, schema);
       const next = cloneSchema(schema);
-      const member = next.tables.find((t) => t.name === 'member')!;
-      const orders = next.tables.find((t) => t.name === 'orders')!;
-      member.columns.find((c) => c.name === 'email')!.unique = false;
-      orders.columns.find((c) => c.name === 'member_id')!.nullable = true;
+      const member = next.tables.find((t) => same(t.name, 'member'))!;
+      const orders = next.tables.find((t) => same(t.name, 'orders'))!;
+      member.columns.find((c) => same(c.name, 'email'))!.unique = false;
+      orders.columns.find((c) => same(c.name, 'member_id'))!.nullable = true;
       next.relations[0].onDelete = 'SET NULL';
       const withCoupon = applyCommands(next, [
         { op: 'createTable', name: 'coupon', logicalName: '쿠폰', columns: [{ name: 'coupon_id', type: 'BIGINT', primaryKey: true, autoIncrement: true }, { name: 'title', type: 'VARCHAR(100)', nullable: false }] },

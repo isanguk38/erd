@@ -487,8 +487,18 @@ export function registerProjectRoutes(
   app.post<{ Params: { id: string; pid: string }; Body: { selected?: string[] } }>('/api/projects/:id/proposals/:pid/apply', async (req) => {
     const { id, pid } = req.params;
     const before = store.schema(id);
-    const fromAi = store.proposals(id).find((p) => p.id === pid)?.source === 'ai';
+    const proposal = store.proposals(id).find((p) => p.id === pid);
+    const fromAi = proposal?.source === 'ai';
+    const total = proposal && proposal.status === 'pending' ? store.proposalChanges(id, proposal).length : 0;
     const applied = store.applyProposal(id, pid, req.body?.selected);
+    // AI가 DB에서 가져온 제안을 모두 승인하면: 그 DB 구조로 기준 시점을 저장한다 (일부만 승인하면 저장하지 않음 — 안 넣은 것이 "ERD에서 바뀜"으로 보이지 않게)
+    const pending = store.takePendingPull(id, pid);
+    if (pending && applied.length === total) {
+      const dialect = getDialect(store.dialect(id));
+      store.saveVersion(id, `DB 가져오기 · ${pending.connectionName}`, 'db');
+      store.setBaseline(id, pending.connectionId, syncedBaseline(pending.db, store.schema(id), { previous: store.baseline(id, pending.connectionId)?.schema, dialect, direction: 'pull' }));
+      if (store.meta(id).dbConnectionId !== pending.connectionId) store.setMeta(id, { dbConnectionId: pending.connectionId });
+    }
     // AI 제안을 승인하면 승인한 것 중 사전에 없는 용어를 사전에 넣고, 아직 표기 기준이 없으면 그 이름들로 기준을 정한다
     const dictionaryAdded = fromAi ? addAiTerms(id, before, store.schema(id)) : [];
     if (fromAi) rememberNamingStyle(id);
@@ -695,6 +705,8 @@ export function registerProjectRoutes(
       placeNewTables(next, plan.diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
     }
     const result = change(id, next, { mode: modeOf(id, body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
+    // 제안으로 쌓이면 DB 구조를 맡아 두었다가, 모두 승인될 때 기준 시점으로 저장한다 (proposals/:pid/apply)
+    if (result.mode === 'propose') store.setPendingPull(id, result.proposalId, { connectionId, connectionName, db: db.schema });
     if (result.mode === 'apply') {
       store.saveVersion(id, `DB 가져오기 · ${connectionName}`, 'db');
       // 반영하지 않은 변경은 기준 시점에 넣지 않는다 (다음에도 "DB에서 바뀜"으로)

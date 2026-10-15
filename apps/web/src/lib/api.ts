@@ -167,7 +167,7 @@ export const projectApi = {
   /** ERD 편집 명령 (열지 않은 프로젝트를 고칠 때 — 사람이 한 편집으로 기록) */
   commands: (id: string, commands: import('@erd/core').Command[]) => request('POST', `/api/projects/${id}/commands`, { commands, source: 'api' }),
   /** DB → ERD: 이 PC에서 읽은 DB 구조를 서버에 넘겨 반영 (apply=false면 미리보기) */
-  pullLocal: (id: string, body: { connectionId: string; connectionName: string; db: IntrospectResult; apply?: boolean; includeRemovals?: boolean; mode?: 'apply' | 'propose'; source?: 'ai' | 'api' }) =>
+  pullLocal: (id: string, body: { connectionId: string; connectionName: string; db: IntrospectResult; apply?: boolean; includeRemovals?: boolean; mode?: 'apply' | 'propose' | undefined; source?: 'ai' | 'api' }) =>
     request<Record<string, unknown>>('POST', `/api/projects/${id}/db/pull-local`, body),
   /** 프로젝트 내용 (열지 않은 프로젝트를 AI 요청으로 다룰 때) */
   get: (id: string) => request<{ meta: { name: string; dialect: DialectId; dbConnectionId?: string | null; aiMode?: 'apply' | 'propose' }; schema: Schema }>('GET', `/api/projects/${id}`),

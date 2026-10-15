@@ -32,7 +32,7 @@ describe('Oracle 구조 읽기', () => {
     expect(oracleType({ DATA_TYPE: 'TIMESTAMP(6) WITH TIME ZONE' })).toEqual({ type: 'TIMESTAMP WITH TIME ZONE', length: '' });
     expect(oracleDefault("'BASIC' \n")).toBe("'BASIC'");
     expect(oracleDefault('NULL ')).toBeNull();
-    expect(fromOracleName('MEMBER_ID')).toBe('member_id');
+    expect(fromOracleName('MEMBER_ID')).toBe('MEMBER_ID'); // 대소문자를 바꾸지 않는다
     expect(fromOracleName('createdAt')).toBe('createdAt');
   });
 
@@ -71,16 +71,18 @@ describe('Oracle 구조 읽기', () => {
       return key ? rows[key] : [];
     };
     const { schema, warnings } = await introspectOracle(query, 'ERD');
-    expect(schema.tables.map((t) => t.name)).toEqual(['member', 'orders']);
+    // DB에 있는 이름 그대로 (대소문자를 바꾸지 않는다)
+    expect(schema.tables.map((t) => t.name)).toEqual(['MEMBER', 'ORDERS']);
     const member = schema.tables[0];
-    expect(member.columns.map((c) => `${c.name}:${c.type}${c.autoIncrement ? ':AI' : ''}`)).toEqual(['member_id:BIGINT:AI', 'email:VARCHAR2', 'is_active:BOOLEAN', 'created_at:TIMESTAMP']);
+    expect(member.columns.map((c) => `${c.name}:${c.type}${c.autoIncrement ? ':AI' : ''}`)).toEqual(['MEMBER_ID:BIGINT:AI', 'EMAIL:VARCHAR2', 'IS_ACTIVE:BOOLEAN', 'CREATED_AT:TIMESTAMP']);
     expect(member.columns[0].defaultValue).toBeNull(); // IDENTITY 내부 시퀀스는 기본값으로 안 가져온다
-    expect(member.primaryKeyName).toBe('pk_member');
-    expect(schema.relations[0]).toMatchObject({ name: 'fk_orders_member', onDelete: 'CASCADE', onUpdate: 'NO ACTION' });
+    expect(member.primaryKeyName).toBe('PK_MEMBER');
+    expect(schema.relations[0]).toMatchObject({ name: 'FK_ORDERS_MEMBER', onDelete: 'CASCADE', onUpdate: 'NO ACTION' });
     expect(warnings).toEqual([]);
     // 함수 기반 인덱스는 식 원문 그대로 가져온다
-    expect(schema.tables.find((t) => t.name === 'orders')!.indexes.find((i) => i.name === 'ix_fn')).toMatchObject({ columnIds: [], expression: 'UPPER("STATUS")' });
+    expect(schema.tables.find((t) => t.name === 'ORDERS')!.indexes.find((i) => i.name === 'IX_FN')).toMatchObject({ columnIds: [], expression: 'UPPER("STATUS")' });
 
+    // 소문자로 만든 ERD(예전에 가져온 프로젝트)와 비교해도 이름 차이는 없다 (Oracle은 따옴표 없는 member를 MEMBER로 저장)
     const plan = planPush(erd(), schema, { dialect: getDialect('oracle') });
     // ERD에는 없는 DB 쪽 식 인덱스만 차이로 나온다
     expect(plan.diff.changes.map((c) => c.summary)).toEqual(['orders 인덱스 삭제 (UPPER("STATUS"))']);
