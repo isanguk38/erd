@@ -17,6 +17,7 @@ import type { Dialect } from './dialects/types';
 import { cloneSchema, type Column, type Schema, type Table } from './model';
 import { alignToCurrent, applyChanges } from './sync';
 import { enumKey } from './enums';
+import { objectKey } from './dbObjects';
 
 export type ChangeOrigin = 'db' | 'erd' | 'conflict' | 'unknown';
 
@@ -94,6 +95,11 @@ export function changeKey(change: Change): string {
       return `e:${enumKey(change.enumType.name)}`;
     case 'alterEnum':
       return `e:${enumKey(change.after.name)}`;
+    case 'createObject':
+    case 'dropObject':
+      return `o:${objectKey(change.object)}`;
+    case 'alterObject':
+      return `o:${objectKey(change.after)}`;
   }
 }
 

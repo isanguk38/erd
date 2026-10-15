@@ -2,6 +2,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import {
+  adoptDbObjectDefinitions,
+  pushedObjectKeys,
   erdTermNotes,
   appliedChanges,
   buildReview,
@@ -594,6 +596,16 @@ export function registerProjectRoutes(
   async function markSynced(id: string, connectionId: string, userId: string, applied: Change[] = [], skipped: Change[] = []) {
     const { db, dialect } = await readDb(id, connectionId, userId);
     const previous = store.baseline(id, connectionId)?.schema;
+    // 내보낸 DB 객체(뷰·함수 등)는 DB가 다시 쓴 모양으로 ERD를 맞춘다 (다음 비교에서 "ERD에서 바뀜"으로 보이지 않게)
+    const adopt = adoptDbObjectDefinitions(store.schema(id), db.schema, pushedObjectKeys(applied));
+    if (adopt.length) {
+      const next = store.schema(id);
+      for (const u of adopt) {
+        const o = next.objects?.find((x) => x.id === u.id);
+        if (o) o.definition = u.definition;
+      }
+      store.setSchema(id, next, 'db');
+    }
     return store.setBaseline(id, connectionId, syncedBaseline(db.schema, store.schema(id), { applied, previous, skipped, dialect, direction: 'push' }));
   }
 

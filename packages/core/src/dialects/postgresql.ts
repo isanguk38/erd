@@ -2,7 +2,7 @@ import { indexName, primaryKeyColumns, relationName, type Column, type EnumType,
 import { quoteExpression, columnNames, limitCount, typeWords, literal, numericRegex, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect, TypeProfile } from './types';
 import { enumAdditions, pgEnumTypeName } from '../enums';
-import { enumAsTypeObject, standardCheck } from '../features';
+import { dbObjectsModule, enumAsTypeObject, standardCheck } from '../features';
 
 const TYPE_MAP: Record<string, string> = {
   DATETIME: 'TIMESTAMP',
@@ -237,6 +237,46 @@ export const postgresql: Dialect = {
   },
 
   features: {
+    // DB 객체: 뷰·구체화 뷰·함수·프로시저·트리거. 함수·프로시저는 CREATE OR REPLACE로 바꾼다 (트리거가 쓰는 함수를 지우지 않게)
+    objects: dbObjectsModule({
+      kinds: ['view', 'materializedView', 'function', 'procedure', 'trigger'],
+      quote: q,
+      drop: {
+        view: (o, q) => `DROP VIEW IF EXISTS ${q(o.name)}`,
+        materializedView: (o, q) => `DROP MATERIALIZED VIEW IF EXISTS ${q(o.name)}`,
+        function: (o, q) => `DROP FUNCTION IF EXISTS ${q(o.name)}`,
+        procedure: (o, q) => `DROP PROCEDURE IF EXISTS ${q(o.name)}`,
+        trigger: (o, q) => `DROP TRIGGER IF EXISTS ${q(o.name)} ON ${q(o.table ?? '')}`,
+      },
+      replaceable: ['function', 'procedure'],
+      templates: {
+        view: (n, t) => `CREATE VIEW ${q(n)} AS
+SELECT *
+FROM ${q(t)}`,
+        materializedView: (n, t) => `CREATE MATERIALIZED VIEW ${q(n)} AS
+SELECT *
+FROM ${q(t)}`,
+        function: (n) => `CREATE OR REPLACE FUNCTION ${q(n)}(p integer)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN p;
+END;
+$$`,
+        procedure: (n) => `CREATE OR REPLACE PROCEDURE ${q(n)}()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NULL;
+END;
+$$`,
+        trigger: (n, t) => `CREATE TRIGGER ${q(n)}
+BEFORE UPDATE ON ${q(t)}
+FOR EACH ROW
+EXECUTE FUNCTION trigger_function_name()`,
+      },
+    }),
     enum: enumAsTypeObject({
       typeName: pgEnumTypeName,
       create: (e) => [`CREATE TYPE ${pgEnumTypeName(e.name)} AS ENUM (${e.values.map((v) => literal(v)).join(', ')})`],

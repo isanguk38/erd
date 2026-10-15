@@ -1073,3 +1073,16 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 /* DB 종류: 프로젝트를 만들 때 정하며 바꿀 수 없다 (표시만) */
 .dbms-chip { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); cursor: default; white-space: nowrap; font-weight: 600; }
 .dbms-fixed { align-self: center; font-weight: 600; }
+
+/* DB 객체 창: 왼쪽 목록 + 오른쪽 DDL */
+.objects-layout { display: grid; grid-template-columns: 240px 1fr; gap: 14px; min-height: 420px; }
+.objects-list { display: flex; flex-direction: column; gap: 8px; border-right: 1px solid var(--border); padding-right: 12px; max-height: 60vh; overflow: auto; }
+.objects-list h5 { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
+.objects-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.objects-list .link-btn { width: 100%; padding: 3px 6px; border-radius: 6px; font-size: 13px; }
+.objects-list .link-btn.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); text-decoration: none; }
+.objects-search, .objects-new { width: 100%; }
+.objects-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.objects-editor__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.objects-ddl { width: 100%; min-height: 340px; resize: vertical; font-size: 12.5px; line-height: 1.5; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; white-space: pre; tab-size: 2; }
+@media (max-width: 720px) { .objects-layout { grid-template-columns: 1fr; } .objects-list { border-right: none; padding-right: 0; max-height: 200px; } }

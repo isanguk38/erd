@@ -1,7 +1,7 @@
 import { checkName, indexName, primaryKeyColumns, relationName, type Column, type Index, type Table } from '../model';
 import { columnNames, limitCount, typeWords, literal, normalizeDefaultCommon, numericRegex, relationTables, sqlComment, typeWithLength, indexKeys, splitTopLevel } from './common';
 import type { Dialect, TypeProfile } from './types';
-import { enumInColumn, standardCheck } from '../features';
+import { dbObjectsModule, enumInColumn, standardCheck } from '../features';
 
 const TYPE_MAP: Record<string, string> = {
   BOOL: 'TINYINT',
@@ -181,6 +181,43 @@ export const mysql: Dialect = {
   },
 
   features: {
+    // DB 객체: 뷰·함수·프로시저·트리거·이벤트 (DEFINER는 저장하지 않는다)
+    objects: dbObjectsModule({
+      kinds: ['view', 'function', 'procedure', 'trigger', 'event'],
+      quote: q,
+      drop: {
+        view: (o, q) => `DROP VIEW IF EXISTS ${q(o.name)}`,
+        function: (o, q) => `DROP FUNCTION IF EXISTS ${q(o.name)}`,
+        procedure: (o, q) => `DROP PROCEDURE IF EXISTS ${q(o.name)}`,
+        trigger: (o, q) => `DROP TRIGGER IF EXISTS ${q(o.name)}`,
+        event: (o, q) => `DROP EVENT IF EXISTS ${q(o.name)}`,
+      },
+      templates: {
+        view: (n, t) => `CREATE VIEW ${q(n)} AS
+SELECT *
+FROM ${q(t)}`,
+        function: (n) => `CREATE FUNCTION ${q(n)}(p INT)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+  RETURN p;
+END`,
+        procedure: (n) => `CREATE PROCEDURE ${q(n)}()
+BEGIN
+  SELECT 1;
+END`,
+        trigger: (n, t) => `CREATE TRIGGER ${q(n)}
+BEFORE INSERT ON ${q(t)}
+FOR EACH ROW
+BEGIN
+  -- SET NEW.column = ...;
+END`,
+        event: (n, t) => `CREATE EVENT ${q(n)}
+ON SCHEDULE EVERY 1 DAY
+DO
+  DELETE FROM ${q(t)} WHERE created_at < NOW() - INTERVAL 30 DAY`,
+      },
+    }),
     enum: enumInColumn,
     // MySQL 8.0.16+: CHECK 삭제는 DROP CHECK
     check: standardCheck(q, { drop: (table, check) => [`ALTER TABLE ${q(table.name)} DROP CHECK ${q(checkName(table, check))}`] }),

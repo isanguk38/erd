@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { readOracleObjects } from './objects';
 import { explainConnectionError } from './errors';
 import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
@@ -200,6 +201,9 @@ export async function introspectOracle(query: OracleQuery, owner: string, option
       }),
     );
   }
+
+  // DB 객체 (뷰·함수·프로시저·트리거·패키지)
+  schema.objects = await readOracleObjects(query, owner, warnings);
 
   return { schema: stabilizeIds(schema), warnings };
 }

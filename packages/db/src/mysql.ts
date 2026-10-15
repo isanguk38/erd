@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { readMysqlObjects } from './objects';
 import { explainConnectionError, guardErrors } from './errors';
 import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, StatementResult } from './types';
@@ -250,6 +251,9 @@ export async function introspectMysql(query: (sql: string, params: unknown[]) =>
       }),
     );
   }
+
+  // DB 객체 (뷰·함수·프로시저·트리거·이벤트)
+  schema.objects = await readMysqlObjects(query, database, warnings);
 
   return { schema: stabilizeIds(schema), warnings };
 }

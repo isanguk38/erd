@@ -24,6 +24,8 @@ interface ProjectInfo { id: string; name: string; dialect: string; tableCount: n
 
 const referentialAction = z.enum(['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']);
 
+const dbObjectKind = z.enum(['view', 'materializedView', 'function', 'procedure', 'trigger', 'event', 'package', 'packageBody']);
+
 const columnSpec = z.object({
   name: z.string().describe('물리명 (예: member_id)'),
   logicalName: z.string().optional().describe('논리명 (예: 회원번호)'),
@@ -116,6 +118,16 @@ const command = z.discriminatedUnion('op', [
     comment: z.string().optional(),
   }),
   z.object({ op: z.literal('dropEnum'), enum: z.string().describe('지울 타입 (쓰던 컬럼은 VARCHAR로 바뀐다)') }),
+  // DB 객체 (뷰·함수·프로시저·트리거·이벤트·패키지): 그 DB 문법의 CREATE 문 그대로. 종류·이름은 DDL에서 읽는다
+  z.object({ op: z.literal('createObject'), definition: z.string().describe('CREATE VIEW / FUNCTION / PROCEDURE / TRIGGER … 전체 DDL (프로젝트 DB 문법)'), comment: z.string().optional() }),
+  z.object({
+    op: z.literal('updateObject'),
+    name: z.string().describe('고칠 객체 이름'),
+    kind: dbObjectKind.optional().describe('같은 이름이 여러 종류일 때'),
+    definition: z.string().optional().describe('새 CREATE 문 전체 (get_db_objects로 지금 DDL을 읽고 고친다)'),
+    comment: z.string().optional(),
+  }),
+  z.object({ op: z.literal('dropObject'), name: z.string(), kind: dbObjectKind.optional() }),
   z.object({
     op: z.literal('moveToArea'),
     area: z.string().describe('옮겨 갈 영역'),
@@ -442,6 +454,28 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       // 영역(화면 구분)만 바꿨으면 설계가 바뀐 게 아니라 검토 안내를 붙이지 않는다
       const areaOnly = commands.every((c) => /Area$/.test(String((c as { op?: string }).op)));
       return text(areaOnly ? result : { ...result, designReview: await reviewReminder(p.id) });
+    }),
+  );
+
+  server.registerTool(
+    'get_db_objects',
+    {
+      title: 'DB 객체 읽기 (뷰·함수·프로시저 등)',
+      description: [
+        '프로젝트의 DB 객체(뷰·구체화 뷰·함수·프로시저·트리거·이벤트·패키지)의 전체 DDL을 읽는다. get_schema의 objects에는 종류·이름만 나온다.',
+        '고칠 때는 이 DDL을 고쳐 edit_schema의 updateObject(definition)로 넣고, 새로 만들 때는 createObject, 지울 때는 dropObject. 그 뒤 db_push로 DB에 반영한다 (바뀐 것만 지웠다 다시 만든다).',
+        'DB에 이미 있는 객체는 화면의 DB에서 가져오기로 ERD에 들어온다. 다룰 수 있는 종류는 DB마다 다르다 (kinds).',
+      ].join(' '),
+      inputSchema: { project: projectArg, kind: dbObjectKind.optional(), names: z.array(z.string()).optional().describe('이 이름들만 (생략하면 전부)') },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async (a: { project: string; kind?: string; names?: string[] }) => {
+      const p = await resolveProject(a.project);
+      const { meta, schema } = await api.request<{ meta: Record<string, unknown>; schema: Schema }>('GET', `/api/projects/${p.id}`);
+      const kinds = getDialect(String(meta.dialect ?? 'mysql') as DialectId).features.objects?.kinds ?? [];
+      const wanted = a.names?.map((n) => n.toLowerCase());
+      const objects = (schema.objects ?? []).filter((o) => (!a.kind || o.kind === a.kind) && (!wanted || wanted.includes(o.name.toLowerCase())));
+      return text({ dialect: meta.dialect, kinds, objects: objects.map(({ id: _id, ...o }) => o) });
     }),
   );
 

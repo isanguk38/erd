@@ -2,6 +2,7 @@ import type { ColumnField, Dialect } from './dialects/types';
 import { columnWarnings, indexWarnings, sqlComment } from './dialects/common';
 import { columnTypeIssues, tableTypeIssues, type TypeIssue } from './typeRules';
 import { enumAdditions, enumKey, enumUsages, resolveEnumColumns, sameEnumValues } from './enums';
+import { DB_OBJECT_LABEL, objectKey, sameDefinition, type DbObject } from './dbObjects';
 import {
   cloneSchema,
   expressionColumns,
@@ -58,6 +59,10 @@ export type Change = ChangeBase &
     | { kind: 'createEnum'; enumType: EnumType }
     | { kind: 'dropEnum'; enumType: EnumType }
     | { kind: 'alterEnum'; before: EnumType; after: EnumType; usages: { table: string; column: Column }[] }
+    // DB 객체 (뷰·함수·프로시저·트리거 등): DDL이 바뀌면 지웠다 다시 만든다 (DB별 방법은 features.objects)
+    | { kind: 'createObject'; object: DbObject }
+    | { kind: 'dropObject'; object: DbObject }
+    | { kind: 'alterObject'; before: DbObject; after: DbObject }
   );
 
 export type ChangeKind = Change['kind'];
@@ -174,6 +179,9 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
   const objects = dialect.features.enum?.kind === 'type';
   const knows = (s: Schema) => Array.isArray(s.enums) || (objects && !s.tables.length);
   if (dialect.features.enum && knows(base) && knows(target)) diffEnums(base, target, changes);
+  // DB 객체: 양쪽 모두 객체 정보를 가질 때만 비교한다 (없는 쪽은 모르는 것 — 예전 앱이 읽은 DB, SQL 붙여넣기 등). 빈 스키마는 "없음"으로 본다
+  const knowsObjects = (s: Schema) => Array.isArray(s.objects) || !s.tables.length;
+  if (dialect.features.objects && knowsObjects(baseInput) && knowsObjects(targetInput)) diffObjects(baseInput.objects ?? [], targetInput.objects ?? [], dialect.features.objects.kinds, changes);
 
   const baseTables = byId(base.tables);
   const targetTables = byId(target.tables);
@@ -255,6 +263,29 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
 }
 
 /** 사용자 정의 타입 비교 (이름으로 맞춘다 — 대소문자·따옴표 무시) */
+function diffObjects(base: DbObject[], target: DbObject[], kinds: DbObject['kind'][], changes: Change[]): void {
+  const usable = (o: DbObject) => kinds.includes(o.kind);
+  const before = new Map(base.filter(usable).map((o) => [objectKey(o), o]));
+  const after = new Map(target.filter(usable).map((o) => [objectKey(o), o]));
+  const label = (o: DbObject) => `${DB_OBJECT_LABEL[o.kind]} ${o.name}${o.table ? ` (${o.table})` : ''}`;
+  for (const [k, o] of after) {
+    const old = before.get(k);
+    if (!old) {
+      changes.push({ kind: 'createObject', id: `createObject:${k}`, category: 'create', tableName: o.table ?? o.name, summary: `${label(o)} 생성`, object: o });
+    } else if (!sameDefinition(old.definition, o.definition)) {
+      changes.push({
+        kind: 'alterObject', id: `alterObject:${k}`, category: 'alter', tableName: o.table ?? o.name, summary: `${label(o)} 변경`,
+        warning: o.kind === 'view' || o.kind === 'materializedView' ? '지웠다 다시 만듭니다 (이 뷰를 쓰는 다른 뷰가 있으면 실패할 수 있음)' : undefined,
+        before: old, after: o,
+      });
+    }
+  }
+  for (const [k, o] of before) {
+    if (after.has(k)) continue;
+    changes.push({ kind: 'dropObject', id: `dropObject:${k}`, category: 'drop', tableName: o.table ?? o.name, summary: `${label(o)} 삭제`, object: o });
+  }
+}
+
 function diffEnums(base: Schema, target: Schema, changes: Change[]): void {
   const before = new Map((base.enums ?? []).map((e) => [enumKey(e.name), e]));
   const after = new Map((target.enums ?? []).map((e) => [enumKey(e.name), e]));

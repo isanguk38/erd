@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, enumOfType, type Column, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { readPostgresObjects } from './objects';
 import { explainConnectionError, guardErrors } from './errors';
 import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
@@ -266,6 +267,9 @@ export async function introspectPostgres(db: Queryable, schemaName: string, opti
       }
     }
   }
+
+  // DB 객체 (뷰·함수·프로시저·트리거)
+  schema.objects = await readPostgresObjects(async (sql, params) => (await db.query(sql, params)).rows, schemaName, warnings);
 
   return { schema: stabilizeIds(schema), warnings };
 }

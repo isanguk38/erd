@@ -164,6 +164,8 @@ export const dbJobApi = {
 
 export const projectApi = {
   list: () => request<ProjectInfo[]>('GET', '/api/projects'),
+  /** ERD 편집 명령 (열지 않은 프로젝트를 고칠 때 — 사람이 한 편집으로 기록) */
+  commands: (id: string, commands: import('@erd/core').Command[]) => request('POST', `/api/projects/${id}/commands`, { commands, source: 'api' }),
   /** 프로젝트 내용 (열지 않은 프로젝트를 AI 요청으로 다룰 때) */
   get: (id: string) => request<{ meta: { name: string; dialect: DialectId; dbConnectionId?: string | null; aiMode?: 'apply' | 'propose' }; schema: Schema }>('GET', `/api/projects/${id}`),
   /** 그 프로젝트의 표준 용어 사전 (없으면 null) */

@@ -3,6 +3,7 @@ import { checkName } from './model';
 import { diffSchemas } from './diff';
 import type { Dialect } from './dialects/types';
 import { emptySchema, relationName, type Index, type Schema, type Table } from './model';
+import { DB_OBJECT_ORDER, type DbObject } from './dbObjects';
 
 export interface Statement {
   changeId: string;
@@ -35,6 +36,16 @@ const PHASE: Record<ChangeKind, number> = {
   addCheck: 9,
   addForeignKey: 10,
   dropTable: 11,
+  // DB 객체: 테이블을 바꾸기 전에 지우고(뷰가 쓰는 컬럼은 바꿀 수 없음), 테이블·외래키를 다 만든 뒤 만든다
+  dropObject: 0.5,
+  alterObject: 10.5,
+  createObject: 10.5,
+};
+
+/** 같은 단계 안에서 DB 객체 순서: 만들 때 함수·프로시저 → 뷰 → 트리거·이벤트, 지울 때는 거꾸로 */
+const objectRank = (o: DbObject, dropping: boolean) => {
+  const i = DB_OBJECT_ORDER.indexOf(o.kind);
+  return (dropping ? DB_OBJECT_ORDER.length - i : i) / 100;
 };
 
 /**
@@ -74,7 +85,20 @@ function statementsFor(change: Change, diff: DiffResult, dialect: Dialect, chose
     case 'createEnum': return dialect.features.enum?.create?.(change.enumType) ?? [];
     case 'dropEnum': return dialect.features.enum?.drop?.(change.enumType) ?? [];
     case 'alterEnum': return dialect.features.enum?.alter?.(change.before, change.after, change.usages) ?? [];
+    case 'createObject': return dialect.features.objects?.create(change.object) ?? [];
+    case 'dropObject': return dialect.features.objects?.drop(change.object) ?? [];
+    case 'alterObject': {
+      const parts = objectAlter(change.before, change.after, dialect);
+      return [...parts.drop, ...parts.create];
+    }
   }
+}
+
+/** DB 객체의 정의를 바꾸는 SQL: 먼저 지울 것과 다시 만들 것 (모듈에 방법이 없으면 지웠다 다시 만든다) */
+function objectAlter(before: DbObject, after: DbObject, dialect: Dialect): { drop: string[]; create: string[] } {
+  const feature = dialect.features.objects;
+  if (!feature) return { drop: [], create: [] };
+  return feature.alter?.(before, after) ?? { drop: feature.drop(before), create: feature.create(after) };
 }
 
 /**
@@ -85,11 +109,16 @@ export function generateStatements(diff: DiffResult, dialect: Dialect, selected?
   const picked = diff.changes.filter((c) => !selected || selected.has(c.id));
   // 계산식이 바뀐 컬럼은 '지우기'를 앞쪽(다른 컬럼 이름 변경·삭제 전)에, '다시 만들기'를 뒤쪽(컬럼 변경 후)에 둔다.
   // MySQL은 계산 컬럼이 쓰는 컬럼을 바꾸거나 지우지 못하게 막기 때문이다.
-  type Step = { change: Change; order: number; phase: number; part?: 'dropGenerated' | 'addGenerated' };
+  type Step = { change: Change; order: number; phase: number; part?: 'dropGenerated' | 'addGenerated' | 'dropObject' | 'createObject' };
   const steps: Step[] = [];
   picked.forEach((change, order) => {
     if (change.kind === 'alterColumn' && change.fields.includes('generated')) {
       steps.push({ change, order, phase: 2.5, part: 'dropGenerated' }, { change, order, phase: 8.5, part: 'addGenerated' });
+    } else if (change.kind === 'alterObject') {
+      // 정의가 바뀐 DB 객체: 지우기는 테이블을 바꾸기 전에, 다시 만들기는 다 바꾼 뒤에
+      steps.push({ change, order, phase: PHASE.dropObject + objectRank(change.before, true), part: 'dropObject' }, { change, order, phase: PHASE.createObject + objectRank(change.after, false), part: 'createObject' });
+    } else if (change.kind === 'createObject' || change.kind === 'dropObject') {
+      steps.push({ change, order, phase: PHASE[change.kind] + objectRank(change.object, change.kind === 'dropObject') });
     } else {
       steps.push({ change, order, phase: PHASE[change.kind] });
     }
@@ -100,7 +129,9 @@ export function generateStatements(diff: DiffResult, dialect: Dialect, selected?
   const statements: Statement[] = [];
   for (const { change, part } of steps) {
     const sqls =
-      part === 'dropGenerated' && change.kind === 'alterColumn'
+      (part === 'dropObject' || part === 'createObject') && change.kind === 'alterObject'
+        ? objectAlter(change.before, change.after, dialect)[part === 'dropObject' ? 'drop' : 'create']
+        : part === 'dropGenerated' && change.kind === 'alterColumn'
         ? dialect.dropColumn(change.table, change.before)
         : part === 'addGenerated' && change.kind === 'alterColumn'
           ? (() => {

@@ -523,4 +523,36 @@ describe('MCP', () => {
     expect((await call('get_db_errors', { project: '오류', include_success: true, limit: 5 })).entries).toHaveLength(2);
     await client.close();
   });
+  it('DB 객체: AI가 뷰·함수를 DDL로 만들고 고치고, get_schema·get_db_objects로 읽는다. 그 DB에 없는 종류는 거절', async () => {
+    const { url } = await start();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args }) as Promise<ToolResult>;
+    const project = JSON.parse(textOf(await call('create_project', { name: '객체', dialect: 'postgresql' })));
+    await current!.app.inject({ method: 'PATCH', url: `/api/projects/${project.id}`, payload: { aiMode: 'apply' } });
+    await call('edit_schema', { project: '객체', commands: [
+      { op: 'createTable', name: 'player', columns: [{ name: 'player_id', type: 'BIGINT', primaryKey: true }, { name: 'score', type: 'INT' }] },
+      { op: 'createObject', definition: 'CREATE VIEW v_top AS SELECT player_id FROM player WHERE score > 10' },
+      { op: 'createObject', definition: 'CREATE OR REPLACE FUNCTION double_it(p integer) RETURNS integer LANGUAGE sql AS $$ SELECT p * 2 $$', comment: '두 배' },
+    ] });
+    let schema = JSON.parse(textOf(await call('get_schema', { project: '객체' })));
+    expect(schema.objects).toEqual([{ kind: 'view', name: 'v_top' }, { kind: 'function', name: 'double_it', comment: '두 배' }]);
+    const r = await call('edit_schema', { project: '객체', commands: [{ op: 'updateObject', name: 'v_top', definition: 'CREATE VIEW v_top AS SELECT player_id FROM player WHERE score > 100' }] });
+    expect(r.isError).toBeFalsy();
+    const objects = JSON.parse(textOf(await call('get_db_objects', { project: '객체', names: ['v_top'] })));
+    expect(objects.kinds).toContain('materializedView');
+    expect(objects.objects[0].definition).toContain('100');
+    // PostgreSQL에는 이벤트가 없다
+    const bad = await call('edit_schema', { project: '객체', commands: [{ op: 'createObject', definition: 'CREATE EVENT ev ON SCHEDULE EVERY 1 DAY DO SELECT 1' }] });
+    expect(bad.isError).toBe(true);
+    // SQL 만들기에도 들어간다 (테이블 뒤에)
+    const sql = await (await fetch(`${url}/api/projects/${project.id}/sql`, { headers: { Authorization: 'Bearer test-token' } })).json() as { script: string };
+    expect(sql.script.indexOf('CREATE TABLE player')).toBeLessThan(sql.script.indexOf('CREATE VIEW v_top'));
+    schema = JSON.parse(textOf(await call('get_schema', { project: '객체' })));
+    expect(schema.objects).toHaveLength(2);
+    await client.close();
+  });
 });

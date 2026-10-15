@@ -46,6 +46,10 @@ function tableIdOf(c: Change): string | undefined {
     case 'createEnum':
     case 'dropEnum':
     case 'alterEnum':
+    // DB 객체(뷰·함수 등)도 테이블이 아니다
+    case 'createObject':
+    case 'dropObject':
+    case 'alterObject':
       return undefined;
     default:
       return c.table.id;

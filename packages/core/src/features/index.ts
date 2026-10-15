@@ -7,6 +7,7 @@
 // 모든 DB에 똑같이 있는 것(테이블·컬럼·관계·주제영역·메모 등)은 모듈로 나누지 않는다.
 
 import type { CheckConstraint, Column, EnumType, Table } from '../model';
+import type { DbObject, DbObjectKind } from '../dbObjects';
 
 /** 사용자 정의 타입 (ENUM) */
 export interface EnumFeature {
@@ -72,6 +73,19 @@ export interface FkOnUpdateFeature {
   actions: ('NO ACTION' | 'RESTRICT' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT')[];
 }
 
+/** DB 객체 (뷰·함수·프로시저·트리거·이벤트·패키지): DDL을 그대로 다룬다 */
+export interface DbObjectsFeature {
+  /** 이 DB에서 다룰 수 있는 종류 */
+  kinds: DbObjectKind[];
+  /** 만들기 (보통 정의 그대로) */
+  create(object: DbObject): string[];
+  drop(object: DbObject): string[];
+  /** 정의가 바뀌었을 때: 먼저 지울 것(drop, 테이블을 바꾸기 전)과 다시 만들 것(create, 테이블을 다 바꾼 뒤). 없으면 지웠다 다시 만든다 */
+  alter?(before: DbObject, after: DbObject): { drop: string[]; create: string[] };
+  /** "새로 만들기"에 넣어 둘 예시 DDL */
+  template(kind: DbObjectKind, name: string, table?: string): string;
+}
+
 export interface DialectFeatures {
   enum?: EnumFeature;
   check?: CheckFeature;
@@ -81,6 +95,7 @@ export interface DialectFeatures {
   generated?: GeneratedFeature;
   onUpdateTimestamp?: OnUpdateTimestampFeature;
   fkOnUpdate?: FkOnUpdateFeature;
+  objects?: DbObjectsFeature;
 }
 
 export type FeatureKey = keyof DialectFeatures;
@@ -95,7 +110,9 @@ export const FEATURE_LABEL: Record<FeatureKey, string> = {
   generated: '계산 컬럼',
   onUpdateTimestamp: 'ON UPDATE CURRENT_TIMESTAMP',
   fkOnUpdate: '외래키 ON UPDATE',
+  objects: 'DB 객체(뷰·함수·프로시저 등)',
 };
 
 export { enumInColumn, enumAsTypeObject } from './enum';
 export { standardCheck } from './check';
+export { dbObjectsModule, trimTerminator } from './objects';

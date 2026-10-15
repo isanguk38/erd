@@ -2,7 +2,9 @@
 // DB로 내보내기는 화면의 "DB로 내보내기"와 같은 순서: 비교 → 안전 검사 → (제안 모드면 사람이 승인) → 실행 → 기록 → 기준 시점.
 
 import {
+  adoptDbObjectDefinitions,
   appliedChanges,
+  pushedObjectKeys,
   dbmsMismatch,
   generateStatements,
   getDialect,
@@ -162,7 +164,15 @@ async function pushJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unkn
     const after = await api.introspect(connection.id);
     const applied = appliedChanges(plan.diff.changes, statements, r.results);
     const skipped = skippedChanges(plan.diff.changes, applied);
-    await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, schema, { applied, previous: baseline?.schema, skipped, dialect, direction: 'push' }));
+    // 내보낸 DB 객체(뷰·함수 등)는 DB가 다시 쓴 모양으로 ERD를 맞춘다 (다음 비교에서 "ERD에서 바뀜"으로 보이지 않게)
+    let erd = schema;
+    const adopt = adoptDbObjectDefinitions(schema, after.schema, pushedObjectKeys(applied));
+    if (adopt.length) {
+      const byId = new Map(schema.objects?.map((o) => [o.id, o]));
+      await projectApi.commands(projectId, adopt.map((u) => ({ op: 'updateObject', name: byId.get(u.id)!.name, kind: byId.get(u.id)!.kind, definition: u.definition })));
+      erd = (await projectApi.get(projectId)).schema;
+    }
+    await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, erd, { applied, previous: baseline?.schema, skipped, dialect, direction: 'push' }));
   }
   if (p.mode === 'apply') hooks.notify(r.ok ? `AI가 ${meta.name}의 변경 ${sql.length}문장을 DB(${connection.name})에 실행했습니다` : `AI가 DB(${connection.name})에 실행하다 실패했습니다 — AI가 원인을 보고 있습니다`);
   return {

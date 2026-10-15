@@ -6,7 +6,7 @@
 // 테스트마다 임시 DB(Oracle은 임시 사용자)를 만들고 끝나면 지운다.
 
 import { afterAll, describe, expect, it } from 'vitest';
-import { addColumn, addIndex, applyCommands, cloneSchema, emptySchema, generateStatements, getDialect, planPush, toLink, type DialectId, type Schema } from '@erd/core';
+import { addColumn, addIndex, adoptDbObjectDefinitions, applyChanges, applyCommands, cloneSchema, emptySchema, generateStatements, getDialect, objectKey, planPull, planPush, syncedBaseline, toLink, type DialectId, type Schema } from '@erd/core';
 import { getConnector, type ConnectionConfig } from '../src';
 import { mariadb, mssql, oracle } from './targets';
 import { typeRuleMismatches } from './typeCases';
@@ -37,6 +37,46 @@ function erd(): Schema {
   ]).schema;
 }
 
+/** DB 객체 왕복 테스트에 쓸 DDL (DB마다 문법이 다르다): 처음 만들 것, 고친 뷰, 새로 만들 함수, 기대하는 종류:이름 */
+const OBJECTS: Record<string, { setup: string[]; view: string; addFunction: string; expected: string[] }> = {
+  mariadb: {
+    setup: [
+      'CREATE VIEW v_orders AS SELECT order_id, amount FROM orders WHERE amount > 10',
+      'CREATE FUNCTION double_it(p INT) RETURNS INT DETERMINISTIC RETURN p * 2',
+      'CREATE PROCEDURE reset_amount() BEGIN UPDATE orders SET amount = 0; END',
+      "CREATE TRIGGER trg_orders BEFORE INSERT ON orders FOR EACH ROW SET NEW.memo = COALESCE(NEW.memo, '')",
+      'CREATE EVENT ev_cleanup ON SCHEDULE EVERY 1 DAY DISABLE DO DELETE FROM orders WHERE amount < 0',
+    ],
+    view: 'CREATE VIEW v_orders AS SELECT order_id, amount FROM orders WHERE amount > 100',
+    addFunction: 'CREATE FUNCTION triple_it(p INT) RETURNS INT DETERMINISTIC RETURN p * 3',
+    expected: ['event:ev_cleanup', 'function:double_it', 'procedure:reset_amount', 'trigger:trg_orders', 'view:v_orders'],
+  },
+  oracle: {
+    setup: [
+      'CREATE OR REPLACE VIEW v_orders AS SELECT order_id, amount FROM orders WHERE amount > 10',
+      'CREATE OR REPLACE FUNCTION double_it(p IN NUMBER) RETURN NUMBER IS BEGIN RETURN p * 2; END;',
+      'CREATE OR REPLACE PROCEDURE reset_amount IS BEGIN UPDATE orders SET amount = 0; END;',
+      'CREATE OR REPLACE TRIGGER trg_orders BEFORE INSERT ON orders FOR EACH ROW BEGIN NULL; END;',
+      'CREATE OR REPLACE PACKAGE pkg_util AS FUNCTION hello RETURN VARCHAR2; END;',
+      "CREATE OR REPLACE PACKAGE BODY pkg_util AS FUNCTION hello RETURN VARCHAR2 IS BEGIN RETURN 'hi'; END; END;",
+    ],
+    view: 'CREATE OR REPLACE VIEW v_orders AS SELECT order_id, amount FROM orders WHERE amount > 100',
+    addFunction: 'CREATE OR REPLACE FUNCTION triple_it(p IN NUMBER) RETURN NUMBER IS BEGIN RETURN p * 3; END;',
+    expected: ['function:double_it', 'package:pkg_util', 'packageBody:pkg_util', 'procedure:reset_amount', 'trigger:trg_orders', 'view:v_orders'],
+  },
+  mssql: {
+    setup: [
+      'CREATE VIEW v_orders AS SELECT order_id, amount FROM orders WHERE amount > 10',
+      'CREATE FUNCTION double_it(@p INT) RETURNS INT AS BEGIN RETURN @p * 2 END',
+      'CREATE PROCEDURE reset_amount AS BEGIN UPDATE orders SET amount = 0 END',
+      'CREATE TRIGGER trg_orders ON orders AFTER INSERT AS BEGIN SET NOCOUNT ON END',
+    ],
+    view: 'CREATE VIEW v_orders AS SELECT order_id, amount FROM orders WHERE amount > 100',
+    addFunction: 'CREATE FUNCTION triple_it(@p INT) RETURNS INT AS BEGIN RETURN @p * 3 END',
+    expected: ['function:double_it', 'procedure:reset_amount', 'trigger:trg_orders', 'view:v_orders'],
+  },
+};
+
 for (const target of [mariadb, oracle, mssql]) {
   const dialect = getDialect(target.id);
   const connector = getConnector(target.id);
@@ -61,6 +101,42 @@ for (const target of [mariadb, oracle, mssql]) {
       const mismatches = await typeRuleMismatches(target.id, async (sqls) => (await connector.execute(config, sqls)).results.find((r) => !r.ok)?.error ?? null);
       expect(mismatches).toEqual([]);
     }, 180000);
+
+    it('DB 객체(뷰·함수·프로시저·트리거 등): 가져오고 → 고쳐 내보내면 → 다시 읽어 0건', async () => {
+      const config = await target.fresh();
+      const objects = OBJECTS[target.id];
+      let schema = erd();
+      expect((await push(config, schema)).result.results.filter((r) => !r.ok)).toEqual([]);
+      const setup = await connector.execute(config, objects.setup);
+      expect(setup.results.filter((r) => !r.ok)).toEqual([]);
+      const read = async () => (await connector.introspect(config)).schema;
+      let db = await read();
+      const names = (s: Schema) => (s.objects ?? []).map((o) => `${o.kind}:${o.name.toLowerCase()}`).sort();
+      expect(names(db)).toEqual(objects.expected);
+      // 가져와서 ERD에 넣으면 차이 없음
+      const pull = planPull(schema, db, { dialect });
+      schema = applyChanges(schema, pull.diff, new Set(pull.diff.changes.filter((c) => c.kind.endsWith('Object')).map((c) => c.id)));
+      let baseline: Schema = syncedBaseline(db, schema);
+      expect(planPush(schema, db, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+      // 뷰 고치기·함수 추가·프로시저 삭제 → 내보내기
+      schema = applyCommands(schema, [
+        { op: 'updateObject', name: 'v_orders', kind: 'view', definition: objects.view },
+        { op: 'createObject', definition: objects.addFunction },
+        { op: 'dropObject', name: 'reset_amount', kind: 'procedure' },
+      ], dialect).schema;
+      const plan = planPush(schema, db, { dialect, baseline });
+      const statements = generateStatements(plan.diff, dialect, new Set(plan.diff.changes.map((c) => c.id)));
+      const result = await connector.execute(config, statements.map((x) => x.sql));
+      expect(result.results.filter((r) => !r.ok)).toEqual([]);
+      const after = await read();
+      expect(names(after)).toEqual([...objects.expected.filter((n) => n !== 'procedure:reset_amount'), 'function:triple_it'].sort());
+      expect(after.objects?.find((o) => o.name.toLowerCase() === 'v_orders')?.definition).toContain('100');
+      const pushed = plan.diff.changes.flatMap((c) => (c.kind === 'createObject' ? [objectKey(c.object)] : c.kind === 'alterObject' ? [objectKey(c.after)] : []));
+      for (const u of adoptDbObjectDefinitions(schema, after, pushed)) schema.objects!.find((o) => o.id === u.id)!.definition = u.definition;
+      baseline = syncedBaseline(after, schema, { applied: plan.diff.changes, previous: baseline, dialect, direction: 'push' });
+      expect(planPush(schema, after, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+      expect(planPull(schema, after, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+    }, 180_000);
 
     it('연결 확인, ERD로 만들고 다시 읽으면 ERD와 같다 (한글 코멘트, IDENTITY, UNIQUE, 기본값, FK CASCADE, 복합 인덱스)', async () => {
       const config = await target.fresh();

@@ -22,6 +22,7 @@ const INSTRUCTIONS = [
   'DB 기능: get_schema의 project.features.notAvailable에 있는 기능(예: Oracle의 ENUM, MySQL의 부분 인덱스)은 그 DB에 없어 명령이 거절됩니다. available에 있는 기능만 씁니다.',
   'DB 종류: 프로젝트의 DB 종류(get_schema의 project.dialect)는 만들 때 정하며 바꿀 수 없습니다. 그 DB에 있는 타입·기능으로만 설계하고, 다른 DB로 변환하지 않습니다. db_pull·db_push는 같은 DB 종류의 연결만 씁니다.',
   '용어 규칙(사전과 같은 검사): AI가 만든 ERD는 그대로 표준 용어 사전에 넣을 수 있어야 합니다. 사전이 없어도 같은 논리명이면 ERD 어디서나 같은 물리명·타입으로 씁니다 (예: 생성일시는 모두 created_at). edit_schema 결과의 terms는 사전 화면의 "ERD에서 만들기" 검사와 같은 규칙으로 걸린 것이니 바로 고칩니다 (같은 뜻이면 맞추고, 다른 뜻이면 논리명을 구분). 논리명이 다르면 물리명은 같아도 됩니다 (예: 결제상태·구독상태 → status).',
+  'DB 객체(뷰·함수·프로시저·트리거 등): get_schema의 objects에 종류·이름이, get_db_objects에 전체 DDL이 있습니다. 프로젝트 DB 문법의 CREATE 문 그대로 edit_schema의 createObject·updateObject(definition)·dropObject로 고치고, db_push로 DB에 반영합니다 (바뀐 것만 지웠다 다시 만들고, 실패하면 diagnosis를 보고 고칩니다). 테이블·컬럼 이름을 바꾸면 그것을 쓰는 뷰·트리거의 DDL도 함께 고칩니다.',
   'DB 오류 분석: 사용자가 DB 가져오기·내보내기 오류를 물으면 get_db_errors로 실패한 SQL·DB 오류 메시지·관련 테이블 정의를 읽고 원인을 쉬운 말로 설명합니다. ERD를 고쳐야 하면 edit_schema로 고치고(또는 방법을 제안하고), 다시 실행은 db_push로 합니다 (제안 모드면 사용자가 앱에서 승인).',
   '논리명·설명: DB comment에는 테이블·컬럼의 논리명(logicalName)이 들어가고, comment(설명)는 ERD에만 저장되는 상세 설명입니다. 논리명은 꼭 넣고, 설명은 필요할 때만 자세히 씁니다.',
   '메모: 사용자가 설계 설명·주의 사항을 캔버스에 남겨 달라고 하면 edit_notes(add)로 메모를 붙입니다 (영역 탭이면 area). 메모는 SQL·DB에 영향이 없습니다.',

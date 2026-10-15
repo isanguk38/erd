@@ -12,6 +12,7 @@ import * as Y from 'yjs';
 import type { AiReview } from './aiReview';
 import { namingSettingValue, readNamingSetting, type NamingSetting } from './naming';
 import type { Area, CheckConstraint, Column, EnumType, Index, Relation, Schema, Table } from './model';
+import type { DbObject, DbObjectKind } from './dbObjects';
 
 const TABLE_FIELDS = ['name', 'logicalName', 'comment', 'color', 'primaryKeyName', 'position', 'order'] as const;
 const COLUMN_FIELDS = ['name', 'logicalName', 'type', 'length', 'nullable', 'primaryKey', 'unique', 'autoIncrement', 'defaultValue', 'onUpdate', 'generated', 'comment'] as const;
@@ -42,6 +43,10 @@ function tablesMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 
 function relationsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return child(rootMap(doc), 'relations', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
+}
+
+function objectsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return child(rootMap(doc), 'objects', () => new Y.Map()) as Y.Map<Y.Map<unknown>>;
 }
 
 function enumsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
@@ -150,6 +155,26 @@ export function writeSchema(doc: Y.Doc, schema: Schema): void {
     });
   }
 
+  // DB 객체(뷰·함수 등): objects를 넘긴 경우에만 맞춘다 (모르는 쪽 — SQL 붙여넣기 등 — 이 저장해도 남는다)
+  if (schema.objects && (schema.objects.length || rootMap(doc).has('objects'))) {
+    const objects = objectsMap(doc);
+    const wanted = new Set(schema.objects.map((o) => o.id));
+    for (const id of [...objects.keys()]) if (!wanted.has(id)) objects.delete(id);
+    schema.objects.forEach((o, order) => {
+      let map = objects.get(o.id);
+      if (!map) {
+        map = new Y.Map();
+        objects.set(o.id, map);
+      }
+      setIfChanged(map, 'kind', o.kind);
+      setIfChanged(map, 'name', o.name);
+      setIfChanged(map, 'table', o.table || undefined);
+      setIfChanged(map, 'definition', o.definition);
+      setIfChanged(map, 'comment', o.comment?.trim() ? o.comment : undefined);
+      setIfChanged(map, 'order', order);
+    });
+  }
+
   // 영역: areas를 넘긴 경우에만 맞춘다 (영역을 모르는 쪽 — DB 가져오기·SQL 붙여넣기 등 — 이 저장해도 영역은 남는다)
   if (schema.areas) {
     const areas = areasMap(doc);
@@ -238,7 +263,21 @@ export function readSchema(doc: Y.Doc): Schema {
   });
   enums.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 
+  const objectsY = root.get('objects') as Y.Map<Y.Map<unknown>> | undefined;
+  const objects: (DbObject & { order: number })[] = [];
+  objectsY?.forEach((map, id) => {
+    const o: DbObject & { order: number } = { id, kind: map.get('kind') as DbObjectKind, name: (map.get('name') as string) ?? '', definition: (map.get('definition') as string) ?? '', order: (map.get('order') as number) ?? 0 };
+    const table = map.get('table') as string | undefined;
+    if (table) o.table = table;
+    const comment = map.get('comment') as string | undefined;
+    if (comment) o.comment = comment;
+    objects.push(o);
+  });
+  objects.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
   const schema: Schema = { tables: tables.map(({ order: _order, ...t }) => t), relations };
+  // ERD 문서는 DB 객체 정보도 늘 가진다 (없으면 []). 객체를 모르는 쪽(SQL 붙여넣기 등)과 구분한다
+  schema.objects = objects.map(({ order: _order, ...o }) => o);
   // ERD 문서는 타입 정보를 늘 가진다 (없으면 []). 비교할 때 '타입을 모르는 쪽'(MySQL DB 등)과 구분한다
   schema.enums = enums.map(({ order: _order, ...e }) => e);
   if (areas.length) schema.areas = areas.map(({ order: _order, ...a }) => a);

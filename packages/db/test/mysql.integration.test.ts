@@ -19,6 +19,8 @@ import {
   alignDb,
   appliedChanges,
   syncedBaseline,
+  adoptDbObjectDefinitions,
+  objectKey,
   type Schema,
 } from '@erd/core';
 import type { ConnectionConfig } from '../src';
@@ -260,6 +262,45 @@ describe.skipIf(!url)('MySQL 실제 서버', () => {
     expect(warnings).toEqual([]);
     expect(read.tables.find((t) => t.name === 'member')!.indexes.find((i) => i.name === 'ix_member_email_lower')).toMatchObject({ columnIds: [], expression: '(lower(`email`))' });
   });
+
+  it('DB 객체(뷰·함수·프로시저·트리거·이벤트): DEFINER 없이 가져오고 → 고쳐 내보내면 → 다시 읽어 0건', async () => {
+    const config = await freshDatabase();
+    const conn = await connect(config);
+    for (const q of [
+      'CREATE TABLE player (player_id BIGINT PRIMARY KEY, nick VARCHAR(20), score INT NOT NULL DEFAULT 0, updated_at DATETIME)',
+      'CREATE VIEW v_top AS SELECT player_id, nick FROM player WHERE score > 10',
+      'CREATE FUNCTION double_it(p INT) RETURNS INT DETERMINISTIC RETURN p * 2',
+      'CREATE PROCEDURE reset_scores() BEGIN UPDATE player SET score = 0; END',
+      'CREATE TRIGGER trg_touch BEFORE UPDATE ON player FOR EACH ROW SET NEW.updated_at = NOW()',
+      'CREATE EVENT ev_cleanup ON SCHEDULE EVERY 1 DAY DISABLE DO DELETE FROM player WHERE score < 0',
+    ]) await conn.query(q);
+    await conn.end();
+    const read = async () => (await mysqlConnector.introspect(config)).schema;
+    let db = await read();
+    expect(db.objects?.map((o) => `${o.kind}:${o.name}${o.table ? `@${o.table}` : ''}`).sort()).toEqual(['event:ev_cleanup', 'function:double_it', 'procedure:reset_scores', 'trigger:trg_touch@player', 'view:v_top']);
+    expect(db.objects?.every((o) => !/DEFINER\s*=/i.test(o.definition))).toBe(true);
+    let erd = applyChanges(emptySchema(), planPull(emptySchema(), db, { dialect }).diff);
+    let baseline: Schema | null = syncedBaseline(db, erd);
+    expect(planPush(erd, db, { dialect, baseline }).diff.changes).toEqual([]);
+
+    erd = applyCommands(erd, [
+      { op: 'updateObject', name: 'v_top', definition: 'CREATE VIEW v_top AS SELECT player_id, nick, score FROM player WHERE score > 100' },
+      { op: 'updateObject', name: 'double_it', definition: 'CREATE FUNCTION double_it(p INT) RETURNS INT DETERMINISTIC RETURN p * 3' },
+      { op: 'createObject', definition: 'CREATE PROCEDURE add_score(IN pid BIGINT)\nBEGIN\n  UPDATE player SET score = score + 1 WHERE player_id = pid;\nEND' },
+      { op: 'dropObject', name: 'ev_cleanup' },
+    ], dialect).schema;
+    const plan = planPush(erd, db, { dialect, baseline });
+    const statements = generateStatements(plan.diff, dialect, new Set(plan.diff.changes.map((c) => c.id)));
+    const result = await mysqlConnector.execute(config, statements.map((x) => x.sql));
+    expect(result.results.filter((x) => !x.ok)).toEqual([]);
+    const after = await read();
+    expect(after.objects?.map((o) => o.name).sort()).toEqual(['add_score', 'double_it', 'reset_scores', 'trg_touch', 'v_top']);
+    const pushed = plan.diff.changes.flatMap((c) => (c.kind === 'createObject' ? [objectKey(c.object)] : c.kind === 'alterObject' ? [objectKey(c.after)] : []));
+    for (const u of adoptDbObjectDefinitions(erd, after, pushed)) erd.objects!.find((o) => o.id === u.id)!.definition = u.definition;
+    baseline = syncedBaseline(after, erd, { applied: plan.diff.changes, previous: baseline, dialect, direction: 'push' });
+    expect(planPush(erd, after, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+    expect(planPull(erd, after, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+  }, 120000);
 
   it('실패하면 그 자리에서 멈추고 몇 문장까지 반영됐는지 알려준다', async () => {
     const config = await freshDatabase();

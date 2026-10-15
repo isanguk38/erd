@@ -12,6 +12,7 @@ import { enumUi } from './enum';
 import { checkUi } from './check';
 import { expressionIndexUi, indexMethodsUi, partialIndexUi } from './indexes';
 import { generatedUi, onUpdateTimestampUi } from './columnTools';
+import { objectsUi } from './objects';
 import type { Mark } from '../components/TextInput';
 
 /** 자리별로 받는 값 */
@@ -45,6 +46,7 @@ const UI: { [K in FeatureKey]?: FeatureSlots<NonNullable<DialectFeatures[K]>> } 
   partialIndex: partialIndexUi,
   generated: generatedUi,
   onUpdateTimestamp: onUpdateTimestampUi,
+  objects: objectsUi,
 };
 
 /** 프로젝트 DB의 기능 모듈 */

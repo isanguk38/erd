@@ -56,8 +56,9 @@ describe('MySQL information_schema 읽기', () => {
       ],
     };
     const query = async (sql: string) => {
-      const table = ['KEY_COLUMN_USAGE', 'STATISTICS', 'COLUMNS', 'TABLES'].find((t) => sql.includes(`information_schema.${t}`))!;
-      return rows[table] as Record<string, any>[];
+      const table = ['KEY_COLUMN_USAGE', 'STATISTICS', 'COLUMNS', 'TABLES'].find((t) => sql.includes(`information_schema.${t}`));
+      // 뷰·루틴·트리거·이벤트(DB 객체) 등 나머지 질의는 없음
+      return (table ? rows[table] : []) as Record<string, any>[];
     };
     const { schema, warnings } = await introspectMysql(query, 'shop');
     expect(warnings).toEqual([]);

@@ -30,6 +30,7 @@ export const mariadb: Dialect = {
     generated: { virtual: true, stored: true },
     onUpdateTimestamp: mysql.features.onUpdateTimestamp,
     fkOnUpdate: mysql.features.fkOnUpdate,
+    objects: mysql.features.objects,
   },
   normalizeDefault(value) {
     if (value === null) return null;

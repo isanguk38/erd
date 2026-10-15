@@ -52,8 +52,8 @@ describe('Yjs 문서', () => {
     const doc = new Y.Doc();
     const schema = shop();
     writeSchema(doc, schema);
-    // 문서에서 읽으면 타입 목록(enums)은 늘 있다 (없으면 [])
-    expect(readSchema(doc)).toEqual({ ...schema, enums: [] });
+    // 문서에서 읽으면 타입 목록(enums)·DB 객체(objects)는 늘 있다 (없으면 [])
+    expect(readSchema(doc)).toEqual({ ...schema, enums: [], objects: [] });
   });
 
   it('두 사람이 같은 테이블의 다른 컬럼을 동시에 고쳐도 둘 다 남는다', () => {

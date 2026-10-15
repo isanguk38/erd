@@ -130,6 +130,8 @@ export interface Schema {
   enums?: EnumType[];
   /** 주제영역 (없으면 영역을 쓰지 않음). areas를 빼고 저장하면 기존 영역은 그대로 둔다 */
   areas?: Area[];
+  /** DB 객체 (뷰·함수·프로시저·트리거·이벤트 등, dbObjects.ts). 없으면(undefined) 모르는 것 — 비교하지 않는다 */
+  objects?: import('./dbObjects').DbObject[];
 }
 
 export function emptySchema(): Schema {

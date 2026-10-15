@@ -9,6 +9,7 @@ import type { Dialect } from './dialects/types';
 import { cloneSchema, findTable, sameExpression, type Column, type Index, type Relation, type Schema, type Table } from './model';
 import { removeColumn, removeTable } from './operations';
 import { canonicalEnumColumns, enumKey } from './enums';
+import { objectKey } from './dbObjects';
 
 const key = (name: string) => name.toLowerCase();
 
@@ -79,6 +80,13 @@ export function alignToCurrent(incomingInput: Schema, currentInput: Schema, opti
     if (!m) continue;
     e.id = m.id;
     if (m.comment) e.comment = m.comment;
+  }
+
+  for (const o of incoming.objects ?? []) {
+    const m = (currentInput.objects ?? []).find((x) => objectKey(x) === objectKey(o));
+    if (!m) continue;
+    o.id = m.id;
+    if (m.comment) o.comment = m.comment;
   }
 
   for (const relation of incoming.relations) {
@@ -218,6 +226,21 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
     const rest = (schema.enums ?? []).filter((e) => enumKey(e.name) !== k);
     const old = (schema.enums ?? []).find((e) => enumKey(e.name) === k);
     schema.enums = change.kind === 'dropEnum' ? rest : [...rest, { ...structuredClone(target), id: old?.id ?? target.id, ...(old?.comment ? { comment: old.comment } : {}) }];
+  }
+
+  // DB 객체 (종류·이름으로 맞춘다. ERD의 id·설명·순서는 그대로)
+  for (const change of changes) {
+    if (change.kind !== 'createObject' && change.kind !== 'dropObject' && change.kind !== 'alterObject') continue;
+    const target = change.kind === 'alterObject' ? change.after : change.object;
+    const k = objectKey(target);
+    const list = schema.objects ?? [];
+    const i = list.findIndex((o) => objectKey(o) === k);
+    if (change.kind === 'dropObject') {
+      if (i >= 0) schema.objects = list.filter((_, j) => j !== i);
+      continue;
+    }
+    const next = { ...structuredClone(target), ...(i >= 0 ? { id: list[i].id, ...(list[i].comment ? { comment: list[i].comment } : {}) } : {}) };
+    schema.objects = i >= 0 ? list.map((o, j) => (j === i ? next : o)) : [...list, next];
   }
 
   // ENUM을 쓰는 컬럼은 ENUM 이름 그대로 ("ApprovalStatus" → ApprovalStatus — DB에서 가져온 타입과 ERD에서 고른 타입이 한 모양으로)

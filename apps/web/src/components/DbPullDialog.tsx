@@ -6,7 +6,7 @@ import { rememberIfInSync, saveVersion, useDialect } from '../lib/hooks';
 import { Modal } from './Modal';
 import { ChangeList, type GroupLabel } from './ChangeList';
 import { ConnectionPicker } from './ConnectionPicker';
-import { BaselineInfo, DbErrorHint, RenamePanel } from './SyncParts';
+import { BaselineInfo, DbErrorHint, ObjectsUnknownNote, RenamePanel } from './SyncParts';
 import { loadModule } from '../lib/appVersion';
 
 const PULL_GROUPS: Record<'create' | 'alter' | 'drop', GroupLabel> = {
@@ -150,6 +150,7 @@ export function DbPullDialog({ onClose, onDone }: { onClose: () => void; onDone:
               <ul>{result.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
             </details>
           )}
+          <ObjectsUnknownNote db={result.schema} erdObjects={current.objects?.length ?? 0} />
           {isEmpty ? (
             <p className="muted">지금 ERD가 비어 있어 DB 구조로 새로 그립니다. 배치는 관계를 보고 자동으로 정합니다.</p>
           ) : allSame ? (

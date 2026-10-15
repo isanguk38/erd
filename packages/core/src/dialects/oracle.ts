@@ -1,7 +1,7 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
 import { quoteExpression, columnNames, literal, numericRegex, typeWords, normalizeDefaultCommon, relationTables, sqlComment, typeWithLength, indexKeys } from './common';
 import type { Dialect, TypeProfile } from './types';
-import { standardCheck } from '../features';
+import { dbObjectsModule, standardCheck } from '../features';
 
 // Oracle 12c 이상 (IDENTITY 컬럼). 따옴표 없는 이름은 Oracle이 대문자로 바꿔 저장하므로,
 // 소문자·대문자로만 된 이름은 따옴표 없이 쓰고 DB에서 읽을 때 소문자로 돌려 ERD 이름과 맞춘다.
@@ -181,6 +181,49 @@ export const oracle: Dialect = {
 
   // ENUM·부분 인덱스·인덱스 방식·외래키 ON UPDATE는 없다 (모듈을 넣지 않는다)
   features: {
+    // DB 객체: 뷰·함수·프로시저·트리거·패키지(명세·본문). 모두 CREATE OR REPLACE로 바꾸고, PL/SQL 끝의 ;는 남긴다
+    objects: dbObjectsModule({
+      kinds: ['view', 'function', 'procedure', 'trigger', 'package', 'packageBody'],
+      quote: q,
+      drop: {
+        view: (o, q) => `DROP VIEW ${q(o.name)}`,
+        function: (o, q) => `DROP FUNCTION ${q(o.name)}`,
+        procedure: (o, q) => `DROP PROCEDURE ${q(o.name)}`,
+        trigger: (o, q) => `DROP TRIGGER ${q(o.name)}`,
+        package: (o, q) => `DROP PACKAGE ${q(o.name)}`,
+        packageBody: (o, q) => `DROP PACKAGE BODY ${q(o.name)}`,
+      },
+      replaceable: ['view', 'function', 'procedure', 'trigger', 'package', 'packageBody'],
+      terminator: (kind) => (kind === 'view' ? 'strip' : 'keep'),
+      templates: {
+        view: (n, t) => `CREATE OR REPLACE VIEW ${q(n)} AS
+SELECT *
+FROM ${q(t)}`,
+        function: (n) => `CREATE OR REPLACE FUNCTION ${q(n)}(p IN NUMBER) RETURN NUMBER IS
+BEGIN
+  RETURN p;
+END;`,
+        procedure: (n) => `CREATE OR REPLACE PROCEDURE ${q(n)} IS
+BEGIN
+  NULL;
+END;`,
+        trigger: (n, t) => `CREATE OR REPLACE TRIGGER ${q(n)}
+BEFORE INSERT ON ${q(t)}
+FOR EACH ROW
+BEGIN
+  NULL;
+END;`,
+        package: (n) => `CREATE OR REPLACE PACKAGE ${q(n)} AS
+  FUNCTION hello RETURN VARCHAR2;
+END;`,
+        packageBody: (n) => `CREATE OR REPLACE PACKAGE BODY ${q(n)} AS
+  FUNCTION hello RETURN VARCHAR2 IS
+  BEGIN
+    RETURN 'hello';
+  END;
+END;`,
+      },
+    }),
     check: standardCheck(q),
     expressionIndex: {
       example: (col) => `UPPER("${col.toUpperCase()}")`,

@@ -25,5 +25,6 @@ export * from './features';
 export * from './enums';
 export * from './dictionary';
 export * from './dbErrors';
+export * from './dbObjects';
 export * from './impact';
 export * from './safety';

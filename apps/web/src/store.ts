@@ -124,6 +124,9 @@ interface State extends LocalPrefs {
   /** 사용자 정의 타입(ENUM) 창: focus — 열자마자 보여 줄 타입, create — 새로 만들 이름 (컬럼 타입 칸에서 연다) */
   enumDialog: { focus?: string; create?: string } | null;
   setEnumDialog: (value: { focus?: string; create?: string } | null) => void;
+  /** DB 객체(뷰·함수·프로시저 등) 창: focus = 고를 객체 id */
+  objectsDialog: { focus?: string } | null;
+  setObjectsDialog: (value: { focus?: string } | null) => void;
   showNotice: (notice: State['notice']) => void;
   /** 다른 사람·AI가 방금 바꾼 테이블 (잠깐 강조) */
   remoteChanges: Record<string, RemoteChange>;
@@ -250,6 +253,8 @@ export const useStore = create<State>()(
         showNotice: (notice) => set({ notice }),
         enumDialog: null,
         setEnumDialog: (enumDialog) => set({ enumDialog }),
+        objectsDialog: null,
+        setObjectsDialog: (objectsDialog) => set({ objectsDialog }),
         searchOpen: false,
         searchQuery: '',
         searchFocus: null,
@@ -373,6 +378,8 @@ export const useStore = create<State>()(
             if (copy.areas) draft.areas = copy.areas;
             // 타입 정보를 가진 스키마(PostgreSQL DB·CREATE TYPE이 든 DDL·ERD)면 타입도 바꾼다
             if (copy.enums) draft.enums = copy.enums;
+            // DB 객체(뷰·함수 등)를 가진 스키마(DB에서 읽은 것)면 객체도 바꾼다
+            if (copy.objects) draft.objects = copy.objects;
           });
           set({ selection: null, selectedTables: [], inspectorOpen: false });
         },

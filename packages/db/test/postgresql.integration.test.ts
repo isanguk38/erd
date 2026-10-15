@@ -4,7 +4,7 @@
 
 import { afterAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
-import { appliedChanges, applyChanges, applyCommands, emptySchema, generateStatements, getDialect, planPull, planPush, skippedChanges, summarizePlan, syncedBaseline, type Schema } from '@erd/core';
+import { adoptDbObjectDefinitions, appliedChanges, applyChanges, applyCommands, emptySchema, generateStatements, getDialect, objectKey, planPull, planPush, skippedChanges, summarizePlan, syncedBaseline, type Schema } from '@erd/core';
 import type { ConnectionConfig } from '../src';
 import { postgresConnector } from '../src/postgresql';
 import { typeRuleMismatches } from './typeCases';
@@ -272,6 +272,58 @@ describe.skipIf(!url)('PostgreSQL 실제 서버', () => {
     s = await status(config, erd, baseline);
     expect(s.summary.db + s.summary.conflict).toBe(0);
     expect(s.changes).toEqual(['타입 LIAR_WINDOW_STATUS 생성 (ENUM OPEN, CLOSED) [erd]', 'legacy 테이블 생성 [erd]']);
+  }, 120000);
+
+  it('DB 객체(뷰·구체화 뷰·함수·프로시저·트리거): 가져오고 → ERD에서 고쳐 → 내보내면 → 다시 읽어 0건', async () => {
+    const config = await freshDatabase();
+    await postgresConnector.execute(config, [
+      'CREATE TABLE player (player_id BIGINT PRIMARY KEY, nick VARCHAR(20), score INT NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ)',
+      'CREATE VIEW v_top AS SELECT player_id, nick FROM player WHERE score > 10',
+      'CREATE MATERIALIZED VIEW mv_score AS SELECT count(*) AS n FROM player',
+      `CREATE FUNCTION touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at := now(); RETURN NEW; END; $$`,
+      'CREATE TRIGGER trg_touch BEFORE UPDATE ON player FOR EACH ROW EXECUTE FUNCTION touch()',
+      `CREATE PROCEDURE reset_scores() LANGUAGE plpgsql AS $$ BEGIN UPDATE player SET score = 0; END; $$`,
+    ]);
+    const read = async () => (await postgresConnector.introspect(config)).schema;
+    let db = await read();
+    expect(db.objects?.map((o) => `${o.kind}:${o.name}${o.table ? `@${o.table}` : ''}`).sort()).toEqual(['function:touch', 'materializedView:mv_score', 'procedure:reset_scores', 'trigger:trg_touch@player', 'view:v_top']);
+    // 빈 ERD로 가져오기 → 차이 0건
+    let erd = applyChanges(emptySchema(), planPull(emptySchema(), db, { dialect }).diff);
+    expect(erd.objects).toHaveLength(5);
+    let baseline: Schema | null = syncedBaseline(db, erd);
+    expect(planPush(erd, db, { dialect, baseline }).diff.changes).toEqual([]);
+
+    // ERD에서: 뷰 고치기(점수 조건), 함수 추가, 프로시저 삭제, 컬럼 타입 변경(뷰가 쓰는 컬럼 — 뷰를 먼저 지워야 바뀐다)
+    erd = applyCommands(erd, [
+      { op: 'updateObject', name: 'v_top', definition: 'CREATE VIEW v_top AS SELECT player_id, nick, score FROM player WHERE score > 100' },
+      { op: 'createObject', definition: `CREATE OR REPLACE FUNCTION double_score(p integer) RETURNS integer LANGUAGE sql AS $$ SELECT p * 2 $$` },
+      { op: 'dropObject', name: 'reset_scores' },
+      { op: 'updateColumn', table: 'player', column: 'nick', changes: { type: 'VARCHAR(50)' } },
+    ], dialect).schema;
+    const plan = planPush(erd, db, { dialect, baseline });
+    const selected = new Set(plan.diff.changes.map((c) => c.id));
+    const statements = generateStatements(plan.diff, dialect, selected);
+    const sql = statements.map((x) => x.sql);
+    // 순서: 뷰 지우기 → 컬럼 변경 → 함수 만들기 → 뷰 다시 만들기
+    expect(sql.findIndex((x) => x.startsWith('DROP VIEW'))).toBeLessThan(sql.findIndex((x) => x.includes('ALTER COLUMN nick')));
+    expect(sql.findIndex((x) => x.includes('double_score'))).toBeLessThan(sql.findIndex((x) => x.startsWith('CREATE VIEW')));
+    const result = await postgresConnector.execute(config, sql);
+    expect(result.results.filter((x) => !x.ok)).toEqual([]);
+    const after = await read();
+    expect(after.objects?.map((o) => o.name).sort()).toEqual(['double_score', 'mv_score', 'touch', 'trg_touch', 'v_top']);
+    expect(after.objects?.find((o) => o.name === 'v_top')?.definition).toContain('100');
+
+    // 내보낸 객체는 DB가 다시 쓴 모양으로 ERD를 맞추면 → 다시 비교해도 0건
+    const pushed = plan.diff.changes.flatMap((c) => (c.kind === 'createObject' ? [objectKey(c.object)] : c.kind === 'alterObject' ? [objectKey(c.after)] : []));
+    for (const u of adoptDbObjectDefinitions(erd, after, pushed)) erd.objects!.find((o) => o.id === u.id)!.definition = u.definition;
+    baseline = syncedBaseline(after, erd, { applied: plan.diff.changes, previous: baseline, dialect, direction: 'push' });
+    expect(planPush(erd, after, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+    expect(planPull(erd, after, { dialect, baseline }).diff.changes.map((c) => c.summary)).toEqual([]);
+
+    // DB에서 직접 바꾸면 가져오기에 "DB에서 바뀜"으로 나온다
+    await postgresConnector.execute(config, ['CREATE OR REPLACE VIEW v_top AS SELECT player_id, nick, score FROM player WHERE score > 500']);
+    const pull = planPull(erd, await read(), { dialect, baseline });
+    expect(pull.diff.changes.map((c) => `${c.summary} [${pull.origins[c.id]}]`)).toEqual(['뷰 v_top 변경 [db]']);
   }, 120000);
 
   it('타입 검사가 실패라고 한 것만 실제로 실패한다', async () => {

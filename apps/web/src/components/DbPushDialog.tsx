@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { appliedChanges, dbmsMismatch, generateStatements, skippedChanges, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
+import { adoptDbObjectDefinitions, pushedObjectKeys, appliedChanges, dbmsMismatch, generateStatements, skippedChanges, getDialect, planPush, safetyChecks, safetyFindings, syncedBaseline, type RenameLink, type SafetyFinding, type Schema } from '@erd/core';
 import { api, projectApi, type Connection, type ExecuteResult, type IntrospectResult } from '../lib/api';
 import { safeFileName } from '../lib/download';
 import { useStore } from '../store';
@@ -7,7 +7,7 @@ import { rememberIfInSync, saveVersion, useDialect, useProjectName } from '../li
 import { Modal } from './Modal';
 import { ConnectionPicker } from './ConnectionPicker';
 import { MigrationPreview } from './MigrationPreview';
-import { BaselineInfo, DbErrorHint, RenamePanel } from './SyncParts';
+import { BaselineInfo, DbErrorHint, ObjectsUnknownNote, RenamePanel } from './SyncParts';
 
 type Step = 'compare' | 'confirm' | 'result';
 
@@ -107,6 +107,9 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
         const applied = diff ? appliedChanges(diff.changes, statements, r.results) : [];
         // 체크를 풀었거나 실패한 변경은 아직 맞추지 않은 것 — 기준 시점에 넣지 않는다
         const skipped = diff ? skippedChanges(diff.changes, applied) : [];
+        // 내보낸 DB 객체(뷰·함수 등)는 DB가 다시 쓴 모양으로 ERD를 맞춘다 (다음 비교에서 "ERD에서 바뀜"으로 보이지 않게)
+        const adopt = adoptDbObjectDefinitions(useStore.getState().schema, after.schema, pushedObjectKeys(applied));
+        if (adopt.length) useStore.getState().edit((d) => adopt.forEach((u) => { const o = d.objects?.find((x) => x.id === u.id); if (o) o.definition = u.definition; }));
         await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, useStore.getState().schema, { links, applied, previous: baseline?.schema, skipped, dialect, direction: 'push' }));
       }
     } catch (e) {
@@ -184,6 +187,7 @@ export function DbPushDialog({ onClose }: { onClose: () => void }) {
       {error && <div className="error-box">{error}</div>}
       {error && logged && <DbErrorHint />}
 
+      {step === 'compare' && db && <ObjectsUnknownNote db={db.schema} erdObjects={schema.objects?.length ?? 0} />}
       {step === 'compare' && plan && plan.diff.changes.length > 0 && <BaselineInfo plan={plan} baselineAt={baseline?.at ?? null} direction="push" />}
       {step === 'compare' && plan && <RenamePanel plan={plan} links={links} onChange={setLinks} />}
       {step === 'compare' && diff && (

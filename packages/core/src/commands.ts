@@ -36,6 +36,7 @@ import { placeNewTables } from './placement';
 import { FEATURE_LABEL, type FeatureKey } from './features';
 import type { Dialect } from './dialects/types';
 import { addEnumType, canonicalEnumColumns, removeEnumType, requireEnum, typeName, updateEnumType } from './enums';
+import { addObject, DB_OBJECT_LABEL, DB_OBJECT_ORDER, findObjectByName, removeObject, updateObject, type DbObjectKind } from './dbObjects';
 
 export interface ColumnSpec {
   name: string;
@@ -92,7 +93,12 @@ export type Command =
   // 사용자 정의 타입 (ENUM). 컬럼 타입 칸에 이 이름을 쓴다
   | { op: 'createEnum'; name: string; values: string[]; comment?: string }
   | { op: 'updateEnum'; enum: string; name?: string; values?: string[]; comment?: string }
-  | { op: 'dropEnum'; enum: string };
+  | { op: 'dropEnum'; enum: string }
+  // DB 객체 (뷰·함수·프로시저·트리거·이벤트·패키지): DDL 그대로. 종류·이름은 DDL에서 읽는다
+  | { op: 'createObject'; definition: string; comment?: string }
+  /** name(+kind): 고칠 객체, definition: 새 DDL (이름을 바꾸면 그 이름으로) */
+  | { op: 'updateObject'; name: string; kind?: DbObjectKind; definition?: string; comment?: string }
+  | { op: 'dropObject'; name: string; kind?: DbObjectKind };
 
 export class CommandError extends Error {
   constructor(public readonly index: number, message: string) {
@@ -142,7 +148,7 @@ export function columnPatch(spec: Partial<ColumnSpec>): Partial<Column> {
   return patch;
 }
 
-function applyOne(schema: Schema, command: Command, created: string[], areaOf: Map<string, string>): string {
+function applyOne(schema: Schema, command: Command, created: string[], areaOf: Map<string, string>, kinds: DbObjectKind[] = DB_OBJECT_ORDER): string {
   switch (command.op) {
     case 'createTable': {
       if (schema.tables.some((t) => eq(t.name, command.name))) throw new Error(`테이블 "${command.name}"이 이미 있습니다`);
@@ -314,6 +320,22 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
       const n = removeEnumType(schema, e.id);
       return `타입 ${e.name} 삭제${n ? ` (쓰던 컬럼 ${n}개는 VARCHAR로)` : ''}`;
     }
+    case 'createObject': {
+      const o = addObject(schema, command.definition, kinds);
+      if (command.comment?.trim()) o.comment = command.comment.trim();
+      return `${DB_OBJECT_LABEL[o.kind]} ${o.name} 생성`;
+    }
+    case 'updateObject': {
+      const o = findObjectByName(schema, command.name, command.kind);
+      const before = `${DB_OBJECT_LABEL[o.kind]} ${o.name}`;
+      updateObject(schema, o.id, { definition: command.definition, comment: command.comment }, kinds);
+      return `${before} 수정${o.name.toLowerCase() !== command.name.toLowerCase() ? ` (→ ${o.name})` : ''}`;
+    }
+    case 'dropObject': {
+      const o = findObjectByName(schema, command.name, command.kind);
+      removeObject(schema, o.id);
+      return `${DB_OBJECT_LABEL[o.kind]} ${o.name} 삭제`;
+    }
     case 'moveToArea': {
       const area = requireArea(schema, command.area);
       const from = command.from ? requireArea(schema, command.from) : undefined;
@@ -344,6 +366,11 @@ export function commandFeatures(command: Command): FeatureKey[] {
     case 'updateEnum':
     case 'dropEnum':
       out.push('enum');
+      break;
+    case 'createObject':
+    case 'updateObject':
+    case 'dropObject':
+      out.push('objects');
       break;
     case 'addCheck':
       out.push('check');
@@ -400,7 +427,7 @@ export function applyCommands(input: Schema, commands: Command[], dialect?: Pick
   const areaOf = new Map<string, string>();
   const messages = commands.map((command, i) => {
     try {
-      return applyOne(schema, command, created, areaOf);
+      return applyOne(schema, command, created, areaOf, dialect?.features.objects?.kinds);
     } catch (e) {
       throw new CommandError(i, e instanceof Error ? e.message : String(e));
     }
@@ -463,6 +490,8 @@ export function describeSchema(schema: Schema) {
     }),
     // 사용자 정의 타입 (ENUM): 컬럼 type에 이 이름을 쓴다
     enums: schema.enums?.length ? schema.enums.map((e) => ({ name: e.name, values: e.values, comment: e.comment || undefined })) : undefined,
+    // DB 객체: 종류·이름만 (DDL 전체는 get_db_objects로 읽는다)
+    objects: schema.objects?.length ? schema.objects.map((o) => ({ kind: o.kind, name: o.name, ...(o.table ? { table: o.table } : {}), ...(o.comment ? { comment: o.comment } : {}) })) : undefined,
     // 주제영역: 이름과 들어 있는 테이블 (화면에서 나눠 보는 탭)
     areas: schema.areas?.length
       ? schema.areas.map((a) => ({ name: a.name, tables: a.tableIds.map((id) => findTable(schema, id)?.name).filter(Boolean) }))

@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import { createCheck, createColumn, createIndex, createRelation, createTable, emptySchema, type ReferentialAction, type Schema, type Table } from '@erd/core';
 import { stabilizeIds } from './stableIds';
+import { readMssqlObjects } from './objects';
 import { explainConnectionError, guardErrors } from './errors';
 import { CHECK_TIMEOUT_MS, countOf, runSafetyChecks } from './safety';
 import type { ConnectionConfig, Connector, ExecuteResult, IntrospectOptions, IntrospectResult, StatementResult } from './types';
@@ -201,6 +202,9 @@ export async function introspectMssql(query: MssqlQuery, schemaName: string, opt
       }),
     );
   }
+
+  // DB 객체 (뷰·함수·프로시저·트리거)
+  schema.objects = await readMssqlObjects(query, schemaName, warnings);
 
   return { schema: stabilizeIds(schema), warnings };
 }

@@ -1,7 +1,7 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
 import { quoteExpression, columnNames, normalizeDefaultCommon, typeWords, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect, TypeProfile } from './types';
-import { standardCheck } from '../features';
+import { dbObjectsModule, standardCheck } from '../features';
 
 // SQL Server 2016 이상. 이름은 [대괄호], 코멘트는 확장 속성(MS_Description),
 // 기본값은 이름이 정해지지 않은 제약조건이라 바꾸거나 지울 때 이름을 찾아 지운다.
@@ -193,6 +193,41 @@ export const mssql: Dialect = {
 
   // ENUM·식 인덱스·인덱스 방식은 없다 (모듈을 넣지 않는다)
   features: {
+    // DB 객체: 뷰·함수·프로시저·트리거 (SQL Server 2016+의 DROP ... IF EXISTS)
+    objects: dbObjectsModule({
+      kinds: ['view', 'function', 'procedure', 'trigger'],
+      quote: q,
+      drop: {
+        view: (o, q) => `DROP VIEW IF EXISTS ${q(o.name)}`,
+        function: (o, q) => `DROP FUNCTION IF EXISTS ${q(o.name)}`,
+        procedure: (o, q) => `DROP PROCEDURE IF EXISTS ${q(o.name)}`,
+        trigger: (o, q) => `DROP TRIGGER IF EXISTS ${q(o.name)}`,
+      },
+      replaceable: ['view', 'function', 'procedure', 'trigger'],
+      templates: {
+        view: (n, t) => `CREATE VIEW ${q(n)} AS
+SELECT *
+FROM ${q(t)}`,
+        function: (n) => `CREATE FUNCTION ${q(n)}(@p INT)
+RETURNS INT
+AS
+BEGIN
+  RETURN @p;
+END`,
+        procedure: (n) => `CREATE PROCEDURE ${q(n)}
+AS
+BEGIN
+  SET NOCOUNT ON;
+END`,
+        trigger: (n, t) => `CREATE TRIGGER ${q(n)}
+ON ${q(t)}
+AFTER INSERT
+AS
+BEGIN
+  SET NOCOUNT ON;
+END`,
+      },
+    }),
     check: standardCheck(q),
     partialIndex: { placeholder: 'WHERE 뒤 조건 (필터 인덱스). 예) deleted_at IS NULL' },
     generated: { virtual: true, stored: true, typed: false },

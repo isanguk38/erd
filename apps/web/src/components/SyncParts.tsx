@@ -1,4 +1,5 @@
-import type { RenameLink, SyncPlan } from '@erd/core';
+import { getDialect, type RenameLink, type Schema, type SyncPlan } from '@erd/core';
+import { useDialect } from '../lib/hooks';
 
 /** 3방향 비교의 기준 시점 안내 */
 export function BaselineInfo({ plan, baselineAt, direction }: { plan: SyncPlan; baselineAt: string | null; direction: 'pull' | 'push' }) {
@@ -56,3 +57,15 @@ export function RenamePanel({ plan, links, onChange }: { plan: SyncPlan; links: 
 export function DbErrorHint() {
   return <p className="muted small">이 오류는 DB 작업 기록에 남았습니다. 연결된 AI에게 "최근 DB 오류 원인 분석해줘"라고 하면 오류 내용·실패한 SQL·관련 테이블을 보고 원인을 찾아 줍니다.</p>;
 }
+
+/** DB 객체(뷰·함수 등)를 다루는 DB인데 DB 쪽에서 객체를 읽지 못했을 때 (예전 설치형 앱·권한): 비교하지 않았다고 알린다 */
+export function ObjectsUnknownNote({ db, erdObjects }: { db: Schema; erdObjects: number }) {
+  const supported = Boolean(getDialect(useDialect()).features.objects);
+  if (!supported || Array.isArray(db.objects)) return null;
+  return (
+    <p className="muted small">
+      ⓘ 이번 비교에는 뷰·함수·프로시저 등 DB 객체가 빠졌습니다{erdObjects ? ` (ERD의 객체 ${erdObjects}개는 그대로)` : ''}. 설치형 앱을 최신 버전으로 업데이트하면 DB 객체도 가져오고 내보낼 수 있습니다.
+    </p>
+  );
+}
+
