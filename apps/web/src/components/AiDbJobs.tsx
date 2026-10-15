@@ -46,7 +46,7 @@ function startLoop() {
           waiting: async () => void (await dbJobApi.update(current.id, { status: 'waiting_approval' }).catch(() => {})),
         });
         await dbJobApi.update(current.id, { status: 'done', result });
-        if (current.kind === 'push' || current.kind === 'saveConnection') refreshDbStatus();
+        if (current.kind === 'push' || current.kind === 'pull' || current.kind === 'saveConnection') refreshDbStatus();
       } catch (e) {
         await dbJobApi.update(current.id, { status: 'failed', error: e instanceof Error ? e.message : String(e) }).catch(() => {});
       }

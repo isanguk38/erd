@@ -671,21 +671,20 @@ export function registerProjectRoutes(
     return { connected: true, connection: cached.name, database: cached.database, checkedAt: new Date(cached.at).toISOString(), baselineAt: baseline?.at ?? null, ...summarizePlan(plan) };
   });
 
-  /** DB → ERD. apply=false면 미리보기만. 기본으로 DB에서 바뀐 것만 반영하고, ERD에서만 바뀐 설계는 되돌리지 않는다 */
-  app.post<{
-    Params: { id: string };
-    Body: { connectionId: string; apply?: boolean; includeRemovals?: boolean; acceptRenames?: boolean | string[]; selected?: string[]; mode?: Mode; source?: Source };
-  }>('/api/projects/:id/db/pull', async (req) => {
-    const { id } = req.params;
-    const { connectionId, apply = false, includeRemovals = false, source = 'api' } = req.body ?? ({} as never);
-    const { saved, config, dialect, db } = await readDb(id, connectionId, req.user.id, { action: 'pull', by: req.user.name });
+  type PullBody = { connectionId: string; apply?: boolean; includeRemovals?: boolean; acceptRenames?: boolean | string[]; selected?: string[]; mode?: Mode; source?: Source };
+
+  /**
+   * DB 구조(db)를 ERD에 반영한다. apply=false면 미리보기만. 기본으로 DB에서 바뀐 것만 반영하고, ERD에서만 바뀐 설계는 되돌리지 않는다.
+   * 반영 결과에 영역에 아직 없는 테이블(unassignedTables)을 알려 준다 (AI가 이어서 주제영역으로 묶게)
+   */
+  async function pullInto(id: string, connectionName: string, db: { schema: Schema; serverVersion: string; warnings: string[] }, body: PullBody) {
+    const { connectionId, apply = false, includeRemovals = false, source = 'api' } = body;
+    const dialect = getDialect(store.dialect(id));
     const current = store.schema(id);
     const baseline = store.baseline(id, connectionId)?.schema;
     const first = planPull(current, db.schema, { dialect, baseline });
-    const plan = planPull(current, db.schema, { dialect, baseline, links: acceptedLinks(first, req.body.acceptRenames) });
-    const selected = new Set(
-      req.body.selected ?? plan.diff.changes.filter((c) => plan.defaultSelected.has(c.id) || (includeRemovals && c.category === 'drop')).map((c) => c.id),
-    );
+    const plan = planPull(current, db.schema, { dialect, baseline, links: acceptedLinks(first, body.acceptRenames) });
+    const selected = new Set(body.selected ?? plan.diff.changes.filter((c) => plan.defaultSelected.has(c.id) || (includeRemovals && c.category === 'drop')).map((c) => c.id));
     if (!apply) return { serverVersion: db.serverVersion, ...describePlan(plan), warnings: db.warnings };
 
     const next = applyChanges(current, plan.diff, selected);
@@ -695,13 +694,31 @@ export function registerProjectRoutes(
     } else {
       placeNewTables(next, plan.diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
     }
-    const result = change(id, next, { mode: modeOf(id, req.body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
+    const result = change(id, next, { mode: modeOf(id, body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
     if (result.mode === 'apply') {
-      store.saveVersion(id, `DB 가져오기 · ${saved.name}`, 'db');
+      store.saveVersion(id, `DB 가져오기 · ${connectionName}`, 'db');
       // 반영하지 않은 변경은 기준 시점에 넣지 않는다 (다음에도 "DB에서 바뀜"으로)
       store.setBaseline(id, connectionId, syncedBaseline(db.schema, store.schema(id), { previous: store.baseline(id, connectionId)?.schema, skipped: skippedChanges(plan.diff.changes, selected), dialect, direction: 'pull' }));
+      if (store.meta(id).dbConnectionId !== connectionId) store.setMeta(id, { dbConnectionId: connectionId });
     }
-    return { ...result, warnings: db.warnings };
+    const after = store.schema(id);
+    const inArea = new Set((after.areas ?? []).flatMap((a) => a.tableIds));
+    const unassignedTables = after.tables.filter((t) => !inArea.has(t.id)).map((t) => t.name);
+    return { ...result, warnings: db.warnings, tableCount: after.tables.length, areas: (after.areas ?? []).map((a) => a.name), unassignedTables };
+  }
+
+  /** DB → ERD (서버가 DB에 접속하는 로컬·자체 설치 모드) */
+  app.post<{ Params: { id: string }; Body: PullBody }>('/api/projects/:id/db/pull', async (req) => {
+    const { id } = req.params;
+    const { saved, db } = await readDb(id, req.body?.connectionId, req.user.id, { action: 'pull', by: req.user.name });
+    return pullInto(id, saved.name, db, req.body ?? ({} as never));
+  });
+
+  /** DB → ERD: 사용자 PC의 앱이 로컬에서 읽은 DB 구조를 받아 반영한다 (웹 서비스는 서버가 DB에 접속하지 않으므로, AI 가져오기도 이 길) */
+  app.post<{ Params: { id: string }; Body: PullBody & { connectionName?: string; db?: { schema: Schema; serverVersion?: string; warnings?: string[] } } }>('/api/projects/:id/db/pull-local', async (req) => {
+    const { db, connectionName = 'DB' } = req.body ?? ({} as never);
+    if (!req.body?.connectionId || !db?.schema || !Array.isArray(db.schema.tables)) throw badRequest('connectionId와 앱이 읽은 DB 구조(db.schema)가 필요합니다');
+    return pullInto(req.params.id, connectionName, { schema: db.schema, serverVersion: db.serverVersion ?? '', warnings: db.warnings ?? [] }, req.body);
   });
 
   /** ERD → DB. execute=false면 실행할 SQL 미리보기. 기본으로 ERD에서 바뀐 것만 실행하고, DB에서만 바뀐 것은 되돌리지 않는다 */

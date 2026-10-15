@@ -841,17 +841,34 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
   server.registerTool(
     'db_pull',
     {
-      title: 'DB에서 ERD 갱신',
+      title: 'DB에서 가져오기',
       description: [
-        '연결한 DB의 구조를 읽어 ERD와 비교한다. apply=false(기본)면 차이만 보여준다.',
-        'apply=true면 ERD에 반영한다 (위치·논리명 유지). DB에 없는 ERD 테이블은 include_removals=true일 때만 지운다.',
+        '연결한 DB의 구조(테이블·컬럼·인덱스·관계·ENUM·뷰·함수 등 DB 객체)를 읽어 ERD와 비교한다. 사용자의 ERD 앱이 사용자 PC에서 로컬로 DB에 접속해 읽는다 (앱이 켜져 있어야 함).',
+        'apply=false(기본)면 차이만 보여준다. apply=true면 ERD에 반영한다 (화면의 DB에서 가져오기와 같은 규칙: DB에서 바뀐 것만, 위치·논리명 유지, 빈 ERD면 자동 배치). DB에 없는 ERD 테이블은 include_removals=true일 때만 지운다.',
+        '제안 모드 프로젝트는 반영이 제안으로 쌓여 사람이 승인한다. connection을 생략하면 프로젝트에 연결된 DB.',
+        '반영 결과의 unassignedTables(아직 주제영역에 없는 테이블)가 많으면 기능별로 createArea·addToArea로 묶고 영역마다 auto_layout(area)한다.',
       ].join(' '),
-      inputSchema: { project: projectArg, connection: z.string().describe('연결 id 또는 이름'), apply: z.boolean().optional(), include_removals: z.boolean().optional(), mode },
+      inputSchema: { project: projectArg, connection: z.string().optional().describe('연결 id 또는 이름 (생략하면 프로젝트에 연결된 DB)'), apply: z.boolean().optional(), include_removals: z.boolean().optional(), mode },
     },
-    safe(async (a: { project: string; connection: string; apply?: boolean; include_removals?: boolean; mode?: string }) => {
+    safe(async (a: { project: string; connection?: string; apply?: boolean; include_removals?: boolean; mode?: string }) => {
       const p = await resolveProject(a.project);
-      const c = await resolveConnection(a.connection);
-      return text(await api.request('POST', `/api/projects/${p.id}/db/pull`, { connectionId: c.id, apply: a.apply, includeRemovals: a.include_removals, mode: a.mode, source: 'ai' }));
+      let r: Record<string, unknown>;
+      if (await serverDb()) {
+        const c = a.connection ? await resolveConnection(a.connection) : null;
+        const { meta } = await api.request<{ meta: Record<string, unknown> }>('GET', `/api/projects/${p.id}`);
+        const connectionId = c?.id ?? (meta.dbConnectionId as string | undefined);
+        if (!connectionId) throw new Error('이 프로젝트에 연결된 DB가 없습니다. connection으로 연결을 고르거나 create_connection으로 만드세요');
+        r = await api.request('POST', `/api/projects/${p.id}/db/pull`, { connectionId, apply: a.apply, includeRemovals: a.include_removals, mode: a.mode, source: 'ai' });
+      } else {
+        const job = await viaApp('pull', { ref: a.connection, apply: Boolean(a.apply), includeRemovals: Boolean(a.include_removals), mode: a.mode }, p.id, 100);
+        r = job.result ?? {};
+        if (r.ok === false) return { ...text({ ...connectFailure(String(r.error)), stage: 'DB 읽기' }), isError: true };
+      }
+      const unassigned = Array.isArray(r.unassignedTables) ? (r.unassignedTables as string[]) : [];
+      const guide = a.apply && r.mode !== 'propose' && unassigned.length >= 6
+        ? `주제영역에 없는 테이블이 ${unassigned.length}개입니다. 이름·관계를 보고 기능별(예: 회원·주문·결제)로 edit_schema의 createArea·addToArea로 묶고, 영역마다 auto_layout(area)로 정리하세요.`
+        : undefined;
+      return text({ ...r, ...(guide ? { guide } : {}) });
     }),
   );
 

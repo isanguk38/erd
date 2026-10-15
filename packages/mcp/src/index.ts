@@ -9,6 +9,7 @@ const INSTRUCTIONS = [
   'FK는 addRelation으로 만들면 자식 테이블에 FK 컬럼이 자동으로 생깁니다. 외래키 이름은 겹치지 않게 자동으로 정해집니다 (fk_자식_부모, 이미 있으면 fk_자식_FK컬럼). check_design에 "외래키 이름 겹침"이 나오면 updateRelation(newName)으로 안내한 이름으로 바꿉니다.',
   '테이블과 컬럼에는 한글 논리명(logicalName)도 함께 넣어 주세요.',
   'DB로 내보내기(db_push): 사용자의 ERD 앱이 DB에 접속해 실행합니다 (앱이 켜져 있어야 함). 프로젝트 AI 모드가 바로 적용이면 묻지 않고 바로 실행되고, 제안 모드면 사용자가 앱에서 SQL을 보고 승인해야 실행됩니다 (승인을 기다리면 db_job_result로 결과 확인). 테이블·타입 삭제(DROP)는 사용자가 원할 때만 include_drop=true로 넣습니다. 실패하면 결과의 failedStatements.diagnosis(원인·조치·누가 고칠지)를 보고, AI가 고칠 수 있는 것은 edit_schema로 고친 뒤 다시 db_push하고, 사람이 해야 하는 것(데이터 정리·DB 확장·권한)은 사용자에게 알립니다.',
+  'DB 작업은 모두 사용자 PC의 ERD 앱이 로컬에서 DB에 접속해 합니다 (사내망·방화벽 안 DB도 PC에서 접속되면 됨, 서버는 DB에 접속하지 않음). 사용자가 접속 정보를 주며 DB를 가져오라고 하면: create_connection(project 지정, 접속 확인 후 저장) → db_pull(apply=true) → 결과의 unassignedTables를 기능별로 createArea·addToArea로 묶고 영역마다 auto_layout(area) → 무엇을 가져왔고 영역을 어떻게 나눴는지 보고합니다. 제안 모드 프로젝트는 가져오기가 제안으로 쌓이니 사용자에게 검토를 부탁합니다.',
   'DB 연결: create_connection·update_connection은 저장하기 전에 항상 실제로 접속해 확인합니다. 실패하면 diagnosis(원인·조치·누가 고칠지)를 보고, AI가 고칠 수 있는 연결 정보(호스트·포트·DB 이름·SSL)는 고쳐 다시 시도하고, 비밀번호·서버 켜기·방화벽·권한처럼 사람이 해야 하는 것은 사용자에게 알립니다. 비밀번호는 추측하지 않고 사용자에게 받습니다. test_connection으로 저장된 연결을 확인할 수 있습니다.',
   '설계 검토: 설계 작업(edit_schema 여러 번)을 마치면 한 번 check_design으로 기본 검사와 지난 AI 검토를 읽고, 직접 설계를 검토해 save_design_review로 오류(error)·경고(warning)·참고(info)를 저장합니다. 명령마다 검토하지 않습니다.',
   '기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토하고 save_design_review의 tables에 그 이름들을 넣습니다 (다른 테이블의 기존 지적은 남음). edit_schema 결과의 designReview에 검토가 필요한 테이블이 나옵니다.',

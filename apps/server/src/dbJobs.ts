@@ -6,7 +6,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 
-export type DbJobKind = 'listConnections' | 'saveConnection' | 'testConnection' | 'push';
+export type DbJobKind = 'listConnections' | 'saveConnection' | 'testConnection' | 'push' | 'pull';
 export type DbJobStatus = 'pending' | 'running' | 'waiting_approval' | 'done' | 'failed';
 
 export interface DbJob {

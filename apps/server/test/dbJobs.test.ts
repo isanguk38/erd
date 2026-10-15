@@ -130,4 +130,42 @@ describe('AI DB 작업은 사용자의 앱이 처리 (웹 서비스)', () => {
     await fetch(`${url}/api/db-jobs/${job!.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'done', result: { connections: [] } }) });
     expect(await created).toMatchObject({ status: 'done', result: { connections: [] } });
   });
+
+  it('DB에서 가져오기: 앱이 PC에서 읽은 구조를 서버가 반영하고, 영역에 없는 테이블을 AI에게 알려 준다', async () => {
+    const { call, url, erd } = await start();
+    const project = JSON.parse(textOf(await call('create_project', { name: '가져오기', dialect: 'postgresql' })));
+    await erd.app.inject({ method: 'PATCH', url: `/api/projects/${project.id}`, payload: { aiMode: 'apply' } });
+    // PC의 앱이 로컬 DB에서 읽은 구조 (테이블 8개 + 뷰)
+    const names = ['member', 'orders', 'order_item', 'product', 'category', 'payment', 'coupon', 'review'];
+    const dbSchema = {
+      tables: names.map((n) => ({ id: `db_t_${n}`, name: n, logicalName: '', comment: '', position: { x: 0, y: 0 }, columns: [{ id: `db_c_${n}.id`, name: `${n}_id`, logicalName: '', type: 'BIGINT', length: '', nullable: false, primaryKey: true, unique: false, autoIncrement: false, defaultValue: null, comment: '' }], indexes: [] })),
+      relations: [],
+      enums: [],
+      objects: [{ id: 'db_o_view:v_sales', kind: 'view', name: 'v_sales', definition: 'CREATE VIEW v_sales AS SELECT 1' }],
+    };
+    const appSide = (async () => {
+      const { job } = (await (await fetch(`${url}/api/db-jobs/next?wait=10`)).json()) as { job: { id: string; kind: string; payload: Record<string, unknown> } };
+      expect(job.kind).toBe('pull');
+      expect(job.payload.apply).toBe(true);
+      const result = await (await fetch(`${url}/api/projects/${project.id}/db/pull-local`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ connectionId: 'c1', connectionName: '로컬 PG', db: { schema: dbSchema, serverVersion: 'PostgreSQL 16', warnings: [] }, apply: true, mode: job.payload.mode, source: 'ai' }),
+      })).json();
+      await fetch(`${url}/api/db-jobs/${job.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'done', result: { ok: true, connection: '로컬 PG', ...result } }) });
+    })();
+    const [r] = await Promise.all([call('db_pull', { project: '가져오기', apply: true }), appSide]);
+    expect(r.isError).toBeFalsy();
+    const body = JSON.parse(textOf(r));
+    expect(body.mode).toBe('apply');
+    expect(body.unassignedTables).toHaveLength(8);
+    expect(body.guide).toContain('createArea');
+    const after = (await erd.app.inject({ method: 'GET', url: `/api/projects/${project.id}` })).json();
+    expect(after.schema.tables).toHaveLength(8);
+    expect(after.schema.objects.map((o: { name: string }) => o.name)).toEqual(['v_sales']);
+    expect(after.meta.dbConnectionId).toBe('c1');
+    // 영역으로 묶으면 unassigned가 줄어든다
+    await call('edit_schema', { project: '가져오기', commands: [{ op: 'createArea', name: '주문', tables: ['orders', 'order_item', 'payment'] }] });
+    const preview = await erd.app.inject({ method: 'POST', url: `/api/projects/${project.id}/db/pull-local`, payload: { connectionId: 'c1', db: { schema: dbSchema }, apply: false } });
+    expect(preview.json().summary.total).toBe(0);
+  });
 });

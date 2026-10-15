@@ -95,7 +95,37 @@ export async function runDbJob(job: DbJob, hooks: JobHooks): Promise<Record<stri
 
     case 'push':
       return pushJob(job, hooks);
+
+    case 'pull':
+      return pullJob(job);
   }
+}
+
+/** DB에서 가져오기: 이 PC의 앱이 로컬에서 DB를 읽고, 반영은 서버가 화면의 가져오기와 같은 규칙으로 한다 */
+async function pullJob(job: DbJob): Promise<Record<string, unknown>> {
+  const p = job.payload;
+  const projectId = job.projectId!;
+  const { meta } = await projectApi.get(projectId);
+  const connection = await findConnection(p.ref as string | undefined, meta.dbConnectionId);
+  const mismatch = dbmsMismatch(meta.dialect, connection.dialect);
+  if (mismatch) throw new Error(mismatch);
+  let db;
+  try {
+    db = await api.introspect(connection.id);
+  } catch (e) {
+    void projectApi.recordDbLog(projectId, connection, { action: 'pull', stage: 'compare', ok: false, error: message(e) });
+    return { ok: false, connection: connection.name, error: message(e) };
+  }
+  const result = await projectApi.pullLocal(projectId, {
+    connectionId: connection.id,
+    connectionName: `${connection.name} (${connection.database})`,
+    db,
+    apply: Boolean(p.apply),
+    includeRemovals: Boolean(p.includeRemovals),
+    mode: p.mode === 'apply' ? 'apply' : 'propose',
+    source: 'ai',
+  });
+  return { ok: true, connection: connection.name, database: connection.database, ...result, ...(Array.isArray(db.schema.objects) ? {} : { note: '이 설치형 앱 버전은 뷰·함수 등 DB 객체를 읽지 못해 테이블만 가져왔습니다 (앱을 업데이트하면 객체도)' }) };
 }
 
 async function pushJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unknown>> {
