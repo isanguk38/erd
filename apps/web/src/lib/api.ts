@@ -148,8 +148,24 @@ export interface AiLogEntry {
   changes: ChangeSummary[];
 }
 
+/** AI(MCP)가 요청한 DB 작업 — 이 앱이 가져가 처리한다 */
+export interface DbJob {
+  id: string;
+  kind: 'listConnections' | 'saveConnection' | 'testConnection' | 'push';
+  projectId?: string;
+  payload: Record<string, unknown>;
+}
+
+export const dbJobApi = {
+  /** 내 다음 작업 (없으면 wait초 기다렸다가 null) */
+  next: (wait = 25) => request<{ job: DbJob | null }>('GET', `/api/db-jobs/next?wait=${wait}`),
+  update: (id: string, patch: { status: 'running' | 'waiting_approval' | 'done' | 'failed'; result?: unknown; error?: string }) => request('POST', `/api/db-jobs/${id}`, patch),
+};
+
 export const projectApi = {
   list: () => request<ProjectInfo[]>('GET', '/api/projects'),
+  /** 프로젝트 내용 (열지 않은 프로젝트를 AI 요청으로 다룰 때) */
+  get: (id: string) => request<{ meta: { name: string; dialect: DialectId; dbConnectionId?: string | null; aiMode?: 'apply' | 'propose' }; schema: Schema }>('GET', `/api/projects/${id}`),
   /** 그 프로젝트의 표준 용어 사전 (없으면 null) */
   dictionary: (id: string) => request<{ dictionary: Dictionary | null }>('GET', `/api/projects/${id}/dictionary`),
   create: (body: { name: string; dialect: DialectId; schema?: Schema }) => request<ProjectInfo>('POST', '/api/projects', body),

@@ -11,6 +11,8 @@ import { VersionsDialog } from './components/VersionsDialog';
 import { DbPullDialog } from './components/DbPullDialog';
 import { DbPushDialog } from './components/DbPushDialog';
 import { DefinitionDialog } from './components/DefinitionDialog';
+import { desktop } from './lib/desktop';
+import { AiDbJobRunner } from './components/AiDbJobs';
 import { AiBanner, AiDialog, AiLogDialog, ProposalsDialog } from './components/AiPanels';
 import { ProjectsPage } from './components/ProjectsPage';
 import { refreshDbStatus } from './lib/hooks';
@@ -126,8 +128,10 @@ export function App() {
   if (me.authEnabled && !me.user) return <LoginPage me={me} onLoggedIn={loadMe} />;
   if (joinToken) return <div className="center-message muted">프로젝트에 참여하는 중…</div>;
   const projectId = hash.match(/^#\/p\/([a-zA-Z0-9-]+)/)?.[1];
-  if (!projectId) return <ProjectsPage />;
-  return <Editor key={projectId} projectId={projectId} />;
+  // AI가 요청한 DB 작업은 DB에 접속할 수 있는 앱(설치형 앱·로컬 모드)이 처리한다
+  const runner = desktop || me.serverDb !== false ? <AiDbJobRunner /> : null;
+  if (!projectId) return <>{runner}<ProjectsPage /></>;
+  return <>{runner}<Editor key={projectId} projectId={projectId} /></>;
 }
 
 function Editor({ projectId }: { projectId: string }) {

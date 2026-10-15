@@ -14,6 +14,8 @@ import { registerDesktopRoutes } from './routes/desktop';
 import { registerOAuthRoutes } from './routes/oauth';
 import { createSyncServer } from './ws';
 import { loadMcpToken, registerMcpRoute } from './mcp';
+import { DbJobQueue } from './dbJobs';
+import { registerDbJobRoutes } from './routes/dbJobs';
 import { atLeast, Auth, DESKTOP_ONLY_MESSAGE, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
 import { FileStorage, type Storage } from './storage';
 
@@ -46,6 +48,8 @@ export interface AppOptions {
    * 배포(로그인) 모드에서는 끄고, DB 연결은 설치형 앱이 사용자 PC에서 처리한다.
    */
   serverDb?: boolean;
+  /** AI DB 작업을 앱이 가져가길 기다리는 시간 (테스트용) */
+  dbJobPickupMs?: number;
 }
 
 
@@ -119,6 +123,7 @@ export function buildApp(options: AppOptions): ErdApp {
   });
   const store = new ConnectionStore(storage, options.secret);
   const serverDb = options.serverDb ?? !auth.enabled;
+  const dbJobs = new DbJobQueue(options.dbJobPickupMs);
   const projects = new ProjectStore(storage);
   const mcpToken = loadMcpToken(storage, options.mcpToken);
 
@@ -240,6 +245,8 @@ export function buildApp(options: AppOptions): ErdApp {
   registerTemplateRoutes(app, storage);
   registerDesktopRoutes(app, options.fetchDesktopRelease);
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
+  // AI가 요청한 DB 작업은 사용자의 앱이 가져가 처리한다 (웹 서비스는 DB에 직접 접속하지 않음)
+  registerDbJobRoutes(app, dbJobs, auth);
   registerMcpRoute(app, { auth, localToken: mcpToken, webUrl: publicUrl });
 
   /** 화면의 "AI 연결" 안내용 */

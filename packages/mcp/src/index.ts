@@ -8,7 +8,8 @@ const INSTRUCTIONS = [
   '작업 순서: list_projects로 프로젝트를 찾고, get_schema로 지금 구조를 확인한 뒤, edit_schema로 고칩니다.',
   'FK는 addRelation으로 만들면 자식 테이블에 FK 컬럼이 자동으로 생깁니다. 외래키 이름은 겹치지 않게 자동으로 정해집니다 (fk_자식_부모, 이미 있으면 fk_자식_FK컬럼). check_design에 "외래키 이름 겹침"이 나오면 updateRelation(newName)으로 안내한 이름으로 바꿉니다.',
   '테이블과 컬럼에는 한글 논리명(logicalName)도 함께 넣어 주세요.',
-  'DB에 실제로 실행하는 db_push(execute=true)는 반드시 사용자에게 SQL을 보여주고 승인을 받은 뒤에만 호출합니다.',
+  'DB로 내보내기(db_push): 사용자의 ERD 앱이 DB에 접속해 실행합니다 (앱이 켜져 있어야 함). 프로젝트 AI 모드가 바로 적용이면 묻지 않고 바로 실행되고, 제안 모드면 사용자가 앱에서 SQL을 보고 승인해야 실행됩니다 (승인을 기다리면 db_job_result로 결과 확인). 테이블·타입 삭제(DROP)는 사용자가 원할 때만 include_drop=true로 넣습니다. 실패하면 결과의 failedStatements.diagnosis(원인·조치·누가 고칠지)를 보고, AI가 고칠 수 있는 것은 edit_schema로 고친 뒤 다시 db_push하고, 사람이 해야 하는 것(데이터 정리·DB 확장·권한)은 사용자에게 알립니다.',
+  'DB 연결: create_connection·update_connection은 저장하기 전에 항상 실제로 접속해 확인합니다. 실패하면 diagnosis(원인·조치·누가 고칠지)를 보고, AI가 고칠 수 있는 연결 정보(호스트·포트·DB 이름·SSL)는 고쳐 다시 시도하고, 비밀번호·서버 켜기·방화벽·권한처럼 사람이 해야 하는 것은 사용자에게 알립니다. 비밀번호는 추측하지 않고 사용자에게 받습니다. test_connection으로 저장된 연결을 확인할 수 있습니다.',
   '설계 검토: 설계 작업(edit_schema 여러 번)을 마치면 한 번 check_design으로 기본 검사와 지난 AI 검토를 읽고, 직접 설계를 검토해 save_design_review로 오류(error)·경고(warning)·참고(info)를 저장합니다. 명령마다 검토하지 않습니다.',
   '기능을 추가했으면 새로 만들거나 고친 테이블과 그 관계 상대만 검토하고 save_design_review의 tables에 그 이름들을 넣습니다 (다른 테이블의 기존 지적은 남음). edit_schema 결과의 designReview에 검토가 필요한 테이블이 나옵니다.',
   '사람이 무시한 항목(check_design에 나오지 않음)은 고치지 않습니다. 검토 항목을 고쳤으면 resolve_design_review로 해결 표시하고, 사용자에게 오류·경고·참고별로 무엇을 고쳤고 무엇을 남겼는지 알려 줍니다.',
@@ -21,7 +22,7 @@ const INSTRUCTIONS = [
   'DB 기능: get_schema의 project.features.notAvailable에 있는 기능(예: Oracle의 ENUM, MySQL의 부분 인덱스)은 그 DB에 없어 명령이 거절됩니다. available에 있는 기능만 씁니다.',
   'DB 종류: 프로젝트의 DB 종류(get_schema의 project.dialect)는 만들 때 정하며 바꿀 수 없습니다. 그 DB에 있는 타입·기능으로만 설계하고, 다른 DB로 변환하지 않습니다. db_pull·db_push는 같은 DB 종류의 연결만 씁니다.',
   '용어 규칙(사전과 같은 검사): AI가 만든 ERD는 그대로 표준 용어 사전에 넣을 수 있어야 합니다. 사전이 없어도 같은 논리명이면 ERD 어디서나 같은 물리명·타입으로 씁니다 (예: 생성일시는 모두 created_at). edit_schema 결과의 terms는 사전 화면의 "ERD에서 만들기" 검사와 같은 규칙으로 걸린 것이니 바로 고칩니다 (같은 뜻이면 맞추고, 다른 뜻이면 논리명을 구분). 논리명이 다르면 물리명은 같아도 됩니다 (예: 결제상태·구독상태 → status).',
-  'DB 오류 분석: 사용자가 DB 가져오기·내보내기 오류를 물으면 get_db_errors로 실패한 SQL·DB 오류 메시지·관련 테이블 정의를 읽고 원인을 쉬운 말로 설명합니다. ERD를 고쳐야 하면 edit_schema로 고치고(또는 방법을 제안하고), 다시 실행은 사람이 화면에서 하거나 승인받은 뒤 db_push로 합니다.',
+  'DB 오류 분석: 사용자가 DB 가져오기·내보내기 오류를 물으면 get_db_errors로 실패한 SQL·DB 오류 메시지·관련 테이블 정의를 읽고 원인을 쉬운 말로 설명합니다. ERD를 고쳐야 하면 edit_schema로 고치고(또는 방법을 제안하고), 다시 실행은 db_push로 합니다 (제안 모드면 사용자가 앱에서 승인).',
   '논리명·설명: DB comment에는 테이블·컬럼의 논리명(logicalName)이 들어가고, comment(설명)는 ERD에만 저장되는 상세 설명입니다. 논리명은 꼭 넣고, 설명은 필요할 때만 자세히 씁니다.',
   '메모: 사용자가 설계 설명·주의 사항을 캔버스에 남겨 달라고 하면 edit_notes(add)로 메모를 붙입니다 (영역 탭이면 area). 메모는 SQL·DB에 영향이 없습니다.',
 ].join('\n');

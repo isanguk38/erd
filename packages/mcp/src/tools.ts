@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { areaSchema, describeMatch, describeSchema, dialects, FEATURE_LABEL, getDialect, type FeatureKey, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { diagnoseDbError, areaSchema, describeMatch, describeSchema, dialects, FEATURE_LABEL, getDialect, type FeatureKey, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -666,10 +666,45 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     }),
   );
 
+  // ── DB 연결·내보내기 ─────────────────────────────
+  // 웹 서비스는 서버가 사용자 PC·사내망 DB에 접속하지 않는다: 이 작업들은 사용자가 열어 둔 ERD 앱(설치형 앱)에 넘겨
+  // 앱이 직접 접속해 처리하고 결과를 돌려준다 (/api/db-jobs). 로컬·자체 설치 서버는 연결 관리를 서버가 바로 한다.
+  let serverDbCache: boolean | null = null;
+  const serverDb = async () => (serverDbCache ??= (await api.request<{ serverDb?: boolean }>('GET', '/api/me')).serverDb !== false);
+  type JobResult = { id: string; status: string; projectId?: string; result?: Record<string, unknown>; error?: string };
+  /** 앱에 작업을 넘기고 끝날 때까지 기다린다 */
+  const viaApp = async (kind: string, payload: Record<string, unknown>, projectId?: string, wait = 100): Promise<JobResult> => {
+    const job = await api.request<JobResult>('POST', '/api/db-jobs', { kind, payload, projectId, wait });
+    if (job.status === 'failed' && !job.result) throw new Error(job.error ?? 'DB 작업이 실패했습니다');
+    return job;
+  };
+  /** 접속 오류에 원인·조치·누가 고칠지를 붙인다 */
+  const connectFailure = (error: string, stage: 'connect' | 'execute' = 'connect') => ({
+    ok: false,
+    error,
+    diagnosis: diagnoseDbError(error, stage) ?? { cause: '알 수 없는 오류입니다 (원문을 보고 판단)', fix: '오류 원문을 사용자에게 보여 주고 확인을 받으세요', actor: 'user' },
+    guide: 'diagnosis.actor가 ai면 연결 정보(호스트·포트·DB 이름·SSL)를 고쳐 update_connection으로 다시 시도하고, user면 무엇을 해야 하는지 사용자에게 알려 주세요. 비밀번호는 추측하지 말고 사용자에게 받으세요.',
+  });
+  const connectionArgs = {
+    name: z.string().describe('연결 이름 (예: 로컬 MySQL)'),
+    dialect: dialectArg,
+    host: z.string(),
+    port: z.number().int(),
+    database: z.string().describe('데이터베이스 이름 (Oracle은 서비스 이름, 예: FREEPDB1)'),
+    user: z.string(),
+    password: z.string().optional().describe('비밀번호 (사용자가 알려 준 것만. 추측하지 않는다)'),
+    schema: z.string().optional().describe('PostgreSQL·SQL Server 스키마 (기본 public·dbo)'),
+    ssl: z.boolean().optional(),
+  };
+  type ConnInput = { name: string; dialect: string; host: string; port: number; database: string; user: string; password?: string; schema?: string; ssl?: boolean };
+
   server.registerTool(
     'list_connections',
-    { title: 'DB 연결 목록', description: '화면에서 등록한 DB 연결 목록 (비밀번호 제외).', inputSchema: {}, annotations: { readOnlyHint: true } },
-    safe(async () => text(await api.request('GET', '/api/connections'))),
+    { title: 'DB 연결 목록', description: '등록한 DB 연결 목록 (비밀번호 제외). 웹 서비스에서는 사용자 PC의 ERD 앱에 저장된 연결을 읽는다 (앱이 켜져 있어야 함).', inputSchema: {}, annotations: { readOnlyHint: true } },
+    safe(async () => {
+      if (await serverDb()) return text(await api.request('GET', '/api/connections'));
+      return text((await viaApp('listConnections', {}, undefined, 30)).result?.connections ?? []);
+    }),
   );
 
   server.registerTool(
@@ -677,25 +712,95 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     {
       title: 'DB 연결 만들기',
       description: [
-        'DB 연결 정보를 저장한다. 저장하기 전에 실제로 접속해 확인한다 (실패하면 저장하지 않는다).',
-        '비밀번호는 서버에 암호화해 저장하고 결과에는 나오지 않는다.',
-        '로컬·자체 설치 서버에서 쓴다. 웹 서비스(배포 서버)는 사용자 PC·사내망 DB에 접속할 수 없어 설치형 앱에서 연결해야 한다.',
+        'DB 연결을 만든다. 저장하기 전에 항상 실제로 접속해 확인하고, 실패하면 저장하지 않고 원인(diagnosis: 원인·조치·누가 고칠지)을 돌려준다.',
+        '비밀번호는 암호화해 저장하고 결과에는 나오지 않는다. 웹 서비스에서는 사용자 PC의 ERD 앱이 접속해 확인·저장한다 (앱이 켜져 있어야 함).',
+        'project를 주면 그 프로젝트의 DB 연결로 정한다 (DB 종류가 같아야 함).',
+      ].join(' '),
+      inputSchema: { ...connectionArgs, project: projectArg.optional() },
+    },
+    safe(async (a: ConnInput & { project?: string }) => {
+      const { project, ...input } = a;
+      const p = project ? await resolveProject(project) : null;
+      if (p && p.dialect !== input.dialect) throw new Error(`프로젝트 ${p.name}은(는) ${p.dialect} 프로젝트입니다. 같은 DB 종류의 연결만 쓸 수 있습니다`);
+      if (await serverDb()) {
+        try {
+          const tested = await api.request<{ serverVersion: string }>('POST', '/api/connections/test', input);
+          const saved = await api.request<{ id: string; name: string }>('POST', '/api/connections', input);
+          if (p) await api.request('PATCH', `/api/projects/${p.id}`, { dbConnectionId: saved.id });
+          return text({ ok: true, connection: saved, serverVersion: tested.serverVersion, linkedProject: p?.name });
+        } catch (e) {
+          return { ...text(connectFailure(e instanceof Error ? e.message : String(e))), isError: true };
+        }
+      }
+      const { password, ...rest } = input;
+      const job = await viaApp('saveConnection', { input: rest, password, projectId: p?.id }, p?.id, 60);
+      const r = job.result ?? {};
+      if (!r.ok) return { ...text(connectFailure(String(r.error ?? job.error))), isError: true };
+      return text({ ...r, linkedProject: p?.name });
+    }),
+  );
+
+  server.registerTool(
+    'update_connection',
+    {
+      title: 'DB 연결 고치기',
+      description: [
+        '이미 있는 DB 연결의 호스트·포트·DB 이름·사용자·비밀번호·SSL 등을 바꾼다. 바꾼 값으로 항상 먼저 접속해 확인하고, 실패하면 바꾸지 않고 원인(diagnosis)을 돌려준다.',
+        '비밀번호를 주지 않으면 저장된 비밀번호를 그대로 쓴다.',
       ].join(' '),
       inputSchema: {
-        name: z.string().describe('연결 이름 (예: 로컬 MySQL)'),
-        dialect: dialectArg,
-        host: z.string(),
-        port: z.number().int(),
-        database: z.string().describe('데이터베이스 이름 (Oracle은 서비스 이름, 예: FREEPDB1)'),
-        user: z.string(),
-        password: z.string().optional(),
-        schema: z.string().optional().describe('PostgreSQL·SQL Server 스키마 (기본 public·dbo)'),
+        connection: z.string().describe('고칠 연결 id 또는 이름'),
+        name: z.string().optional(),
+        host: z.string().optional(),
+        port: z.number().int().optional(),
+        database: z.string().optional(),
+        user: z.string().optional(),
+        password: z.string().optional().describe('새 비밀번호 (사용자가 알려 준 것만)'),
+        schema: z.string().optional(),
+        ssl: z.boolean().optional(),
       },
     },
-    safe(async (input: { name: string; dialect: string; host: string; port: number; database: string; user: string; password?: string; schema?: string }) => {
-      const tested = await api.request<{ serverVersion: string }>('POST', '/api/connections/test', input);
-      const saved = await api.request<{ id: string; name: string }>('POST', '/api/connections', input);
-      return text({ ...saved, serverVersion: tested.serverVersion });
+    safe(async (a: { connection: string } & Partial<ConnInput>) => {
+      const { connection, password, ...changes } = a;
+      if (await serverDb()) {
+        const c = await resolveConnection(connection);
+        const input = { ...(c as unknown as ConnInput), ...changes, ...(password ? { password } : {}) };
+        try {
+          const tested = await api.request<{ serverVersion: string }>('POST', '/api/connections/test', { ...input, id: c.id });
+          const saved = await api.request('PUT', `/api/connections/${c.id}`, input);
+          return text({ ok: true, connection: saved, serverVersion: tested.serverVersion });
+        } catch (e) {
+          return { ...text(connectFailure(e instanceof Error ? e.message : String(e))), isError: true };
+        }
+      }
+      const job = await viaApp('saveConnection', { ref: connection, input: changes, password }, undefined, 60);
+      const r = job.result ?? {};
+      if (!r.ok) return { ...text(connectFailure(String(r.error ?? job.error))), isError: true };
+      return text(r);
+    }),
+  );
+
+  server.registerTool(
+    'test_connection',
+    {
+      title: 'DB 연결 확인',
+      description: '저장된 DB 연결로 실제로 접속해 본다. 실패하면 원인(diagnosis: 원인·조치·누가 고칠지)을 돌려준다.',
+      inputSchema: { connection: z.string().describe('연결 id 또는 이름') },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async (a: { connection: string }) => {
+      if (await serverDb()) {
+        const c = await resolveConnection(a.connection);
+        try {
+          const tested = await api.request<{ serverVersion: string }>('POST', '/api/connections/test', { ...(c as unknown as ConnInput), id: c.id });
+          return text({ ok: true, connection: c.name, serverVersion: tested.serverVersion });
+        } catch (e) {
+          return { ...text(connectFailure(e instanceof Error ? e.message : String(e))), isError: true };
+        }
+      }
+      const r = (await viaApp('testConnection', { ref: a.connection }, undefined, 40)).result ?? {};
+      if (!r.ok) return { ...text(connectFailure(String(r.error))), isError: true };
+      return text(r);
     }),
   );
 
@@ -716,36 +821,77 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     }),
   );
 
+  /** 내보내기 결과를 AI가 바로 조치할 수 있게: 실패한 문장마다 원인·조치·누가 고칠지 + 관련 테이블 정의 */
+  const pushReport = async (projectId: string, job: JobResult) => {
+    const r = (job.result ?? {}) as {
+      executed?: boolean; ok?: boolean; rolledBack?: boolean; appliedCount?: number;
+      results?: { sql: string; ok: boolean; skipped?: boolean; error?: string }[]; error?: string;
+    };
+    if (job.status === 'waiting_approval' || job.status === 'running' || job.status === 'pending') {
+      return text({ status: job.status, jobId: job.id, message: '사용자가 ERD 앱에서 실행을 승인하기를 기다리고 있습니다. 잠시 뒤 db_job_result로 결과를 확인하세요.' });
+    }
+    if (r.error && !r.results) {
+      // 비교 단계(DB 읽기)에서 실패
+      return { ...text({ ...connectFailure(r.error, 'connect'), stage: 'DB 읽기·비교' }), isError: true };
+    }
+    const failed = (r.results ?? []).filter((x) => !x.ok && !x.skipped);
+    if (!failed.length) return text(r);
+    const { schema } = await api.request<{ schema: Schema }>('GET', `/api/projects/${projectId}`);
+    return {
+      ...text({
+        ...r,
+        failedStatements: failed.map((x) => ({ sql: x.sql, error: x.error, diagnosis: diagnoseDbError(x.error ?? '', 'execute') })),
+        relatedTables: relatedSchema(schema, failed.map((x) => `${x.sql}\n${x.error ?? ''}`).join('\n')),
+        guide: [
+          r.rolledBack ? 'DB는 실행 전 상태로 되돌려졌습니다.' : r.appliedCount ? `앞의 ${r.appliedCount}문장은 DB에 반영된 채 멈췄습니다 (다시 실행하면 남은 변경만 나옴).` : '',
+          'diagnosis.actor가 ai면 ERD를 고쳐(edit_schema) 다시 db_push 하세요. user면(데이터 정리·확장 설치·권한 등) 사용자에게 무엇을 해야 하는지 알려 주세요. 고친 것과 남은 것을 사용자에게 보고합니다.',
+        ].filter(Boolean).join(' '),
+      }),
+      isError: true,
+    };
+  };
+
   server.registerTool(
     'db_push',
     {
-      title: 'ERD를 DB에 반영',
+      title: 'ERD를 DB에 반영 (DB로 내보내기)',
       description: [
-        'ERD와 DB를 비교해 바뀐 부분만 실행할 SQL(CREATE/ALTER/INDEX/FK)을 만든다. execute=false(기본)면 SQL만 보여준다.',
-        '중요: execute=true로 실행하기 전에 반드시 SQL을 사용자에게 보여주고 명시적인 승인을 받는다.',
-        '실행하려면 confirm_database에 데이터베이스 이름을 넣어야 하고, 프로젝트에서 "AI의 DB 실행 허용"이 켜져 있어야 한다.',
-        '테이블 삭제(DROP)는 include_drop=true일 때만 포함한다.',
+        'ERD와 DB를 비교해 바뀐 부분만 SQL(CREATE/ALTER/INDEX/FK)로 DB에 실행한다. 사용자의 ERD 앱이 DB에 접속해 화면의 "DB로 내보내기"와 같은 순서로 처리한다 (앱이 켜져 있어야 함).',
+        '프로젝트 AI 모드가 바로 적용이면 묻지 않고 바로 실행하고, 제안 모드면 사용자가 앱에서 SQL을 보고 승인해야 실행한다 (승인을 기다리면 jobId를 주니 db_job_result로 확인).',
+        '실행 전 안전 검사(NULL·중복·긴 값 등 지금 데이터로 실패할 변경)가 걸리면 실행하지 않고 findings를 돌려준다. 테이블·타입 삭제(DROP)는 include_drop=true일 때만 넣는다.',
+        '실패하면 실패한 SQL마다 원인·조치·누가 고칠지(diagnosis)와 관련 테이블 정의(relatedTables)를 돌려준다: AI가 고칠 수 있는 것은 edit_schema로 고치고 다시 db_push, 사람이 해야 하는 것은 사용자에게 알린다.',
+        'dry_run=true면 실행하지 않고 실행할 SQL만 보여 준다.',
       ].join(' '),
       inputSchema: {
         project: projectArg,
-        connection: z.string().describe('연결 id 또는 이름'),
-        execute: z.boolean().optional(),
-        include_drop: z.boolean().optional(),
-        confirm_database: z.string().optional(),
+        connection: z.string().optional().describe('연결 id 또는 이름 (생략하면 프로젝트에 연결된 DB)'),
+        include_drop: z.boolean().optional().describe('테이블·타입 삭제(DROP)도 실행 (기본 false)'),
+        dry_run: z.boolean().optional(),
       },
       annotations: { destructiveHint: true },
     },
-    safe(async (a: { project: string; connection: string; execute?: boolean; include_drop?: boolean; confirm_database?: string }) => {
+    safe(async (a: { project: string; connection?: string; include_drop?: boolean; dry_run?: boolean }) => {
       const p = await resolveProject(a.project);
-      const c = await resolveConnection(a.connection);
-      const r = await api.request<{ script: string; changes: unknown[]; result?: unknown; database: string }>('POST', `/api/projects/${p.id}/db/push`, {
-        connectionId: c.id,
-        execute: a.execute,
-        includeDrop: a.include_drop,
-        confirmDatabase: a.confirm_database,
-        source: 'ai',
-      });
-      return text({ database: r.database, changes: r.changes, sql: r.script || '-- 실행할 것 없음 (DB와 ERD가 같음)', result: r.result });
+      const { meta } = await api.request<{ meta: Record<string, unknown> }>('GET', `/api/projects/${p.id}`);
+      const mode = meta.aiMode === 'apply' ? 'apply' : 'propose';
+      const job = await viaApp('push', { ref: a.connection, includeDrop: Boolean(a.include_drop), dryRun: Boolean(a.dry_run), mode }, p.id, 100);
+      return pushReport(p.id, job);
+    }),
+  );
+
+  server.registerTool(
+    'db_job_result',
+    {
+      title: 'DB 작업 결과 확인',
+      description: '승인을 기다리던 db_push 등 DB 작업의 결과를 확인한다 (최대 100초 기다림).',
+      inputSchema: { job: z.string().describe('jobId') },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async (a: { job: string }) => {
+      const job = await api.request<JobResult>('GET', `/api/db-jobs/${encodeURIComponent(a.job)}?wait=100`);
+      if (job.status === 'failed' && !job.result) return { ...text({ ...job, ...(job.error ? { diagnosis: diagnoseDbError(job.error, 'execute') } : {}) }), isError: true };
+      if (job.projectId) return pushReport(job.projectId, job);
+      return text(job.status === 'done' ? job.result : job);
     }),
   );
 

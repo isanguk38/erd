@@ -231,6 +231,8 @@ type Grant = Awaited<ReturnType<typeof authApi.oauthGrants>>[number];
 
 /** 연결된 AI 목록 (로그인으로 연결한 앱, 예전 방식 토큰). 끊으면 그 AI는 더 이상 ERD를 쓸 수 없다 */
 function AiConnections() {
+  const me = useStore((s) => s.me?.user);
+  const account = me ? `${me.name || me.login}${me.login && me.name !== me.login ? ` (@${me.login})` : ''}` : '';
   const [grants, setGrants] = useState<Grant[]>([]);
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
   const load = () => {
@@ -248,7 +250,9 @@ function AiConnections() {
         <li key={g.id}>
           <b>{g.clientName}</b>
           <span className="tag">로그인</span>
-          <span className="muted small">{date(g.createdAt)} 연결{g.lastUsedAt ? ` · ${date(g.lastUsedAt)} 사용` : ''}</span>
+          {/* 같은 앱으로 여러 번(다른 PC 등) 연결하면 번호로 구분한다 */}
+          {grants.filter((x) => x.clientName === g.clientName).length > 1 && <span className="tag">#{grants.filter((x) => x.clientName === g.clientName).length - grants.filter((x) => x.clientName === g.clientName).indexOf(g)}</span>}
+          <span className="muted small">{account && `${account} · `}{date(g.createdAt)} 연결{g.lastUsedAt ? ` · ${date(g.lastUsedAt)} 사용` : ' · 아직 안 씀'}</span>
           <button
             className="btn btn-sm btn-danger"
             onClick={async () => {
@@ -287,6 +291,7 @@ export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () 
   const projectId = useStore((s) => s.projectId)!;
   const meta = useStore((s) => s.meta);
   const role = useStore((s) => s.role);
+  const meName = useStore((s) => s.me?.user?.name || s.me?.user?.login || '');
   // 서버가 DB에 접속하는 환경(로컬·자체 설치)에서만 AI가 DB에 실행할 수 있다. 웹 서비스는 설치형 앱에서 사람이 실행한다.
   const serverDb = useStore((s) => s.me?.serverDb !== false);
   const [info, setInfo] = useState<{ authEnabled: boolean; url: string; token: string | null; serverUrl: string; mcpCommand: string[] } | null>(null);
@@ -341,14 +346,11 @@ export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () 
             </div>
           </label>
         </div>
-        {serverDb ? (
-          <label className="check" title={role !== 'owner' ? '프로젝트 소유자만 바꿀 수 있습니다' : ''}>
-            <input type="checkbox" disabled={role !== 'owner'} checked={Boolean(meta.aiAllowDbExecute)} onChange={(e) => projectApi.update(projectId, { aiAllowDbExecute: e.target.checked })} />
-            AI가 DB에 SQL을 실행하도록 허용 (기본: 끔 — 꺼져 있으면 AI는 SQL 미리보기까지만 할 수 있습니다. 소유자만 변경)
-          </label>
-        ) : (
-          <p className="muted small">AI는 설계와 SQL 만들기까지 합니다. DB에 실행하는 것은 설치형 앱의 "DB로 내보내기"에서 사람이 직접 합니다.</p>
-        )}
+        <p className="muted small">
+          <b>DB 연결·DB로 내보내기</b>: AI가 요청하면 이 계정으로 켜 둔 ERD 앱이 DB에 접속해 처리합니다 (연결은 저장 전에 항상 접속해 확인).
+          {meta.aiMode === 'propose' ? ' 제안 모드라 DB로 내보내기는 앱에 뜨는 승인 창에서 SQL을 보고 승인해야 실행됩니다.' : ' 바로 적용 모드라 DB로 내보내기도 묻지 않고 바로 실행됩니다 (테이블 삭제는 요청할 때만).'}
+          {' '}실패하면 AI가 원인을 보고 고칠 수 있는 것은 고치고, 사람이 해야 할 것은 알려 줍니다.
+        </p>
         {meta.aiMode !== 'propose' && (
           <button className="btn btn-sm" onClick={onOpenLog}>AI가 바로 적용한 변경 내용 보기</button>
         )}
@@ -382,7 +384,7 @@ export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () 
               <li>브라우저가 열리면 ERD에 로그인하고 <b>허용</b>을 누릅니다. 데스크톱 앱은 이어서 <b>다시 연결</b>을 누르세요.</li>
             </ol>
             <p className="muted small">
-              MCP 기능이 바뀌어 새 도구가 필요하면 같은 방법(<code>/mcp</code> → erd → 재인증)으로 다시 로그인하세요. 같은 앱은 연결이 새로 쌓이지 않고 기존 연결을 덮어씁니다.
+              MCP 기능이 바뀌어 새 도구가 필요하면 같은 방법(<code>/mcp</code> → erd → 재인증)으로 다시 로그인하세요. 다시 로그인하거나 다른 PC에서 연결해도 기존 연결은 끊기지 않고 따로 남습니다 (안 쓰는 연결은 아래 "연결된 AI"에서 끊으세요).
             </p>
           </section>
           <section className="ai-section">
@@ -392,7 +394,9 @@ export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () 
           </section>
           <section className="ai-section">
             <h4>연결된 AI</h4>
-            <p className="muted small">AI는 나(이 계정)가 볼 수 있는 프로젝트만 다룹니다. 필요 없는 연결은 끊으세요.</p>
+            <p className="muted small">
+              AI 연결은 사람마다 따로입니다. 초대받은 사람도 위 방법으로 <b>자기 계정</b>으로 로그인하면 자기 연결(토큰)이 따로 생기고, 그 사람의 권한(편집·보기)대로만 프로젝트를 다룹니다. 아래는 <b>{meName}</b> 계정의 연결입니다.
+            </p>
             <AiConnections />
           </section>
         </>
@@ -419,7 +423,7 @@ export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () 
       <section className="ai-section">
         <h4>이렇게 말해 보세요</h4>
         <ul className="examples">
-          {/* MCP 도구로 실제 할 수 있는 것만 (edit_schema · check_design/save_design_review · diff_versions/export_sql · export_definition_excel · lookup_dictionary · edit_notes · get_db_errors · db_pull) */}
+          {/* MCP 도구로 실제 할 수 있는 것만 (edit_schema · check_design/save_design_review · diff_versions/export_sql · export_definition_excel · lookup_dictionary · edit_notes · get_db_errors · db_push · create_connection · db_pull) */}
           <li>"{meta.name} 프로젝트에 쿠폰 기능 테이블 설계해줘. 회원과 연결하고 한글 논리명도 넣어줘"</li>
           <li>"{meta.name} 설계 검토해서 오류·경고·참고로 정리해줘"</li>
           <li>"주문 테이블 컬럼 구성을 보고 필요한 인덱스를 추천해서 추가해줘"</li>
@@ -428,6 +432,8 @@ export function AiDialog({ onClose, onOpenProposals, onOpenLog }: { onClose: () 
           <li>"표준 용어 사전대로 회원 테이블 컬럼 이름이랑 타입 맞춰줘"</li>
           <li>"이 프로젝트 이름 표기 기준대로 안 맞는 테이블·컬럼 이름 고쳐줘"</li>
           <li>"주문 영역에 결제 흐름 설명 메모 붙여줘"</li>
+          <li>"바뀐 설계 개발 DB에 내보내줘"</li>
+          <li>"로컬 PostgreSQL에 DB 연결 만들어줘 (localhost 5432, DB 이름 game)"</li>
           <li>"방금 DB로 내보내기 실패했는데 원인 분석해줘"</li>
           {/* DB 비교는 서버가 DB에 접속하는 환경(로컬·자체 설치)에서만. 웹 서비스는 설치형 앱에서 사람이 한다 */}
           {serverDb && <li>"개발 DB랑 ERD 비교해서 다른 점 알려줘"</li>}
