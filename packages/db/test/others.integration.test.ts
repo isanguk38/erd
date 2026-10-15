@@ -105,7 +105,8 @@ for (const target of [mariadb, oracle, mssql]) {
     it('DB 객체(뷰·함수·프로시저·트리거 등): 가져오고 → 고쳐 내보내면 → 다시 읽어 0건', async () => {
       const config = await target.fresh();
       const objects = OBJECTS[target.id];
-      let schema = erd();
+      // ERD 문서는 DB 객체 목록을 늘 가진다 (없으면 []) — 없으면(undefined) 객체를 모르는 쪽으로 보고 비교하지 않는다
+      let schema: Schema = { ...erd(), objects: [] };
       expect((await push(config, schema)).result.results.filter((r) => !r.ok)).toEqual([]);
       const setup = await connector.execute(config, objects.setup);
       expect(setup.results.filter((r) => !r.ok)).toEqual([]);
