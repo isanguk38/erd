@@ -179,7 +179,9 @@ for (const target of [mariadb, oracle, mssql]) {
 
       const first = await connector.introspect(config);
       const plan = planPush(next, first.schema, { dialect });
-      expect(plan.renames).toMatchObject([{ kind: 'column', dbName: 'memo', erdName: 'note' }]);
+      // DB 이름은 그대로 (Oracle은 MEMO)
+      expect(plan.renames).toMatchObject([{ kind: 'column', erdName: 'note' }]);
+      expect(same(plan.renames[0].dbName, 'memo')).toBe(true);
       const { result } = await push(config, next, plan.renames.map(toLink));
       expect(result.results.filter((r) => !r.ok)).toEqual([]);
       expect(await remaining(config, next)).toEqual([]);
