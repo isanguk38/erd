@@ -10,6 +10,7 @@ import {
   indexLabel,
   isExpressionIndex,
   primaryKeyColumns,
+  relationName,
   sameExpression,
   sameIndexMethod,
   type CheckConstraint,
@@ -227,20 +228,34 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
   const targetRelations = byId(target.relations);
   const tableNameOf = (schema: Schema, id: string) => findTable(schema, id)?.name ?? id;
 
-  const dropFk = (relation: Relation) => {
+  // 같은 외래키가 양쪽에 있는데 설정만 다르면 무엇이 다른지 적는다 (SQL은 지웠다 다시 만들어 두 건이지만 하나의 변경)
+  const colNames = (schema: Schema, tableId: string, ids: string[]) => ids.map((id) => findTable(schema, tableId)?.columns.find((c) => c.id === id)?.name ?? '?').join(', ');
+  const fkDifference = (a: Relation, b: Relation): string => {
+    const parts: string[] = [];
+    if (!sameName(a.name, b.name, storedName(dialect))) parts.push(`이름 ${relationName(base, a)} → ${relationName(target, b)}`);
+    const ca = `${colNames(base, a.fromTableId, a.fromColumnIds)} → ${tableNameOf(base, a.toTableId)}(${colNames(base, a.toTableId, a.toColumnIds)})`;
+    const cb = `${colNames(target, b.fromTableId, b.fromColumnIds)} → ${tableNameOf(target, b.toTableId)}(${colNames(target, b.toTableId, b.toColumnIds)})`;
+    if (ca !== cb) parts.push(`컬럼 ${ca} → ${cb}`);
+    if (dialect.normalizeAction(a.onDelete) !== dialect.normalizeAction(b.onDelete)) parts.push(`ON DELETE ${a.onDelete} → ${b.onDelete}`);
+    if (dialect.features.fkOnUpdate && dialect.normalizeAction(a.onUpdate) !== dialect.normalizeAction(b.onUpdate)) parts.push(`ON UPDATE ${a.onUpdate} → ${b.onUpdate}`);
+    return parts.join(', ');
+  };
+  const dropFk = (relation: Relation, after?: Relation) => {
     const tableName = tableNameOf(base, relation.fromTableId);
+    const head = `${tableName} → ${tableNameOf(base, relation.toTableId)} 외래키`;
     changes.push({
       kind: 'dropForeignKey', id: `dropForeignKey:${relation.id}`,
       category: droppedTableIds.has(relation.fromTableId) ? 'drop' : 'alter',
-      tableName, summary: `${tableName} → ${tableNameOf(base, relation.toTableId)} 외래키 삭제`, relation,
+      tableName, summary: after ? `${head} 변경 — 기존 외래키 삭제 (${fkDifference(relation, after)})` : `${head} 삭제`, relation,
     });
   };
-  const addFk = (relation: Relation) => {
+  const addFk = (relation: Relation, before?: Relation) => {
     const tableName = tableNameOf(target, relation.fromTableId);
+    const head = `${tableName} → ${tableNameOf(target, relation.toTableId)} 외래키`;
     changes.push({
       kind: 'addForeignKey', id: `addForeignKey:${relation.id}`,
       category: createdTableIds.has(relation.fromTableId) ? 'create' : 'alter',
-      tableName, summary: `${tableName} → ${tableNameOf(target, relation.toTableId)} 외래키 추가`, relation,
+      tableName, summary: before ? `${head} 변경: ${fkDifference(before, relation)}` : `${head} 추가`, relation,
     });
   };
 
@@ -255,11 +270,11 @@ export function diffSchemas(baseInput: Schema, targetInput: Schema, dialect: Dia
 
   for (const relation of base.relations) {
     const after = targetRelations.get(relation.id);
-    if (!after || !sameRelation(relation, after)) dropFk(relation);
+    if (!after || !sameRelation(relation, after)) dropFk(relation, after);
   }
   for (const relation of target.relations) {
     const before = baseRelations.get(relation.id);
-    if (!before || !sameRelation(before, relation)) addFk(relation);
+    if (!before || !sameRelation(before, relation)) addFk(relation, before);
   }
 
   return { base, target, changes };
