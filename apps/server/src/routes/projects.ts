@@ -709,7 +709,7 @@ export function registerProjectRoutes(
     } else {
       placeNewTables(next, plan.diff.changes.flatMap((c) => (c.kind === 'createTable' && selected.has(c.id) ? [c.table.id] : [])));
     }
-    const result = change(id, next, { mode: modeOf(id, body.mode, source), source, title: 'DB에서 가져오기', messages: [`${db.serverVersion}에서 ${selected.size}건 반영`], origin: 'db' });
+    const result = change(id, next, { mode: modeOf(id, body.mode, source), source, title: 'DB에서 가져오기', messages: [`DB에서 가져오기 · ${connectionName} (${db.serverVersion}): DB에서 바뀐 것 ${selected.size}건 반영`], origin: 'db' });
     // 제안으로 쌓이면 DB 구조를 맡아 두었다가, 모두 승인될 때 기준 시점으로 저장한다 (proposals/:pid/apply)
     if (result.mode === 'propose') store.setPendingPull(id, result.proposalId, { connectionId, connectionName, db: db.schema });
     if (result.mode === 'apply') {
