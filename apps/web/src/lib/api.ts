@@ -265,7 +265,7 @@ export const authApi = {
   tokens: () => request<TokenInfo[]>('GET', '/api/tokens'),
   revokeToken: (id: string) => request('DELETE', `/api/tokens/${id}`),
   /** MCP 로그인(OAuth)으로 연결된 앱 */
-  oauthGrants: () => request<{ id: string; clientName: string; createdAt: string; lastUsedAt?: string }[]>('GET', '/api/oauth/grants'),
+  oauthGrants: () => request<{ id: string; clientName: string; createdAt: string; lastUsedAt?: string; renewedAt?: string }[]>('GET', '/api/oauth/grants'),
   revokeOauthGrant: (id: string) => request('DELETE', `/api/oauth/grants/${id}`),
   project: (id: string) => request<{ role: Role }>('GET', `/api/projects/${id}`),
 };

@@ -171,7 +171,7 @@ export function registerOAuthRoutes(app: FastifyInstance, auth: Auth, oauth: OAu
 
   // ── 연결된 앱 (화면에서 보기·끊기) ─────────────────────────────
   app.get('/api/oauth/grants', async (req) =>
-    oauth.listGrants(req.user.id).map(({ id, clientName, createdAt, lastUsedAt }) => ({ id, clientName, createdAt, lastUsedAt })),
+    oauth.listGrants(req.user.id).map(({ id, clientName, createdAt, lastUsedAt, renewedAt }) => ({ id, clientName, createdAt, lastUsedAt, renewedAt })),
   );
   app.delete<{ Params: { id: string } }>('/api/oauth/grants/:id', async (req) => {
     oauth.revokeGrant(req.user.id, req.params.id);

@@ -32,6 +32,8 @@ export interface OAuthGrant {
   clientName: string;
   createdAt: string;
   lastUsedAt?: string;
+  /** 같은 사람이 같은 AI 앱으로 다시 로그인해 이 연결을 이어 쓴 마지막 시각 */
+  renewedAt?: string;
 }
 
 interface TokenRecord {
@@ -158,9 +160,15 @@ export class OAuthStore {
     const challenge = base64url(createHash('sha256').update(verifier).digest());
     if (!verifier || !safeEqual(challenge, record.codeChallenge)) throw new OAuthError('invalid_grant', 'code_verifier가 맞지 않습니다');
     const client = this.client(record.clientId);
-    const grant: OAuthGrant = { id: randomUUID(), userId: record.userId, clientId: record.clientId, clientName: client?.client_name ?? 'MCP 클라이언트', createdAt: new Date().toISOString() };
-    // 연결은 로그인할 때마다 따로 만든다. 같은 사람이 다른 PC·앱에서 다시 로그인해도 이전 연결(토큰)은 그대로 둔다
-    // (새 연결이 생겼다고 쓰던 연결을 끊지 않는다). 안 쓰는 연결은 화면의 "연결된 AI"에서 사람이 끊는다
+    const clientName = client?.client_name ?? 'MCP 클라이언트';
+    const now = new Date().toISOString();
+    // 같은 사람이 같은 AI 앱(이름)으로 다시 로그인하면 연결을 새로 만들지 않고 기존 연결을 갱신한다 (목록에 한 줄).
+    // AI 앱은 로그인할 때마다 클라이언트를 새로 등록하므로 클라이언트 id가 아니라 이름으로 같은 앱을 알아본다.
+    // 예전 토큰은 같은 연결에 묶여 그대로 쓸 수 있다 (다시 로그인했다고 쓰던 곳을 끊지 않는다). 연결 끊기는 이 앱의 토큰을 모두 막는다
+    const existing = this.listGrants(record.userId).find((g) => g.clientName === clientName);
+    const grant: OAuthGrant = existing
+      ? { ...existing, clientId: record.clientId, renewedAt: now, lastUsedAt: now }
+      : { id: randomUUID(), userId: record.userId, clientId: record.clientId, clientName, createdAt: now };
     putJson(this.storage, `oauth/grants/${grant.id}.json`, grant);
     return this.issue(grant, record.scope);
   }
@@ -215,7 +223,7 @@ export class OAuthStore {
       .keys('oauth/grants/')
       .map((k) => getJson<OAuthGrant | null>(this.storage, k, null))
       .filter((g): g is OAuthGrant => g?.userId === userId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      .sort((a, b) => (b.renewedAt ?? b.createdAt).localeCompare(a.renewedAt ?? a.createdAt));
   }
 
   /** 연결 끊기: 그 연결로 받은 토큰은 바로 쓸 수 없게 된다 (토큰 검사가 연결을 확인한다) */

@@ -250,9 +250,9 @@ function AiConnections() {
         <li key={g.id}>
           <b>{g.clientName}</b>
           <span className="tag">로그인</span>
-          {/* 같은 앱으로 여러 번(다른 PC 등) 연결하면 번호로 구분한다 */}
+          {/* 같은 앱으로 다시 로그인하면 한 줄을 갱신한다. 번호는 예전에 따로 생긴 연결을 구분할 때만 */}
           {grants.filter((x) => x.clientName === g.clientName).length > 1 && <span className="tag">#{grants.filter((x) => x.clientName === g.clientName).length - grants.filter((x) => x.clientName === g.clientName).indexOf(g)}</span>}
-          <span className="muted small">{account && `${account} · `}{date(g.createdAt)} 연결{g.lastUsedAt ? ` · ${date(g.lastUsedAt)} 사용` : ' · 아직 안 씀'}</span>
+          <span className="muted small">{account && `${account} · `}{date(g.createdAt)} 연결{g.renewedAt ? ` · ${date(g.renewedAt)} 다시 로그인` : ''}{g.lastUsedAt ? ` · ${date(g.lastUsedAt)} 사용` : ' · 아직 안 씀'}</span>
           <button
             className="btn btn-sm btn-danger"
             onClick={async () => {

@@ -149,7 +149,7 @@ describe('MCP 로그인 (OAuth)', () => {
     expect(noLogin.statusCode).toBe(401);
   });
 
-  it('다시 로그인하거나 다른 PC에서 연결해도 기존 연결(토큰)은 끊기지 않고 따로 남는다. 다른 사람(초대받은 사람)은 자기 연결', async () => {
+  it('같은 사람이 같은 AI 앱으로 다시 로그인하면 연결 한 줄을 갱신하고 예전 토큰도 그대로 쓴다. 다른 사람(초대받은 사람)은 자기 연결', async () => {
     const { app } = setup();
     const exchange = async (c: Awaited<ReturnType<typeof connect>>) =>
       (await app.inject({ method: 'POST', url: '/oauth/token', ...form({ grant_type: 'authorization_code', code: c.code, client_id: c.client.client_id, redirect_uri: REDIRECT, code_verifier: c.verifier }) })).json();
@@ -157,8 +157,9 @@ describe('MCP 로그인 (OAuth)', () => {
     const t1 = await exchange(first);
     const second = await connect(app); // 같은 사람이 다시 로그인 (다른 PC·재인증)
     const t2 = await exchange(second);
-    const mine = (await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: second.cookie } })).json() as { id: string; clientName: string }[];
-    expect(mine.map((g) => g.clientName)).toEqual(['Claude Code', 'Claude Code']);
+    const mine = (await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: second.cookie } })).json() as { id: string; clientName: string; renewedAt?: string }[];
+    expect(mine.map((g) => g.clientName)).toEqual(['Claude Code']); // 새 줄이 아니라 갱신
+    expect(mine[0].renewedAt).toBeTruthy();
     expect((await mcpList(app, t1.access_token)).statusCode).toBe(200); // 예전 토큰도 그대로
     expect((await mcpList(app, t2.access_token)).statusCode).toBe(200);
 
@@ -167,14 +168,17 @@ describe('MCP 로그인 (OAuth)', () => {
     const t3 = await exchange(other);
     expect((await mcpList(app, t3.access_token)).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: other.cookie } })).json()).toHaveLength(1);
-    expect((await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: second.cookie } })).json()).toHaveLength(2);
+    expect((await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: second.cookie } })).json()).toHaveLength(1);
 
-    // 하나를 끊으면 그 토큰만 막힌다
+    // 연결을 끊으면 이 앱으로 받은 토큰(예전 것 포함)이 모두 막히고, 다른 사람 연결은 그대로
     await app.inject({ method: 'DELETE', url: `/api/oauth/grants/${mine[0].id}`, headers: { cookie: second.cookie } });
-    const left = [t1, t2].map((t) => t.access_token);
-    const codes = await Promise.all(left.map(async (t) => (await mcpList(app, t)).statusCode));
-    expect(codes.sort()).toEqual([200, 401]);
+    const codes = await Promise.all([t1, t2].map(async (t) => (await mcpList(app, t.access_token)).statusCode));
+    expect(codes).toEqual([401, 401]);
     expect((await mcpList(app, t3.access_token)).statusCode).toBe(200);
+    // 끊은 뒤 다시 로그인하면 새 연결
+    const t4 = await exchange(await connect(app));
+    expect((await mcpList(app, t4.access_token)).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/oauth/grants', headers: { cookie: second.cookie } })).json()).toHaveLength(1);
   });
 
   it('예전 방식 토큰(erd_...)은 새로 만들 수 없지만, 이미 있는 것은 그대로 쓴다', async () => {
