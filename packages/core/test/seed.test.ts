@@ -182,3 +182,12 @@ describe('테스트 데이터: 큰 ERD 속도', () => {
     expect(new Set(statuses).size).toBe(20);
   });
 });
+
+describe('테스트 데이터: 글자 기본키', () => {
+  it('ID000001처럼 앞에 0을 채운 번호는 그대로 (뒤에 _1을 또 붙이지 않음)', () => {
+    const s = applyCommands(emptySchema(), [{ op: 'createTable', name: 'account_holder', columns: [{ name: 'id', type: 'VARCHAR(50)', primaryKey: true }, { name: 'email', type: 'VARCHAR(100)', unique: true }] }]).schema;
+    const rows = rowsOf(generateSeedData(s, getDialect('mysql'), { rows: 3 }).statements, 'account_holder');
+    expect(rows[0]).toBe("('ID000001', 'user1@example.com')");
+    expect(rows[2]).toBe("('ID000003', 'user3@example.com')");
+  });
+});

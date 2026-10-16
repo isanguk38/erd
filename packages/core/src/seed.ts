@@ -239,7 +239,8 @@ function makeValue(c: Column, kind: Kind, i: number, rng: Rng, ctx: { start: num
       const n = ctx.start + i;
       let text = ctx.text!(n, rng);
       // 하나만으로 UNIQUE(또는 기본키)인 글자 컬럼: 행 번호가 들어 있지 않으면 붙여 늘 다르게 (상태·코드처럼 값이 몇 개뿐인 것도)
-      if (ctx.uniqueText && !new RegExp(`(^|\\D)${n}(\\D|$)`).test(text)) text = `${text}_${n}`;
+      // (ID000001처럼 앞에 0을 채운 번호도 행 번호로 본다)
+      if (ctx.uniqueText && !new RegExp(`(^|\\D)0*${n}(\\D|$)`).test(text)) text = `${text}_${n}`;
       return fitText(c, text, ctx.byteLimit);
     }
     default:
