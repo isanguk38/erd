@@ -1,5 +1,5 @@
 import { indexName, primaryKeyColumns, relationName, type Column, type Table } from '../model';
-import { quoteExpression, columnNames, normalizeDefaultCommon, typeWords, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
+import { quoteExpression, columnNames, literal, normalizeDefaultCommon, typeWords, relationTables, sqlComment, typeWithLength, indexKeys, indexWhere } from './common';
 import type { Dialect, TypeProfile } from './types';
 import { dbObjectsModule, standardCheck } from '../features';
 
@@ -236,6 +236,17 @@ END`,
   traits: {},
   types: mssqlTypes,
   connection: { port: 1433, databaseLabel: '데이터베이스', databasePlaceholder: 'shop', schemaPlaceholder: 'dbo', transactional: true },
+  seed: {
+    boolean: (v) => (v ? '1' : '0'),
+    binary: (h) => `0x${h}`,
+    // 한글 등은 N'...' (VARCHAR 칸이어도 코드 페이지에 맞춰 바뀐다)
+    text: (s) => (/[^\x00-\x7f]/.test(s) ? `N${literal(s)}` : literal(s)),
+    // DATETIME은 언어 설정에 따라 'YYYY-MM-DD hh:mm:ss'를 다르게 읽어 ISO 8601(T)로
+    dateTime: (s, kind) => literal(kind === 'datetime' ? s.replace(' ', 'T') : s),
+    multiRow: true,
+    byteLengthTypes: /^(VARCHAR|CHAR)$/,
+    identityInsert: (t) => ({ before: `SET IDENTITY_INSERT ${q(t)} ON`, after: `SET IDENTITY_INSERT ${q(t)} OFF` }),
+  },
   safety: {
     countUpTo: (inner, n) => `SELECT COUNT(*) AS n FROM (SELECT TOP ${n} 1 AS x ${inner}) t`,
     lengthFn: 'LEN',

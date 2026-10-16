@@ -333,7 +333,7 @@ describe('MCP', () => {
       arguments: {
         project: '쇼핑몰',
         commands: [
-          { op: 'createTable', name: 'member', logicalName: '회원', columns: [{ name: 'member_id', type: 'BIGINT', primaryKey: true, autoIncrement: true }, { name: 'email', type: 'VARCHAR(100)', nullable: false, unique: true }] },
+          { op: 'createTable', name: 'member', logicalName: '회원', columns: [{ name: 'member_id', type: 'BIGINT', primaryKey: true, autoIncrement: true }, { name: 'email', type: 'VARCHAR(100)', nullable: false, unique: true, privacy: 'personal' }] },
           { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_id', type: 'BIGINT', primaryKey: true, autoIncrement: true }] },
           { op: 'addRelation', parent: 'member', child: 'orders', onDelete: 'CASCADE' },
           { op: 'addIndex', table: 'orders', columns: ['member_id'] },

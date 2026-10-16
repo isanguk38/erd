@@ -39,6 +39,8 @@ export interface Dialect {
   traits: DialectTraits;
   /** DB 반영 전 안전 검사(읽기 전용 SELECT COUNT)에 쓰는 이 DB의 SQL 조각 */
   safety: DialectSafetySql;
+  /** 테스트 데이터(INSERT) 값을 쓰는 이 DB의 문법 (seed.ts) */
+  seed: DialectSeedSql;
   /** 컬럼 타입 검사에 쓰는 이 DB의 타입 정보 */
   types: TypeProfile;
   /** DB 연결 입력 안내 */
@@ -161,6 +163,25 @@ export interface DialectSafetySql {
   lengthFn: string;
   /** 이 컬럼 값이 숫자(정수)로 바꿀 수 없는 행 조건 */
   notNumeric(col: string, integer: boolean): string;
+}
+
+export interface DialectSeedSql {
+  /** 참/거짓 값 */
+  boolean(value: boolean): string;
+  /** 바이트 값 (16진수) */
+  binary(hex: string): string;
+  /** 문자열 값 */
+  text(value: string): string;
+  /** 날짜·시각 값 ('YYYY-MM-DD', 'YYYY-MM-DD hh:mm:ss', 'hh:mm:ss'). baseType: 컬럼 타입 이름 (대문자) */
+  dateTime(value: string, kind: 'date' | 'datetime' | 'time', baseType: string): string;
+  /** 한 INSERT에 여러 행 (VALUES (...), (...)) */
+  multiRow: boolean;
+  /** 길이를 바이트로 세는 문자 타입 (한글이 2~3바이트) */
+  byteLengthTypes?: RegExp;
+  /** 자동 증가 컬럼에 번호를 직접 넣을 때 앞뒤로 실행할 SQL */
+  identityInsert?(table: string): { before: string; after: string };
+  /** 번호를 직접 넣은 뒤 자동 증가가 다음 번호부터 이어지게 하는 SQL */
+  resetIdentity?(table: string, column: string): string;
 }
 
 export interface DialectTraits {

@@ -130,7 +130,7 @@ export interface ProposalInfo {
 
 /** DB 가져오기·내보내기 기록 한 번 (AI가 오류 원인을 분석할 수 있게 서버에 남긴다. 접속 주소·비밀번호는 넣지 않음) */
 export interface DbLogInput {
-  action: 'pull' | 'push';
+  action: 'pull' | 'push' | 'seed';
   stage: 'compare' | 'safety' | 'execute' | 'apply';
   ok: boolean;
   serverVersion?: string;
@@ -151,7 +151,7 @@ export interface AiLogEntry {
 /** AI(MCP)가 요청한 DB 작업 — 이 앱이 가져가 처리한다 */
 export interface DbJob {
   id: string;
-  kind: 'listConnections' | 'saveConnection' | 'testConnection' | 'push' | 'pull';
+  kind: 'listConnections' | 'saveConnection' | 'testConnection' | 'push' | 'pull' | 'compare' | 'seed';
   projectId?: string;
   payload: Record<string, unknown>;
 }

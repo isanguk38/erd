@@ -234,6 +234,8 @@ DO
   traits: { fkAutoIndex: true, fkNeedsIndex: true, noJsonColumnIndex: true, varcharLengthIsTypeError: true },
   types: mysqlTypes,
   connection: { port: 3306, databaseLabel: '스키마(DB)', databasePlaceholder: 'shop', transactional: false },
+  // AUTO_INCREMENT는 직접 넣은 가장 큰 번호 다음부터 알아서 이어진다
+  seed: { boolean: (v) => (v ? '1' : '0'), binary: (h) => `X'${h}'`, text: (s) => literal(s, true), dateTime: (s) => literal(s), multiRow: true },
   safety: { countUpTo: limitCount, lengthFn: 'CHAR_LENGTH', notNumeric: (col, integer) => `${col} IS NOT NULL AND ${col} NOT REGEXP '${numericRegex(integer)}'` },
   createIndex(table: Table, index) {
     // MySQL은 식마다 괄호를 한 번 더 감싸야 한다: lower(email) → (lower(email))

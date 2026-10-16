@@ -298,6 +298,15 @@ EXECUTE FUNCTION trigger_function_name()`,
   traits: {},
   types: postgresTypes,
   connection: { port: 5432, databaseLabel: '데이터베이스', databasePlaceholder: 'postgres', schemaPlaceholder: 'public', transactional: true },
+  seed: {
+    boolean: (v) => (v ? 'TRUE' : 'FALSE'),
+    binary: (h) => `decode('${h}', 'hex')`,
+    text: (s) => literal(s),
+    dateTime: (s) => literal(s),
+    multiRow: true,
+    // IDENTITY 번호를 직접 넣으면 시퀀스가 그대로라, 다음 INSERT가 겹치지 않게 가장 큰 번호로 맞춘다
+    resetIdentity: (t, c) => `SELECT setval(pg_get_serial_sequence(${literal(q(t))}, ${literal(c)}), (SELECT MAX(${q(c)}) FROM ${q(t)}))`,
+  },
   safety: { countUpTo: limitCount, lengthFn: 'char_length', notNumeric: (col, integer) => `${col} IS NOT NULL AND ${col}::text !~ '${numericRegex(integer)}'` },
   createIndex(table, index) {
     // PostgreSQL에 있는 방식만 쓴다 (MySQL의 fulltext 등은 일반 인덱스로 만들고 주의를 단다)

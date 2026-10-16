@@ -3,7 +3,7 @@
 
 import type { DbLogEntry } from './projects';
 
-const ACTIONS = new Set(['pull', 'push']);
+const ACTIONS = new Set(['pull', 'push', 'seed']);
 const STAGES = new Set(['compare', 'safety', 'execute', 'apply']);
 const MAX_TEXT = 2000;
 const MAX_SQL = 4000;
@@ -22,7 +22,7 @@ type Input = Partial<Record<keyof DbLogEntry, unknown>>;
 
 /** 화면이 보낸 기록을 검사해 저장할 모양으로 만든다. 잘못된 값이면 이유를 던진다 */
 export function cleanDbLog(body: Input, by: string | undefined, via: DbLogEntry['via']): Omit<DbLogEntry, 'id' | 'at'> {
-  if (!ACTIONS.has(body.action as string)) throw new Error('action은 pull 또는 push입니다');
+  if (!ACTIONS.has(body.action as string)) throw new Error('action은 pull·push·seed 중 하나입니다');
   if (!STAGES.has(body.stage as string)) throw new Error('stage는 compare·safety·execute·apply 중 하나입니다');
   const c = (body.connection ?? {}) as Record<string, unknown>;
   const results = Array.isArray(body.results)

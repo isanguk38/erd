@@ -95,7 +95,8 @@ export interface DbLogEntry {
   /** 실행한 사람 이름 */
   by?: string;
   /** pull: DB에서 가져오기, push: DB로 내보내기 */
-  action: 'pull' | 'push';
+  /** seed: 테스트 데이터 넣기 */
+  action: 'pull' | 'push' | 'seed';
   /** compare: DB 읽기·비교, safety: 실행 전 안전 검사, execute: SQL 실행, apply: ERD에 반영 */
   stage: 'compare' | 'safety' | 'execute' | 'apply';
   /** screen: 화면(설치형 앱이 DB에 접속), server: 서버가 직접 접속 (AI·로컬 모드) */

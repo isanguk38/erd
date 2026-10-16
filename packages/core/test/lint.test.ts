@@ -8,7 +8,7 @@ function good(): Schema {
   return applyCommands(emptySchema(), [
     { op: 'createTable', name: 'member', logicalName: '회원', columns: [
       { name: 'member_id', logicalName: '회원번호', type: 'BIGINT', primaryKey: true },
-      { name: 'email', logicalName: '이메일', type: 'VARCHAR(100)' },
+      { name: 'email', logicalName: '이메일', type: 'VARCHAR(100)', privacy: 'personal' },
     ] },
     { op: 'createTable', name: 'orders', logicalName: '주문', columns: [{ name: 'order_id', logicalName: '주문번호', type: 'BIGINT', primaryKey: true }] },
     { op: 'addRelation', parent: 'member', child: 'orders' },

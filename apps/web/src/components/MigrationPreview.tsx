@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { generateStatements, toScript, type ChangeCategory, type DiffResult, type Dialect } from '@erd/core';
 import { downloadText } from '../lib/download';
-import { ChangeList } from './ChangeList';
+import { ChangeList, type GroupLabel } from './ChangeList';
 
 const GROUPS: { category: ChangeCategory; title: string }[] = [
   { category: 'create', title: 'CREATE' },
@@ -23,6 +23,8 @@ export function MigrationPreview({
   fileName,
   emptyMessage = '변경 사항이 없습니다. 기준과 지금 ERD가 같습니다.',
   origins,
+  groups,
+  sqlTitle,
 }: {
   diff: DiffResult;
   dialect: Dialect;
@@ -31,6 +33,10 @@ export function MigrationPreview({
   fileName: string;
   emptyMessage?: string;
   origins?: Record<string, import('@erd/core').ChangeOrigin>;
+  /** 변경 묶음 이름 (기본 CREATE·ALTER·DROP) */
+  groups?: Record<ChangeCategory, GroupLabel>;
+  /** SQL 칸 위 제목 */
+  sqlTitle?: string;
 }) {
   const [tab, setTab] = useState<SqlTab>('all');
   const [copied, setCopied] = useState(false);
@@ -45,8 +51,9 @@ export function MigrationPreview({
 
   return (
     <div className="migration">
-      <ChangeList changes={diff.changes} selected={selected} onSelectedChange={onSelectedChange} origins={origins} />
+      <ChangeList changes={diff.changes} selected={selected} onSelectedChange={onSelectedChange} origins={origins} groups={groups} />
       <div className="migration__sql">
+        {sqlTitle && <div className="migration__sql-title">{sqlTitle}</div>}
         <div className="tabs">
           <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>전체 ({statements.length})</button>
           {GROUPS.map((g) => (

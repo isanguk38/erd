@@ -21,7 +21,7 @@ import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
 
-export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'aiLog' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary';
+export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'aiLog' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary' | 'dbCompare' | 'seed';
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'physical', label: '물리명' },
@@ -398,6 +398,17 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
               </a>
             </>
           )}
+          {/* DB 도구: DB끼리 비교(설치형 앱), 테스트 데이터(SQL은 웹에서도, DB에 넣기는 앱에서) */}
+          <Dropdown
+            label="DB 도구"
+            iconOnly
+            icon="more"
+            title="DB 도구: DB끼리 비교 · 테스트 데이터 만들기"
+            items={[
+              { label: 'DB끼리 비교', hint: dbAvailable ? '개발 ↔ 운영 구조 차이 · 맞추는 SQL' : '설치형 앱에서', disabled: !dbAvailable, onClick: () => onOpen('dbCompare') },
+              { label: '테스트 데이터 만들기', hint: 'FK·UNIQUE를 지키는 INSERT', disabled: isEmpty, onClick: () => onOpen('seed') },
+            ]}
+          />
         </div>
       </div>
     </header>

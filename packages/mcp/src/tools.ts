@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { diagnoseDbError, areaSchema, describeMatch, describeSchema, dialects, FEATURE_LABEL, getDialect, type FeatureKey, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
+import { diagnoseDbError, areaSchema, describeMatch, describeSchema, dialects, FEATURE_LABEL, getDialect, type FeatureKey, dictIndex, describeNaming, lookupTerm, NAME_KIND_LABEL, readNamingSetting, type NameKind, searchDictionary, splitDictType, type Dictionary, NAME_STYLE_EXAMPLE, NAME_STYLE_LABEL, projectNamingStyles, requireArea, LINT_RULES, lintSchema, generateSeedData, seedScript, reviewItemState, unreviewedTables, type AiReview, type DialectId, type Schema } from '@erd/core';
 
 /** ERD 서버 호출 방법 (HTTP 또는 서버 안에서 직접) */
 export interface ErdApi {
@@ -26,6 +26,16 @@ const referentialAction = z.enum(['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL'
 
 const dbObjectKind = z.enum(['view', 'materializedView', 'function', 'procedure', 'trigger', 'event', 'package', 'packageBody']);
 
+const areaColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/)
+  .optional()
+  .describe('영역 색 (#rrggbb). 생략하면 옆 영역과 구분되는 색을 차례로 준다. 흰 글자가 잘 보이는 진한 색 (예: #2563eb, #059669, #ea580c, #9333ea)');
+const colorTables = z
+  .boolean()
+  .optional()
+  .describe('영역 색을 그 영역 테이블 색으로도 칠한다 (기본 true). 여러 영역에 들어 있는 공통 테이블은 첫 영역(탭 순서)의 색을 쓴다');
+
 const columnSpec = z.object({
   name: z.string().describe('물리명 (예: member_id)'),
   logicalName: z.string().optional().describe('논리명 (예: 회원번호)'),
@@ -39,6 +49,8 @@ const columnSpec = z.object({
   generated: z.string().nullable().optional().describe('계산 컬럼 식 (예: qty * price). null이면 일반 컬럼으로'),
   generatedStored: z.boolean().optional().describe('계산 값을 저장(STORED)할지. 기본 VIRTUAL (PostgreSQL은 STORED만, Oracle은 VIRTUAL만)'),
   comment: z.string().optional().describe('상세 설명 — ERD에만 저장 (DB comment에는 logicalName이 들어간다)'),
+  privacy: z.enum(['unique', 'password', 'financial', 'sensitive', 'personal']).nullable().optional().describe('개인정보 표시 (ERD에만 저장): unique 고유식별정보(주민·여권·운전면허·외국인등록번호), password 비밀번호, financial 계좌·카드번호, sensitive 민감정보(건강·종교 등), personal 이름·연락처·이메일·주소·생년월일·IP. null이면 해제'),
+  encrypted: z.boolean().optional().describe('개인정보를 암호화(비밀번호는 해시)해서 저장하는지. unique·password·financial은 법으로 암호화해야 한다'),
 });
 
 const command = z.discriminatedUnion('op', [
@@ -97,10 +109,25 @@ const command = z.discriminatedUnion('op', [
     onUpdate: referentialAction.optional(),
   }),
   // 주제영역: 큰 ERD를 기능별로 나눠 보는 탭 (화면 구분일 뿐 SQL·DB에는 영향 없음). 같은 테이블을 여러 영역에 넣을 수 있다
-  z.object({ op: z.literal('createArea'), name: z.string().describe('영역 이름 (예: 주문, 회원, 정산)'), tables: z.array(z.string()).optional().describe('처음 넣을 테이블') }),
-  z.object({ op: z.literal('updateArea'), area: z.string(), name: z.string().optional().describe('새 이름') }),
+  z.object({
+    op: z.literal('createArea'),
+    name: z.string().describe('영역 이름 (예: 주문, 회원, 정산)'),
+    tables: z.array(z.string()).optional().describe('처음 넣을 테이블'),
+    color: areaColor,
+    colorTables: colorTables,
+  }),
+  z.object({
+    op: z.literal('updateArea'),
+    area: z.string(),
+    name: z.string().optional().describe('새 이름'),
+    color: areaColor,
+    colorTables: z
+      .boolean()
+      .optional()
+      .describe('true: 이미 있는 영역의 테이블을 모두 영역 색으로 칠한다 (색을 안 바꿔도. "기존 영역에 테이블 색 맞춰줘"일 때). 생략: 영역 색을 바꿀 때 그 색을 따르던 테이블만 함께 바꾼다. false: 테이블 색은 그대로'),
+  }),
   z.object({ op: z.literal('dropArea'), area: z.string().describe('지울 영역 (테이블은 남는다)') }),
-  z.object({ op: z.literal('addToArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('넣을 테이블 (다른 영역에도 그대로 남는다)') }),
+  z.object({ op: z.literal('addToArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('넣을 테이블 (다른 영역에도 그대로 남는다)'), colorTables: colorTables }),
   z.object({ op: z.literal('removeFromArea'), area: z.string(), tables: z.array(z.string()).min(1).describe('영역에서 뺄 테이블 (테이블은 남는다)') }),
   // 사용자 정의 타입 (ENUM): 허용 값 목록. 컬럼 type에 이 이름을 쓴다.
   // PostgreSQL은 CREATE TYPE으로, MySQL·MariaDB는 컬럼마다 ENUM(...)으로, Oracle·SQL Server는 VARCHAR로 만든다
@@ -133,6 +160,7 @@ const command = z.discriminatedUnion('op', [
     area: z.string().describe('옮겨 갈 영역'),
     tables: z.array(z.string()).min(1),
     from: z.string().optional().describe('이 영역에서만 뺀다. 생략하면 다른 모든 영역에서 빼고 이 영역에만 둔다'),
+    colorTables: colorTables,
   }),
 ]);
 
@@ -141,7 +169,7 @@ interface DbLogEntry {
   id: string;
   at: string;
   by?: string;
-  action: 'pull' | 'push';
+  action: 'pull' | 'push' | 'seed';
   stage: 'compare' | 'safety' | 'execute' | 'apply';
   via: 'screen' | 'server';
   ok: boolean;
@@ -163,7 +191,7 @@ function describeDbLog(e: DbLogEntry) {
   return {
     at: e.at,
     by: e.by,
-    action: e.action === 'pull' ? 'DB에서 가져오기' : 'DB로 내보내기',
+    action: e.action === 'pull' ? 'DB에서 가져오기' : e.action === 'seed' ? '테스트 데이터 넣기' : 'DB로 내보내기',
     stage: DB_STAGE[e.stage],
     via: e.via === 'screen' ? '화면(설치형 앱이 DB에 접속)' : '서버(AI 등)',
     ok: e.ok,
@@ -908,7 +936,7 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       title: 'ERD를 DB에 반영 (DB로 내보내기)',
       description: [
         'ERD와 DB를 비교해 바뀐 부분만 SQL(CREATE/ALTER/INDEX/FK)로 DB에 실행한다. 사용자의 ERD 앱이 DB에 접속해 화면의 "DB로 내보내기"와 같은 순서로 처리한다 (앱이 켜져 있어야 함).',
-        '프로젝트 AI 모드가 바로 적용이면 묻지 않고 바로 실행하고, 제안 모드면 사용자가 앱에서 SQL을 보고 승인해야 실행한다 (승인을 기다리면 jobId를 주니 db_job_result로 확인).',
+        'DB 실행은 되돌리기 어려워 프로젝트 AI 모드(바로 적용·제안)와 상관없이 항상 사용자가 앱에서 SQL을 보고 승인해야 실행한다 (승인을 기다리면 jobId를 주니 db_job_result로 확인).',
         '실행 전 안전 검사(NULL·중복·긴 값 등 지금 데이터로 실패할 변경)가 걸리면 실행하지 않고 findings를 돌려준다. 테이블·타입 삭제(DROP)는 include_drop=true일 때만 넣는다.',
         '실패하면 실패한 SQL마다 원인·조치·누가 고칠지(diagnosis)와 관련 테이블 정의(relatedTables)를 돌려준다: AI가 고칠 수 있는 것은 edit_schema로 고치고 다시 db_push, 사람이 해야 하는 것은 사용자에게 알린다.',
         'dry_run=true면 실행하지 않고 실행할 SQL만 보여 준다.',
@@ -923,9 +951,8 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
     },
     safe(async (a: { project: string; connection?: string; include_drop?: boolean; dry_run?: boolean }) => {
       const p = await resolveProject(a.project);
-      const { meta } = await api.request<{ meta: Record<string, unknown> }>('GET', `/api/projects/${p.id}`);
-      const mode = meta.aiMode === 'apply' ? 'apply' : 'propose';
-      const job = await viaApp('push', { ref: a.connection, includeDrop: Boolean(a.include_drop), dryRun: Boolean(a.dry_run), mode }, p.id, 100);
+      // 실행은 항상 사람이 앱에서 승인 (AI 모드와 상관없이)
+      const job = await viaApp('push', { ref: a.connection, includeDrop: Boolean(a.include_drop), dryRun: Boolean(a.dry_run) }, p.id, 100);
       return pushReport(p.id, job);
     }),
   );
@@ -943,6 +970,74 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
       if (job.status === 'failed' && !job.result) return { ...text({ ...job, ...(job.error ? { diagnosis: diagnoseDbError(job.error, 'execute') } : {}) }), isError: true };
       if (job.projectId) return pushReport(job.projectId, job);
       return text(job.status === 'done' ? job.result : job);
+    }),
+  );
+
+  server.registerTool(
+    'compare_databases',
+    {
+      title: 'DB끼리 비교 (개발 ↔ 운영)',
+      description: [
+        '두 DB 연결(예: 개발·운영)의 구조(테이블·컬럼·인덱스·외래키·뷰·함수 등)를 읽어 차이를 돌려준다. 사용자의 ERD 앱이 PC에서 두 DB를 읽기만 한다 (앱이 켜져 있어야 함).',
+        'source(기준)에만 있는 것 onlyInSource, 다른 것 different, target(대상)에만 있는 것 onlyInTarget, 그리고 대상을 기준과 같게 만드는 SQL(statements)을 준다.',
+        'SQL은 실행하지 않는다. 사용자에게 차이를 쉬운 말로 요약하고(배포 누락·운영에만 있는 인덱스 등), 운영 반영은 사람이 검토하도록 안내한다. DROP은 include_drop=true일 때만 SQL에 넣는다.',
+      ].join(' '),
+      inputSchema: {
+        source: z.string().describe('기준 연결 id 또는 이름 (예: 개발 DB)'),
+        target: z.string().describe('대상 연결 id 또는 이름 (예: 운영 DB)'),
+        include_drop: z.boolean().optional().describe('대상에만 있는 테이블의 DROP도 SQL에 넣기 (기본 false)'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    safe(async (a: { source: string; target: string; include_drop?: boolean }) => {
+      const job = await viaApp('compare', { source: a.source, target: a.target, includeDrop: Boolean(a.include_drop) }, undefined, 100);
+      const r = job.result ?? {};
+      if (r.ok === false) return { ...text({ ...connectFailure(String(r.error)), stage: 'DB 읽기' }), isError: true };
+      return text(r);
+    }),
+  );
+
+  server.registerTool(
+    'generate_test_data',
+    {
+      title: '테스트 데이터 만들기 (INSERT)',
+      description: [
+        'ERD를 보고 외래키·NOT NULL·UNIQUE·ENUM·간단한 CHECK를 지키는 가짜 데이터를 INSERT SQL로 만든다. 부모 테이블부터 채우고 이름·연락처·이메일·금액처럼 컬럼 이름에 맞는 값을 넣는다.',
+        'insert=false(기본)면 SQL만 돌려준다. insert=true면 사용자의 ERD 앱이 연결한 DB에 넣는데, AI 모드와 상관없이 사용자가 앱에서 승인해야 실행된다 (승인을 기다리면 jobId → db_job_result).',
+        '개발·테스트 DB에만 넣는다 — 운영 DB로 보이는 연결이면 넣지 말고 사용자에게 확인한다. DB에 이미 데이터가 있으면 start_id를 크게 해 기본키가 겹치지 않게 한다.',
+      ].join(' '),
+      inputSchema: {
+        project: projectArg,
+        rows: z.number().int().min(1).max(10000).optional().describe('테이블마다 행 수 (기본 20)'),
+        tables: z.array(z.string()).optional().describe('이 테이블만 (NOT NULL 외래키의 부모는 자동으로 함께). 생략하면 전체'),
+        start_id: z.number().int().min(0).optional().describe('정수 기본키 시작 번호 (기본 1)'),
+        seed: z.number().int().optional().describe('같은 seed면 같은 데이터 (기본 1). 다른 값을 원하면 바꾼다'),
+        insert: z.boolean().optional().describe('true면 DB에 넣는다 (사용자 승인 후)'),
+        connection: z.string().optional().describe('넣을 연결 id 또는 이름 (생략하면 프로젝트에 연결된 DB)'),
+      },
+    },
+    safe(async (a: { project: string; rows?: number; tables?: string[]; start_id?: number; seed?: number; insert?: boolean; connection?: string }) => {
+      const p = await resolveProject(a.project);
+      if (a.insert) {
+        const job = await viaApp('seed', { ref: a.connection, rows: a.rows, tables: a.tables, startId: a.start_id, seed: a.seed }, p.id, 100);
+        return pushReport(p.id, job);
+      }
+      const { schema } = await api.request<{ schema: Schema }>('GET', `/api/projects/${p.id}`);
+      const tableIds = a.tables?.map((name) => {
+        const t = schema.tables.find((x) => x.name.toLowerCase() === name.toLowerCase());
+        if (!t) throw new Error(`테이블 "${name}"이 없습니다. 있는 테이블: ${schema.tables.map((x) => x.name).join(', ')}`);
+        return t.id;
+      });
+      const r = generateSeedData(schema, getDialect(p.dialect as DialectId), { rows: a.rows, tableIds, startId: a.start_id, seed: a.seed });
+      const script = seedScript(r);
+      const LIMIT = 200_000;
+      return text({
+        tables: r.tables.map((t) => ({ name: t.name, rows: t.rows })),
+        added: r.added.length ? r.added : undefined,
+        skipped: r.skipped.length ? r.skipped : undefined,
+        warnings: r.warnings.length ? r.warnings : undefined,
+        sql: script.length > LIMIT ? `${script.slice(0, LIMIT)}\n-- … (너무 길어 잘랐습니다. rows를 줄이거나 tables로 나눠 다시)` : script,
+      });
     }),
   );
 

@@ -1,11 +1,13 @@
 // AI(MCP)가 요청한 DB 작업을 이 앱에서 처리한다 (웹 서비스 서버는 사용자 PC·사내망 DB에 접속하지 않으므로).
-// DB로 내보내기는 화면의 "DB로 내보내기"와 같은 순서: 비교 → 안전 검사 → (제안 모드면 사람이 승인) → 실행 → 기록 → 기준 시점.
+// DB로 내보내기는 화면의 "DB로 내보내기"와 같은 순서: 비교 → 안전 검사 → 사람이 승인 → 실행 → 기록 → 기준 시점.
+// DB에 실행하는 것은 되돌리기 어려워, 프로젝트 AI 모드가 바로 적용이어도 항상 사람이 SQL을 보고 승인해야 실행한다.
 
 import {
   adoptDbObjectDefinitions,
   appliedChanges,
   pushedObjectKeys,
   dbmsMismatch,
+  generateSeedData,
   generateStatements,
   getDialect,
   planPush,
@@ -32,18 +34,20 @@ async function findConnection(ref: string | undefined, fallbackId?: string | nul
 
 const publicConnection = (c: Connection) => ({ id: c.id, name: c.name, dialect: c.dialect, host: c.host, port: c.port, database: c.database, schema: c.schema, ssl: c.ssl });
 
-/** 사람이 승인해야 하는 내보내기 (제안 모드) */
+/** 사람이 승인해야 하는 내보내기 (AI 모드와 상관없이 항상) */
 export interface PushApproval {
   projectName: string;
   connection: Connection;
   statements: { sql: string; category: string; warning?: string }[];
+  /** seed: 테스트 데이터 넣기 (기본은 DB로 내보내기) */
+  purpose?: 'push' | 'seed';
+  /** 승인 창에 보일 한 줄 요약 (예: "3개 테이블 60행") */
+  summary?: string;
 }
 
 export interface JobHooks {
-  /** 제안 모드: 사람에게 묻고 승인하면 true */
+  /** 사람에게 묻고 승인하면 true */
   approve: (request: PushApproval) => Promise<boolean>;
-  /** 바로 적용 모드에서 AI가 DB에 실행했을 때 화면에 알린다 */
-  notify: (text: string) => void;
   /** 승인을 기다리기 시작할 때 (AI 쪽에 알린다) */
   waiting: () => Promise<void>;
 }
@@ -98,6 +102,12 @@ export async function runDbJob(job: DbJob, hooks: JobHooks): Promise<Record<stri
 
     case 'pull':
       return pullJob(job);
+
+    case 'compare':
+      return compareJob(job);
+
+    case 'seed':
+      return seedJob(job, hooks);
   }
 }
 
@@ -172,12 +182,10 @@ async function pushJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unkn
   }
   if (p.dryRun) return { ...base, ok: true, executed: false, dryRun: true, statements: sql, findings };
 
-  // ③ 제안 모드: 사람이 승인해야 실행
-  if (p.mode !== 'apply') {
-    await hooks.waiting();
-    const ok = await hooks.approve({ projectName: meta.name, connection, statements: statements.map((s) => ({ sql: s.sql, category: s.category, warning: s.warning })) });
-    if (!ok) return { ...base, ok: false, executed: false, rejected: true, message: '사용자가 실행을 거절했습니다', statements: sql };
-  }
+  // ③ 사람이 승인해야 실행 (바로 적용 모드여도 — DB 실행은 되돌리기 어렵다)
+  await hooks.waiting();
+  const ok = await hooks.approve({ projectName: meta.name, connection, statements: statements.map((s) => ({ sql: s.sql, category: s.category, warning: s.warning })) });
+  if (!ok) return { ...base, ok: false, executed: false, rejected: true, message: '사용자가 실행을 거절했습니다', statements: sql };
 
   // ④ 실행 (화면의 DB로 내보내기와 같게: 실행 전후 버전, 기록, 기준 시점)
   const label = `${connection.name} (${connection.database}) · AI`;
@@ -205,7 +213,6 @@ async function pushJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unkn
     }
     await projectApi.saveBaseline(projectId, connection.id, syncedBaseline(after.schema, erd, { applied, previous: baseline?.schema, skipped, dialect, direction: 'push' }));
   }
-  if (p.mode === 'apply') hooks.notify(r.ok ? `AI가 ${meta.name}의 변경 ${sql.length}문장을 DB(${connection.name})에 실행했습니다` : `AI가 DB(${connection.name})에 실행하다 실패했습니다 — AI가 원인을 보고 있습니다`);
   return {
     ...base,
     ok: r.ok,
@@ -214,5 +221,98 @@ async function pushJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unkn
     appliedCount: r.appliedCount,
     results: r.results.map(({ sql: s, ok, skipped, error }) => ({ sql: s, ok, ...(skipped ? { skipped } : {}), ...(error ? { error } : {}) })),
     findings,
+  };
+}
+
+/** DB끼리 비교: 두 연결을 읽기만 하고, 대상을 기준과 같게 만드는 변경·SQL을 돌려준다 (실행하지 않음) */
+async function compareJob(job: DbJob): Promise<Record<string, unknown>> {
+  const p = job.payload;
+  const source = await findConnection(p.source as string);
+  const target = await findConnection(p.target as string);
+  if (source.id === target.id) throw new Error('서로 다른 두 연결을 고르세요');
+  const mismatch = dbmsMismatch(source.dialect, target.dialect);
+  if (mismatch) throw new Error(`두 DB의 종류가 다릅니다: ${mismatch}`);
+  const read = async (c: Connection) => {
+    try {
+      return await api.introspect(c.id);
+    } catch (e) {
+      throw new Error(`${c.name}: ${message(e)}`);
+    }
+  };
+  let s, t;
+  try {
+    [s, t] = await Promise.all([read(source), read(target)]);
+  } catch (e) {
+    return { ok: false, error: message(e) };
+  }
+  const dialect = getDialect(source.dialect);
+  const plan = planPush(s.schema, t.schema, { dialect });
+  const selected = new Set(plan.defaultSelected);
+  if (p.includeDrop) for (const c of plan.diff.changes) if (c.category === 'drop') selected.add(c.id);
+  const statements = generateStatements(plan.diff, dialect, selected);
+  const where = (c: Connection, v: string) => ({ name: c.name, database: c.database, host: c.host, serverVersion: v });
+  return {
+    ok: true,
+    source: where(source, s.serverVersion),
+    target: where(target, t.serverVersion),
+    same: plan.diff.changes.length === 0,
+    onlyInSource: plan.diff.changes.filter((c) => c.category === 'create').map((c) => c.summary),
+    different: plan.diff.changes.filter((c) => c.category === 'alter').map((c) => ({ summary: c.summary, ...(c.warning ? { warning: c.warning } : {}) })),
+    onlyInTarget: plan.diff.changes.filter((c) => c.category === 'drop').map((c) => c.summary),
+    renameCandidates: plan.renames.map((r) => `${r.kind === 'table' ? '테이블' : `${r.tableName} 컬럼`} ${r.dbName} → ${r.erdName}?`),
+    objectsCompared: Array.isArray(s.schema.objects) && Array.isArray(t.schema.objects),
+    // 대상 DB를 기준과 같게 만드는 SQL (실행하지 않음. DROP은 includeDrop일 때만)
+    statements: statements.map((x) => x.sql),
+  };
+}
+
+/** 테스트 데이터 넣기: 프로젝트 ERD로 INSERT를 만들고, 사람이 승인하면 고른 DB에 넣는다 */
+async function seedJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unknown>> {
+  const p = job.payload;
+  const projectId = job.projectId!;
+  const { meta, schema } = await projectApi.get(projectId);
+  const connection = await findConnection(p.ref as string | undefined, meta.dbConnectionId);
+  const mismatch = dbmsMismatch(meta.dialect, connection.dialect);
+  if (mismatch) throw new Error(mismatch);
+  const dialect = getDialect(meta.dialect);
+  const tableIds = Array.isArray(p.tables) && p.tables.length
+    ? (p.tables as string[]).map((name) => {
+        const t = schema.tables.find((x) => x.name === name) ?? schema.tables.find((x) => x.name.toLowerCase() === String(name).toLowerCase());
+        if (!t) throw new Error(`테이블 "${name}"이 없습니다`);
+        return t.id;
+      })
+    : undefined;
+  const seed = generateSeedData(schema, dialect, { rows: Number(p.rows) || undefined, startId: p.startId === undefined ? undefined : Number(p.startId), seed: Number(p.seed) || undefined, tableIds });
+  const summary = { tables: seed.tables.map((t) => ({ name: t.name, rows: t.rows })), added: seed.added, skipped: seed.skipped, warnings: seed.warnings };
+  const base = { connection: connection.name, database: connection.database, ...summary };
+  if (!seed.statements.length) return { ...base, ok: false, executed: false, message: '넣을 데이터가 없습니다' };
+  const total = seed.tables.reduce((n, t) => n + t.rows, 0);
+
+  await hooks.waiting();
+  const ok = await hooks.approve({
+    projectName: meta.name,
+    connection,
+    purpose: 'seed',
+    summary: `${seed.tables.length}개 테이블 ${total}행`,
+    statements: seed.statements.map((sql) => ({ sql, category: 'create' })),
+  });
+  if (!ok) return { ...base, ok: false, executed: false, rejected: true, message: '사용자가 테스트 데이터 넣기를 거절했습니다' };
+
+  let r;
+  try {
+    r = await api.execute(connection.id, seed.statements);
+  } catch (e) {
+    void projectApi.recordDbLog(projectId, connection, { action: 'seed', stage: 'execute', ok: false, error: message(e) });
+    return { ...base, ok: false, executed: false, error: message(e) };
+  }
+  void projectApi.recordDbLog(projectId, connection, { action: 'seed', stage: 'execute', ok: r.ok, results: r.results, rolledBack: r.rolledBack, appliedCount: r.appliedCount });
+  return {
+    ...base,
+    ok: r.ok,
+    executed: true,
+    rolledBack: r.rolledBack,
+    appliedCount: r.appliedCount,
+    // 성공한 문장은 길어서 빼고, 실패한 것만 SQL과 오류를 돌려준다
+    results: r.results.filter((x) => !x.ok).map(({ sql: s, ok: o, skipped, error }) => ({ sql: s.slice(0, 2000), ok: o, ...(skipped ? { skipped } : {}), ...(error ? { error } : {}) })),
   };
 }

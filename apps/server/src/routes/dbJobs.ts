@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { atLeast, type Auth } from '../auth';
 import { publicJob, type DbJobKind, type DbJobQueue, type DbJobStatus } from '../dbJobs';
 
-const KINDS: DbJobKind[] = ['listConnections', 'saveConnection', 'testConnection', 'push', 'pull'];
+const KINDS: DbJobKind[] = ['listConnections', 'saveConnection', 'testConnection', 'push', 'pull', 'compare', 'seed'];
 const STATUSES: DbJobStatus[] = ['running', 'waiting_approval', 'done', 'failed'];
 /** 한 번 요청에서 기다리는 최대 시간 (MCP 클라이언트가 먼저 끊지 않게) */
 const MAX_WAIT_S = 110;

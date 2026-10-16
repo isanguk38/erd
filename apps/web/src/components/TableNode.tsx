@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position, useConnection, type Node, type NodeProps } from '@xyflow/react';
-import { indexLabel, type Table } from '@erd/core';
+import { indexLabel, PRIVACY_MUST_ENCRYPT, privacyText, type Table } from '@erd/core';
 import type { ViewMode } from '../store';
 import { Icon } from './ui';
 import { readableText } from './ColorPicker';
@@ -80,6 +80,11 @@ function TableNodeView({ id, data, selected }: NodeProps<TableNodeType>) {
               </span>
               <span className="table-node__name">
                 {name}
+                {c.privacy && (
+                  <span className={`pii-mark privacy-${c.privacy.kind}${PRIVACY_MUST_ENCRYPT.has(c.privacy.kind) && !c.privacy.encrypted ? ' warn' : ''}`} title={`개인정보: ${privacyText(c.privacy)}`}>
+                    <Icon name="lock" size={10} />
+                  </span>
+                )}
                 {viewMode === 'both' && c.logicalName && <span className="table-node__logical">{c.logicalName}</span>}
               </span>
               <span className="table-node__type">

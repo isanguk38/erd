@@ -6,6 +6,7 @@ import { FEATURE_LABEL } from './features';
 import { enumOfType } from './enums';
 import { newRelationName, relationName, type Column, type Relation, type Schema, type Table } from './model';
 import { tableTypeIssues } from './typeRules';
+import { guessPrivacy, PRIVACY_LABEL, PRIVACY_MUST_ENCRYPT } from './privacy';
 import { fitsStyle, isToolTable, namingIssues, namingRuleText, projectNamingStyles, stylesOf, type NameStyle, type NamingSetting } from './naming';
 import { checkColumnAgainstDictionary, checkTableAgainstDictionary, describeMatch, dictIndex, lookupPhysical, lookupTablePhysical, termFromTable, type DictTerm, type Dictionary } from './dictionary';
 
@@ -25,7 +26,9 @@ export type LintRule =
   | 'dict-mismatch'
   | 'dict-unknown'
   | 'duplicate-table-logical'
-  | 'unsupported-feature';
+  | 'unsupported-feature'
+  | 'privacy-unmarked'
+  | 'privacy-unencrypted';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -65,6 +68,8 @@ export const LINT_RULES: Record<LintRule, { label: string; severity: LintSeverit
   'dict-unknown': { label: '사전에 없는 용어', severity: 'warning', description: '논리명이 표준 용어 사전에 없습니다. "사전에 추가"로 이 컬럼의 이름·타입을 새 용어로 넣거나, 사전에 있는 표준 용어로 바꾸세요.' },
   'unsupported-feature': { label: '이 DB에 없는 기능', severity: 'error', description: '프로젝트 DB 종류에는 없는 기능을 쓰고 있습니다 (예: Oracle에 ENUM, MySQL에 부분 인덱스). 예전 데이터나 SQL 붙여넣기로 들어온 것이니 이 DB에 있는 방법으로 바꾸세요.' },
   'duplicate-table-logical': { label: '같은 논리명 테이블', severity: 'warning', description: '두 테이블이 같은 논리명을 씁니다. 같은 것을 두 번 만든 것인지 확인하고, 다르면 논리명을 구분하세요.' },
+  'privacy-unencrypted': { label: '개인정보 암호화 표시 없음', severity: 'warning', description: '고유식별정보(주민등록번호 등)·계좌번호·카드번호는 암호화해서, 비밀번호는 일방향 암호화(해시)해서 저장해야 합니다 (개인정보 보호법). 암호화해 저장한다면 "암호화함으로 표시"를 누르세요 — 암호문·해시가 들어갈 길이인지도 확인하세요.' },
+  'privacy-unmarked': { label: '개인정보로 보이는 컬럼', severity: 'info', description: '이름·연락처·주민등록번호·계좌처럼 개인정보로 보이는 컬럼입니다. 개인정보로 표시해 두면 정의서의 "개인정보 항목" 시트에 모이고, 암호화해야 하는 것은 따로 알려 줍니다. 개인정보가 아니면 무시하세요.' },
   'type-ignored': { label: 'DB가 무시하는 설정', severity: 'info', description: '이 DB에서는 쓰지 않는 길이·기본값·ON UPDATE입니다. 실패하지는 않지만 ERD와 실제 DB가 달라 보입니다.' },
 };
 
@@ -350,6 +355,30 @@ export function lintSchema(schema: Schema, dialect: DialectId | string, options:
       if (r.onUpdate === 'NO ACTION' || r.onUpdate === 'RESTRICT') continue;
       const child = schema.tables.find((t) => t.id === r.fromTableId);
       if (child) add('unsupported-feature', child, `${child.name} 외래키: ${no(FEATURE_LABEL.fkOnUpdate)} (ON UPDATE ${r.onUpdate}는 빼고 만듭니다)`);
+    }
+  }
+
+  // 개인정보: 표시하지 않은 개인정보 같은 컬럼, 암호화해야 하는데 암호화 표시가 없는 컬럼
+  for (const t of schema.tables) {
+    if (isToolTable(t.name)) continue;
+    for (const c of t.columns) {
+      if (c.privacy) {
+        if (PRIVACY_MUST_ENCRYPT.has(c.privacy.kind) && !c.privacy.encrypted) {
+          add('privacy-unencrypted', t, `${t.name}.${c.name}: ${PRIVACY_LABEL[c.privacy.kind]}인데 암호화 표시가 없습니다 — ${c.privacy.kind === 'password' ? '일방향 암호화(해시)' : '암호화'}해서 저장해야 합니다`, {
+            columnId: c.id,
+            columnName: c.name,
+            fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: '암호화함으로 표시', patch: { privacy: { kind: c.privacy.kind, encrypted: true } } },
+          });
+        }
+        continue;
+      }
+      const kind = guessPrivacy(c);
+      if (!kind) continue;
+      add('privacy-unmarked', t, `${t.name}.${c.name}${c.logicalName ? `(${c.logicalName})` : ''}: ${PRIVACY_LABEL[kind]}로 보입니다`, {
+        columnId: c.id,
+        columnName: c.name,
+        fix: { kind: 'patchColumn', tableId: t.id, columnId: c.id, label: `${PRIVACY_LABEL[kind]}로 표시`, patch: { privacy: { kind } } },
+      });
     }
   }
 

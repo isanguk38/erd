@@ -31,11 +31,12 @@ import {
   updateTable,
   updateRelation,
 } from './operations';
-import { addToArea, createArea, moveToArea, removeArea, removeFromArea, requireArea, updateArea } from './areas';
+import { addToArea, createArea, moveToArea, paintAreaTables, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
 import { FEATURE_LABEL, type FeatureKey } from './features';
 import type { Dialect } from './dialects/types';
 import { addEnumType, canonicalEnumColumns, removeEnumType, requireEnum, typeName, updateEnumType } from './enums';
+import { isPrivacyKind, PRIVACY_KINDS, type PrivacyKind } from './privacy';
 import { addObject, DB_OBJECT_LABEL, DB_OBJECT_ORDER, findObjectByName, removeObject, updateObject, type DbObjectKind } from './dbObjects';
 
 export interface ColumnSpec {
@@ -57,6 +58,10 @@ export interface ColumnSpec {
   /** 계산 값을 저장(STORED)할지. 기본 false(VIRTUAL) */
   generatedStored?: boolean;
   comment?: string;
+  /** 개인정보 종류 (unique·password·financial·sensitive·personal). null이면 표시 해제. ERD에만 저장 */
+  privacy?: PrivacyKind | null;
+  /** 개인정보를 암호화(비밀번호는 해시)해서 저장하는지 */
+  encrypted?: boolean;
 }
 
 export type Command =
@@ -84,12 +89,13 @@ export type Command =
   /** 관계 고치기. name: 지금 외래키 이름(여럿일 때 고름), newName: 새 외래키 이름 */
   | { op: 'updateRelation'; parent: string; child: string; name?: string; newName?: string; cardinality?: Cardinality; onDelete?: ReferentialAction; onUpdate?: ReferentialAction }
   // 주제영역 (화면에서 나눠 보는 탭. SQL·DB에는 영향 없음)
-  | { op: 'createArea'; name: string; tables?: string[]; color?: string }
-  | { op: 'updateArea'; area: string; name?: string; color?: string }
+  // colorTables(기본 true): 영역 색을 그 영역 테이블 색으로도 칠한다 (공통 테이블은 먼저 들어간 영역 색 유지)
+  | { op: 'createArea'; name: string; tables?: string[]; color?: string; colorTables?: boolean }
+  | { op: 'updateArea'; area: string; name?: string; color?: string; colorTables?: boolean }
   | { op: 'dropArea'; area: string }
-  | { op: 'addToArea'; area: string; tables: string[] }
+  | { op: 'addToArea'; area: string; tables: string[]; colorTables?: boolean }
   | { op: 'removeFromArea'; area: string; tables: string[] }
-  | { op: 'moveToArea'; area: string; tables: string[]; from?: string }
+  | { op: 'moveToArea'; area: string; tables: string[]; from?: string; colorTables?: boolean }
   // 사용자 정의 타입 (ENUM). 컬럼 타입 칸에 이 이름을 쓴다
   | { op: 'createEnum'; name: string; values: string[]; comment?: string }
   | { op: 'updateEnum'; enum: string; name?: string; values?: string[]; comment?: string }
@@ -145,10 +151,14 @@ export function columnPatch(spec: Partial<ColumnSpec>): Partial<Column> {
   if (spec.generated !== undefined) patch.generated = spec.generated?.trim() ? { expression: spec.generated.trim(), stored: Boolean(spec.generatedStored) } : undefined;
 
   if (spec.comment !== undefined) patch.comment = spec.comment;
+  if (spec.privacy !== undefined) {
+    if (spec.privacy !== null && !isPrivacyKind(spec.privacy)) throw new Error(`개인정보 종류 "${spec.privacy}"는 없습니다. ${PRIVACY_KINDS.join(', ')} 중 하나 (해제는 null)`);
+    patch.privacy = spec.privacy ? { kind: spec.privacy, ...(spec.encrypted ? { encrypted: true } : {}) } : undefined;
+  }
   return patch;
 }
 
-function applyOne(schema: Schema, command: Command, created: string[], areaOf: Map<string, string>, kinds: DbObjectKind[] = DB_OBJECT_ORDER): string {
+function applyOne(schema: Schema, command: Command, created: string[], areaOf: Map<string, string>, keepColor: Set<string>, kinds: DbObjectKind[] = DB_OBJECT_ORDER): string {
   switch (command.op) {
     case 'createTable': {
       if (schema.tables.some((t) => eq(t.name, command.name))) throw new Error(`테이블 "${command.name}"이 이미 있습니다`);
@@ -158,6 +168,7 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
       for (const spec of command.columns ?? []) addColumn(schema, table.id, columnPatch(spec));
       created.push(table.id);
       if (command.area) areaOf.set(table.id, requireArea(schema, command.area).id);
+      if (command.color) keepColor.add(table.id);
       return `${table.name} 테이블 생성 (컬럼 ${table.columns.length}개)`;
     }
     case 'updateTable': {
@@ -187,6 +198,11 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
       // 계산식은 그대로 두고 저장 방식만 바꾸는 경우
       if (command.changes.generated === undefined && command.changes.generatedStored !== undefined && column.generated) {
         column.generated = { ...column.generated, stored: command.changes.generatedStored };
+      }
+      // 개인정보 종류는 그대로 두고 암호화 여부만 바꾸는 경우
+      if (command.changes.encrypted !== undefined && command.changes.privacy === undefined) {
+        if (!column.privacy) throw new Error(`${table.name}.${column.name}은(는) 개인정보로 표시되지 않았습니다. privacy로 종류를 함께 주세요`);
+        column.privacy = { kind: column.privacy.kind, ...(command.changes.encrypted ? { encrypted: true } : {}) };
       }
       return `${table.name}.${command.column} 컬럼 수정`;
     }
@@ -281,12 +297,26 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
     }
     case 'createArea': {
       const area = createArea(schema, { name: command.name, color: command.color, tableIds: (command.tables ?? []).map((n) => tableByName(schema, n).id) });
-      return `영역 ${area.name} 생성 (테이블 ${area.tableIds.length}개)`;
+      const painted = command.colorTables === false ? [] : paintAreaTables(schema, area.id, undefined, keepColor);
+      return `영역 ${area.name} 생성 (테이블 ${area.tableIds.length}개${painted.length ? `, 테이블 ${painted.length}개를 영역 색 ${area.color}로` : ''})`;
     }
     case 'updateArea': {
-      const before = requireArea(schema, command.area).name;
+      const old = requireArea(schema, command.area);
+      const before = old.name;
+      const oldColor = old.color;
       const area = updateArea(schema, command.area, { name: command.name, color: command.color });
-      return `영역 ${before}${area.name !== before ? ` → ${area.name}` : ''} 수정`;
+      let follow: string[];
+      if (command.colorTables === true) {
+        // 직접 요청: 이미 있는 영역의 테이블을 모두 영역 색으로 (공통 테이블은 첫 영역 색)
+        follow = paintAreaTables(schema, area.id, undefined, keepColor);
+      } else {
+        // 색을 바꾸면 그 영역 색을 따르던 테이블(예전 영역 색 그대로인 것)도 함께
+        follow = command.colorTables !== false && command.color && oldColor !== area.color
+          ? area.tableIds.filter((id) => !keepColor.has(id) && findTable(schema, id)?.color === oldColor)
+          : [];
+        for (const id of follow) findTable(schema, id)!.color = area.color;
+      }
+      return `영역 ${before}${area.name !== before ? ` → ${area.name}` : ''} 수정${follow.length ? ` (테이블 ${follow.length}개 색을 ${area.color}로)` : ''}`;
     }
     case 'dropArea': {
       const area = requireArea(schema, command.area);
@@ -296,8 +326,9 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
     case 'addToArea': {
       const area = requireArea(schema, command.area);
       const tables = command.tables.map((n) => tableByName(schema, n));
-      addToArea(schema, area.id, tables.map((t) => t.id));
-      return `영역 ${area.name}에 ${tables.map((t) => t.name).join(', ')} 추가`;
+      const added = addToArea(schema, area.id, tables.map((t) => t.id));
+      const painted = command.colorTables === false ? [] : paintAreaTables(schema, area.id, added, keepColor);
+      return `영역 ${area.name}에 ${tables.map((t) => t.name).join(', ')} 추가${painted.length ? ` (테이블 ${painted.length}개를 영역 색으로)` : ''}`;
     }
     case 'removeFromArea': {
       const area = requireArea(schema, command.area);
@@ -341,6 +372,7 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
       const from = command.from ? requireArea(schema, command.from) : undefined;
       const tables = command.tables.map((n) => tableByName(schema, n));
       moveToArea(schema, area.id, tables.map((t) => t.id), from?.id);
+      if (command.colorTables !== false) paintAreaTables(schema, area.id, tables.map((t) => t.id), keepColor);
       return `${tables.map((t) => t.name).join(', ')}을(를) ${from ? `${from.name}에서 ` : ''}영역 ${area.name}(으)로 옮김`;
     }
   }
@@ -425,9 +457,11 @@ export function applyCommands(input: Schema, commands: Command[], dialect?: Pick
   const schema = cloneSchema(input);
   const created: string[] = [];
   const areaOf = new Map<string, string>();
+  // 이번 명령에서 색을 직접 정한 테이블 (영역 색으로 덮지 않는다)
+  const keepColor = new Set<string>();
   const messages = commands.map((command, i) => {
     try {
-      return applyOne(schema, command, created, areaOf, dialect?.features.objects?.kinds);
+      return applyOne(schema, command, created, areaOf, keepColor, dialect?.features.objects?.kinds);
     } catch (e) {
       throw new CommandError(i, e instanceof Error ? e.message : String(e));
     }
@@ -436,7 +470,7 @@ export function applyCommands(input: Schema, commands: Command[], dialect?: Pick
   // 영역을 지정해 만든 새 테이블: 영역에 넣고 영역 안 테이블 아래에 놓는다
   const byArea = new Map<string, string[]>();
   for (const [tableId, areaId] of areaOf) if (findTable(schema, tableId) && schema.areas?.some((a) => a.id === areaId)) byArea.set(areaId, [...(byArea.get(areaId) ?? []), tableId]);
-  for (const [areaId, ids] of byArea) addToArea(schema, areaId, ids);
+  for (const [areaId, ids] of byArea) paintAreaTables(schema, areaId, addToArea(schema, areaId, ids), keepColor);
   // ENUM을 쓰는 컬럼의 타입은 ENUM에 적힌 이름 그대로 (대소문자·따옴표가 달라도 같은 타입)
   canonicalEnumColumns(schema);
   return { schema, messages };
@@ -462,6 +496,8 @@ export function describeSchema(schema: Schema) {
         generated: c.generated?.expression || undefined,
         generatedStored: c.generated?.stored || undefined,
         comment: c.comment || undefined,
+        privacy: c.privacy?.kind,
+        encrypted: c.privacy?.encrypted || undefined,
       })),
       checks: t.checks?.length ? t.checks.map((k) => ({ name: checkName(t, k), expression: k.expression })) : undefined,
       indexes: t.indexes.length

@@ -6,6 +6,7 @@ import { getDialect } from '../dialects';
 import type { DialectId } from '../dialects/types';
 import { checkName, findTable, indexLabel, indexName, relationName, type Index, type Schema, type Table } from '../model';
 import { foreignKeyColumnIds } from '../operations';
+import { PRIVACY_HINT, PRIVACY_LABEL, PRIVACY_MUST_ENCRYPT, privacyColumns, privacyText } from '../privacy';
 
 export interface DefinitionOptions {
   projectName: string;
@@ -53,7 +54,7 @@ function styleRow(row: ExcelJS.Row, options: { header?: boolean; from?: number; 
 
 /** 시트 이름 규칙: 31자 이하, []:*?/\ 사용 불가, 중복 불가 */
 function sheetNames(tables: Table[]): Map<string, string> {
-  const used = new Set(['표지', '테이블 목록', '변경 이력']);
+  const used = new Set(['표지', '테이블 목록', '변경 이력', '개인정보 항목']);
   const names = new Map<string, string>();
   for (const t of tables) {
     const base = t.name.replace(/[[\]:*?/\\]/g, '_').slice(0, 28) || 'table';
@@ -103,7 +104,8 @@ function writeTableBlock(sheet: ExcelJS.Worksheet, schema: Schema, table: Table,
       c.nullable && !pk ? 'Y' : 'N',
       c.autoIncrement ? 'Y' : '',
       c.generated?.expression.trim() ? `= ${c.generated.expression.trim()} (계산${c.generated.stored ? ', 저장' : ''})` : `${c.defaultValue ?? ''}${c.onUpdate ? ` (수정 시 ${c.onUpdate})` : ''}`,
-      c.comment,
+      // 개인정보 표시는 설명 앞에 [개인정보 종류]로
+      [c.privacy ? `[${privacyText(c.privacy)}]` : '', c.comment].filter(Boolean).join(' '),
     ]);
     styleRow(row);
     for (const col of [1, 5, 6, 7, 8, 9]) row.getCell(col).alignment = { horizontal: 'center', vertical: 'middle' };
@@ -252,6 +254,26 @@ export async function buildDefinitionWorkbook(schema: Schema, options: Definitio
       styleRow(row, { to: 5 });
       row.getCell(1).alignment = { horizontal: 'center' };
       row.getCell(2).alignment = { horizontal: 'center' };
+    });
+  }
+
+  // 개인정보 항목: 개인정보로 표시한 컬럼을 한곳에 (개인정보 처리 현황 점검 자료)
+  const personal = privacyColumns(schema, new Set(tables.map((t) => t.id)));
+  if (personal.length) {
+    const sheet = wb.addWorksheet('개인정보 항목');
+    sheet.columns = [{ width: 6 }, { width: 24 }, { width: 22 }, { width: 24 }, { width: 22 }, { width: 14 }, { width: 10 }, { width: 50 }];
+    sheet.addRow(['개인정보 항목']).getCell(1).font = TITLE_FONT;
+    const mustEncrypt = personal.filter((p) => PRIVACY_MUST_ENCRYPT.has(p.privacy.kind));
+    const missing = mustEncrypt.filter((p) => !p.privacy.encrypted).length;
+    sheet.addRow([`개인정보로 표시한 컬럼 ${personal.length}개 · 암호화해야 하는 것 ${mustEncrypt.length}개${missing ? ` (암호화 표시 없음 ${missing}개)` : ''}`]).getCell(1).font = { color: { argb: 'FF64748B' } };
+    sheet.addRow([]);
+    styleRow(sheet.addRow(['No', '테이블(물리)', '테이블(논리)', '컬럼(물리)', '컬럼(논리)', '종류', '암호화', '비고']), { header: true, to: 8 });
+    personal.forEach((p, i) => {
+      const must = PRIVACY_MUST_ENCRYPT.has(p.privacy.kind);
+      const row = sheet.addRow([i + 1, p.table.name, p.table.logicalName, p.column.name, p.column.logicalName, PRIVACY_LABEL[p.privacy.kind], p.privacy.encrypted ? 'Y' : must ? 'N (필요)' : 'N', PRIVACY_HINT[p.privacy.kind]]);
+      styleRow(row, { to: 8 });
+      for (const col of [1, 6, 7]) row.getCell(col).alignment = { horizontal: 'center', vertical: 'middle' };
+      if (must && !p.privacy.encrypted) row.getCell(7).font = { bold: true, color: { argb: 'FFDC2626' } };
     });
   }
 

@@ -10,6 +10,8 @@ import { SqlDialog } from './components/SqlDialog';
 import { VersionsDialog } from './components/VersionsDialog';
 import { DbPullDialog } from './components/DbPullDialog';
 import { DbPushDialog } from './components/DbPushDialog';
+import { DbCompareDialog } from './components/DbCompareDialog';
+import { SeedDialog } from './components/SeedDialog';
 import { DefinitionDialog } from './components/DefinitionDialog';
 import { desktop } from './lib/desktop';
 import { AiDbJobRunner } from './components/AiDbJobs';
@@ -260,6 +262,8 @@ function Editor({ projectId }: { projectId: string }) {
         {dialog === 'versions' && <VersionsDialog onClose={close} />}
         {dialog === 'dbPull' && <DbPullDialog onClose={close} onDone={(o) => (o?.relayout ? setRelayoutRequest((n) => n + 1) : setFitRequest((n) => n + 1))} />}
         {dialog === 'dbPush' && <DbPushDialog onClose={close} />}
+        {dialog === 'dbCompare' && <DbCompareDialog onClose={close} />}
+        {dialog === 'seed' && <SeedDialog onClose={close} />}
         {dialog === 'definition' && <DefinitionDialog onClose={close} />}
         {dialog === 'ai' && <AiDialog onClose={close} onOpenProposals={() => setDialog('proposals')} onOpenLog={() => setDialog('aiLog')} />}
         {dialog === 'proposals' && <ProposalsDialog onClose={close} />}

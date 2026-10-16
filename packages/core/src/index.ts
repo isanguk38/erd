@@ -28,3 +28,5 @@ export * from './dbErrors';
 export * from './dbObjects';
 export * from './impact';
 export * from './safety';
+export * from './privacy';
+export * from './seed';

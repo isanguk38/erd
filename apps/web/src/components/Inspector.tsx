@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { requestFocus } from '../lib/focus';
 import { Slot, useFeatures, useSlot } from '../features/registry';
 import { TextInput, type Mark } from './TextInput';
+import { PrivacyMenu } from './PrivacyMenu';
 import {
   addColumn,
   addToArea,
@@ -393,6 +394,7 @@ function TableEditor({ table }: { table: Table }) {
               </span>
               <TextInput value={c.comment} onCommit={(comment) => setColumn(c, { comment })} />
               <span className="row-actions">
+                <PrivacyMenu column={c} onChange={(privacy) => setColumn(c, { privacy })} />
                 <button className="icon-btn" title="위로" disabled={i === 0} onClick={() => edit((d) => moveColumn(d, table.id, c.id, i - 1))}>↑</button>
                 <button className="icon-btn" title="아래로" disabled={i === table.columns.length - 1} onClick={() => edit((d) => moveColumn(d, table.id, c.id, i + 1))}>↓</button>
                 <button

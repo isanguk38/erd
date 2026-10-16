@@ -211,7 +211,8 @@ export function applyChanges(baseInput: Schema, diff: DiffResult, selected?: Set
       case 'alterColumn':
         if (table) {
           const i = table.columns.findIndex((c) => c.id === change.after.id);
-          if (i >= 0) table.columns[i] = { ...copyColumn(change.after), primaryKey: table.columns[i].primaryKey, unique: table.columns[i].unique };
+          // 개인정보 표시는 ERD에만 있는 정보라 DB에서 가져와도 그대로 둔다
+          if (i >= 0) table.columns[i] = { ...copyColumn(change.after), primaryKey: table.columns[i].primaryKey, unique: table.columns[i].unique, ...(table.columns[i].privacy ? { privacy: table.columns[i].privacy } : {}) };
         }
         break;
       case 'primaryKey':

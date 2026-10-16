@@ -64,6 +64,26 @@ export function updateArea(schema: Schema, areaId: string, patch: { name?: strin
   return area;
 }
 
+/**
+ * 영역 색을 그 영역 테이블에 칠한다 (AI가 영역을 만들거나 테이블을 넣을 때). 칠한 테이블 id를 돌려준다.
+ * 여러 영역에 들어 있는 공통 테이블(예: 회원)은 그 테이블이 들어 있는 첫 영역(탭 순서)의 색만 칠한다.
+ * keep: 칠하지 않을 테이블 (색을 직접 정한 것)
+ */
+export function paintAreaTables(schema: Schema, areaId: string, tableIds?: string[], keep?: Set<string>): string[] {
+  const area = requireArea(schema, areaId);
+  if (!area.color) return [];
+  const painted: string[] = [];
+  for (const id of tableIds ?? area.tableIds) {
+    if (!area.tableIds.includes(id) || keep?.has(id)) continue;
+    if ((schema.areas ?? []).find((a) => a.tableIds.includes(id))?.id !== area.id) continue;
+    const table = findTable(schema, id);
+    if (!table || table.color === area.color) continue;
+    table.color = area.color;
+    painted.push(id);
+  }
+  return painted;
+}
+
 /** 영역만 지운다 (테이블은 남음) */
 export function removeArea(schema: Schema, areaId: string): void {
   const area = requireArea(schema, areaId);

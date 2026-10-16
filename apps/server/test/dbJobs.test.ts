@@ -71,7 +71,7 @@ describe('AI DB 작업은 사용자의 앱이 처리 (웹 서비스)', () => {
     expect(JSON.parse(textOf(ok)).serverVersion).toBe('PostgreSQL 16');
   });
 
-  it('DB로 내보내기: 프로젝트 AI 모드를 앱에 넘기고, 실패하면 실패한 SQL마다 원인·조치와 관련 테이블', async () => {
+  it('DB로 내보내기: AI 모드가 바로 적용이어도 앱에서 승인(모드를 넘기지 않음), 실패하면 실패한 SQL마다 원인·조치와 관련 테이블', async () => {
     const { call, app, erd } = await start();
     const project = JSON.parse(textOf(await call('create_project', { name: '게임', dialect: 'postgresql' })));
     await erd.app.inject({ method: 'PATCH', url: `/api/projects/${project.id}`, payload: { aiMode: 'apply' } });
@@ -86,7 +86,7 @@ describe('AI DB 작업은 사용자의 앱이 처리 (웹 서비스)', () => {
       app(async () => ({ status: 'done', result: { ok: false, executed: true, rolledBack: true, appliedCount: 0, results: [{ sql, ok: false, error: '"fk_liar_accusation_hand_player" 제약 조건이 이미 "liar_accusation" 릴레이션(relation)에서 사용되고 있습니다' }] } })),
     ]);
     expect(job.kind).toBe('push');
-    expect(job.payload).toMatchObject({ mode: 'apply', includeDrop: false, dryRun: false });
+    expect(job.payload).toEqual({ includeDrop: false, dryRun: false });
     expect(r.isError).toBe(true);
     const body = JSON.parse(textOf(r));
     expect(body.failedStatements[0].diagnosis).toMatchObject({ actor: 'ai' });

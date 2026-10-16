@@ -268,6 +268,19 @@ export function LintPanel({ onClose, onOpenAi }: { onClose: () => void; onOpenAi
                       모두 기준대로 바꾸기 ({list.filter((i) => i.fix).length})
                     </button>
                   )}
+                  {/* 개인정보로 보이는 컬럼은 짐작한 종류로 한 번에 표시할 수 있다 (사람이 아닌 것은 먼저 무시) */}
+                  {rule === 'privacy-unmarked' && !readOnly && list.length > 1 && (
+                    <button
+                      className="btn btn-sm lint-group__bulk"
+                      onClick={() => {
+                        const fixes = list.flatMap((i) => (i.fix?.kind === 'patchColumn' ? [i.fix] : []));
+                        useStore.getState().edit((d) => fixes.forEach((f) => updateColumn(d, f.tableId, f.columnId, f.patch)));
+                        useStore.getState().showNotice({ text: `컬럼 ${fixes.length}개를 개인정보로 표시했습니다 (Ctrl+Z로 한 번에 되돌리기)` });
+                      }}
+                    >
+                      모두 개인정보로 표시 ({list.length})
+                    </button>
+                  )}
                   {rule.startsWith('dict-') && !readOnly && list.filter((i) => i.fix).length > 1 && (
                     <button className="btn btn-sm lint-group__bulk" onClick={() => fixAllDictionary(list)}>
                       {rule === 'dict-unknown' ? '모두 사전에 추가' : '모두 표준대로'} ({list.filter((i) => i.fix).length})

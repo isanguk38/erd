@@ -29,6 +29,7 @@ const PATHS: Record<string, string> = {
   note: 'M5 3h14v11l-7 7H5zM12 21v-7h7',
   tag: 'M3 12V4h8l10 10-8 8zM7.5 7.5h.01',
   code: 'M8 6l-6 6 6 6M16 6l6 6-6 6',
+  lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4',
   book: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z',
 };
 
@@ -49,7 +50,7 @@ export interface MenuItem {
 }
 
 /** 버튼을 누르면 아래로 펼쳐지는 메뉴 */
-export function Dropdown({ label, icon, items, title }: { label: ReactNode; icon?: string; items: MenuItem[]; title?: string }) {
+export function Dropdown({ label, icon, items, title, iconOnly }: { label: ReactNode; icon?: string; items: MenuItem[]; title?: string; /** 아이콘만 (좁은 도구 막대) */ iconOnly?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -65,10 +66,10 @@ export function Dropdown({ label, icon, items, title }: { label: ReactNode; icon
   }, [open]);
   return (
     <div className="dropdown" ref={ref}>
-      <button className={`btn btn-tool${open ? ' active' : ''}`} onClick={() => setOpen(!open)} title={title} aria-haspopup="menu" aria-expanded={open}>
+      <button className={`btn btn-tool${open ? ' active' : ''}${iconOnly ? ' icon-only' : ''}`} onClick={() => setOpen(!open)} title={title} aria-label={iconOnly ? title : undefined} aria-haspopup="menu" aria-expanded={open}>
         {icon && <Icon name={icon} />}
-        <span>{label}</span>
-        <Icon name="chevron" size={14} />
+        {iconOnly ? <span className="sr-only">{label}</span> : <span>{label}</span>}
+        {!iconOnly && <Icon name="chevron" size={14} />}
       </button>
       {open && (
         <div className="dropdown__menu" role="menu">

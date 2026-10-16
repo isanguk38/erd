@@ -28,6 +28,8 @@ export interface Column {
    */
   generated?: { expression: string; stored?: boolean };
   comment: string;
+  /** 개인정보 표시 (privacy.ts). ERD에만 저장 — SQL·DB 비교에는 영향 없음 */
+  privacy?: import('./privacy').ColumnPrivacy;
 }
 
 export interface Index {
