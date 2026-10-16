@@ -30,7 +30,7 @@ const areaColor = z
   .string()
   .regex(/^#[0-9a-fA-F]{6}$/)
   .optional()
-  .describe('영역 색 (#rrggbb). 생략하면 옆 영역과 구분되는 색을 차례로 준다. 흰 글자가 잘 보이는 진한 색 (예: #2563eb, #059669, #ea580c, #9333ea)');
+  .describe('영역 색 (#rrggbb). 생략하면 다른 영역과 겹치지 않는 색을 준다 (생략을 권장). 다른 영역과 같거나 비슷한 색이면 겹치지 않는 색으로 바뀌고 결과 메시지에 알린다. 흰 글자가 잘 보이는 진한 색');
 const colorTables = z
   .boolean()
   .optional()

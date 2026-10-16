@@ -44,12 +44,45 @@ function uniqueAreaName(schema: Schema, name: string): string {
   for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
 }
 
+// ── 영역 색이 겹치지 않게 ──────────────────────
+// 영역 색은 테이블 색으로도 쓰여(AI 영역 만들기), 두 영역이 같거나 거의 같은 색이면 어느 영역 테이블인지 구분이 안 된다.
+
+const rgb = (hex: string) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1]!, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255] as const;
+};
+
+/** 눈으로 구분하기 어려울 만큼 비슷한 색인지 (같은 색 포함). 사람 눈이 초록에 민감한 것을 조금 반영한 RGB 거리 */
+export function similarColor(a: string, b: string): boolean {
+  const x = rgb(a);
+  const y = rgb(b);
+  if (!x || !y) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  const d = Math.sqrt(2 * (x[0] - y[0]) ** 2 + 4 * (x[1] - y[1]) ** 2 + 3 * (x[2] - y[2]) ** 2);
+  return d < 90;
+}
+
+/** 이 색과 겹치는(같거나 비슷한) 다른 영역 */
+export function areaColorClash(schema: Schema, color: string, exceptAreaId?: string): Area | undefined {
+  return (schema.areas ?? []).find((a) => a.id !== exceptAreaId && a.color && similarColor(a.color, color));
+}
+
+/** 다른 영역과 겹치지 않는 다음 영역 색 (팔레트 순서대로. 모두 쓰였으면 가장 덜 쓰인 색) */
+export function nextAreaColor(schema: Schema, exceptAreaId?: string): string {
+  const free = AREA_COLORS.find((c) => !areaColorClash(schema, c, exceptAreaId));
+  if (free) return free;
+  const used = (c: string) => (schema.areas ?? []).filter((a) => a.id !== exceptAreaId && a.color && similarColor(a.color, c)).length;
+  return [...AREA_COLORS].sort((a, b) => used(a) - used(b))[0]!;
+}
+
 export function createArea(schema: Schema, input: { name: string; color?: string; tableIds?: string[] }): Area {
   const areas = (schema.areas ??= []);
   const area: Area = {
     id: newId('area'),
     name: uniqueAreaName(schema, input.name),
-    color: input.color ?? AREA_COLORS[areas.length % AREA_COLORS.length],
+    // 색을 주지 않으면 다른 영역과 겹치지 않는 색
+    color: input.color ?? nextAreaColor(schema),
     tableIds: [],
   };
   areas.push(area);

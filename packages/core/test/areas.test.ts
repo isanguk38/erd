@@ -109,8 +109,8 @@ describe('주제영역', () => {
 
   it('AI가 읽는 요약에 영역이 나온다', () => {
     expect(describeSchema(base()).areas).toEqual([
-      { name: '회원', tables: ['member'] },
-      { name: '주문', tables: ['orders', 'order_item'] },
+      { name: '회원', color: expect.stringMatching(/^#/), tables: ['member'] },
+      { name: '주문', color: expect.stringMatching(/^#/), tables: ['orders', 'order_item'] },
     ]);
   });
 

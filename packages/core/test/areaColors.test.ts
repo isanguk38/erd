@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, emptySchema, type Schema } from '../src';
+import { applyCommands, emptySchema, similarColor, type Schema } from '../src';
 
 const tables = (): Schema =>
   applyCommands(emptySchema(), ['member', 'orders', 'order_item', 'payment', 'coupon'].map((name) => ({ op: 'createTable' as const, name, columns: [{ name: `${name}_id`, type: 'BIGINT', primaryKey: true }] }))).schema;
@@ -17,7 +17,7 @@ describe('AI 영역 만들기: 영역 색 = 테이블 색', () => {
     expect(colorOf(schema, 'order_item')).toBe('#059669');
     expect(colorOf(schema, 'payment')).toBe('#059669');
     expect(colorOf(schema, 'coupon')).toBeUndefined();
-    expect(messages[1]).toContain('테이블 2개를 영역 색 #059669로');
+    expect(messages[1]).toContain('색 #059669, 테이블 3개, 테이블 2개를 영역 색으로');
   });
 
   it('색을 주지 않으면 차례로 주는 영역 색으로 칠한다', () => {
@@ -65,6 +65,33 @@ describe('AI 영역 만들기: 영역 색 = 테이블 색', () => {
     expect(colorOf(schema, 'orders')).toBe('#059669');
     expect(colorOf(schema, 'member')).toBe('#2563eb');
     expect(r.messages[0]).toContain('테이블 1개 색을 #059669로');
+  });
+
+  it('영역 색은 서로 겹치지 않는다: 자동 색은 안 쓰인 색, 같거나 비슷한 색을 주면 바꾸고 알림', () => {
+    // 자동 색: 12개 영역이 모두 서로 구분되는 색 (비슷한 색도 아님)
+    const many = applyCommands(emptySchema(), Array.from({ length: 12 }, (_, i) => ({ op: 'createArea' as const, name: `영역${i}` }))).schema;
+    const colors = many.areas!.map((a) => a.color!);
+    for (let i = 0; i < colors.length; i++) for (let j = i + 1; j < colors.length; j++) expect(similarColor(colors[i]!, colors[j]!), `${colors[i]} ${colors[j]}`).toBe(false);
+
+    // 지운 영역 자리를 차례 번호로 채우다 겹치지 않는다
+    let s = applyCommands(emptySchema(), [{ op: 'createArea', name: 'A' }, { op: 'createArea', name: 'B' }, { op: 'dropArea', area: 'A' }, { op: 'createArea', name: 'C' }]).schema;
+    expect(s.areas![0]!.color).not.toBe(s.areas![1]!.color);
+
+    // AI가 같은 색·비슷한 색을 주면 겹치지 않는 색으로
+    const r = applyCommands(tables(), [
+      { op: 'createArea', name: '회원', tables: ['member'], color: '#2563eb' },
+      { op: 'createArea', name: '주문', tables: ['orders'], color: '#2563eb' },
+      { op: 'createArea', name: '결제', tables: ['payment'], color: '#2a60e8' },
+    ]);
+    const [a, b, c] = r.schema.areas!.map((x) => x.color!);
+    expect(a).toBe('#2563eb');
+    expect(similarColor(a!, b!) || similarColor(a!, c!) || similarColor(b!, c!)).toBe(false);
+    expect(r.messages[1]).toContain('영역 회원과(와) 겹쳐');
+    expect(colorOf(r.schema, 'orders')).toBe(b); // 테이블도 바뀐 색으로
+    // updateArea도 같은 규칙 (자기 자신 색은 겹침이 아님)
+    s = applyCommands(r.schema, [{ op: 'updateArea', area: '주문', color: '#2563eb' }, { op: 'updateArea', area: '회원', color: '#2563eb' }]).schema;
+    expect(s.areas!.find((x) => x.name === '주문')!.color).not.toBe('#2563eb');
+    expect(s.areas!.find((x) => x.name === '회원')!.color).toBe('#2563eb');
   });
 
   it('moveToArea: 옮긴 영역 색으로', () => {

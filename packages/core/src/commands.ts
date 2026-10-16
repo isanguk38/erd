@@ -31,7 +31,7 @@ import {
   updateTable,
   updateRelation,
 } from './operations';
-import { addToArea, createArea, moveToArea, paintAreaTables, removeArea, removeFromArea, requireArea, updateArea } from './areas';
+import { addToArea, areaColorClash, createArea, moveToArea, nextAreaColor, paintAreaTables, removeArea, removeFromArea, requireArea, updateArea } from './areas';
 import { placeNewTables } from './placement';
 import { FEATURE_LABEL, type FeatureKey } from './features';
 import type { Dialect } from './dialects/types';
@@ -296,15 +296,20 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
       return `${parent.name} → ${child.name} 관계 수정${after !== before ? ` (외래키 이름 ${before} → ${after})` : ''}`;
     }
     case 'createArea': {
-      const area = createArea(schema, { name: command.name, color: command.color, tableIds: (command.tables ?? []).map((n) => tableByName(schema, n).id) });
+      // 다른 영역과 같거나 비슷한 색을 고르면 겹치지 않는 색으로 바꾼다 (영역 색 = 테이블 색이라 겹치면 구분이 안 됨)
+      const clash = command.color ? areaColorClash(schema, command.color) : undefined;
+      const color = clash ? nextAreaColor(schema) : command.color;
+      const area = createArea(schema, { name: command.name, color, tableIds: (command.tables ?? []).map((n) => tableByName(schema, n).id) });
       const painted = command.colorTables === false ? [] : paintAreaTables(schema, area.id, undefined, keepColor);
-      return `영역 ${area.name} 생성 (테이블 ${area.tableIds.length}개${painted.length ? `, 테이블 ${painted.length}개를 영역 색 ${area.color}로` : ''})`;
+      const note = clash ? `, ${command.color}은(는) 영역 ${clash.name}과(와) 겹쳐 ${area.color}로` : '';
+      return `영역 ${area.name} 생성 (색 ${area.color}, 테이블 ${area.tableIds.length}개${painted.length ? `, 테이블 ${painted.length}개를 영역 색으로` : ''}${note})`;
     }
     case 'updateArea': {
       const old = requireArea(schema, command.area);
       const before = old.name;
       const oldColor = old.color;
-      const area = updateArea(schema, command.area, { name: command.name, color: command.color });
+      const clash = command.color ? areaColorClash(schema, command.color, old.id) : undefined;
+      const area = updateArea(schema, command.area, { name: command.name, color: clash ? nextAreaColor(schema, old.id) : command.color });
       let follow: string[];
       if (command.colorTables === true) {
         // 직접 요청: 이미 있는 영역의 테이블을 모두 영역 색으로 (공통 테이블은 첫 영역 색)
@@ -316,7 +321,7 @@ function applyOne(schema: Schema, command: Command, created: string[], areaOf: M
           : [];
         for (const id of follow) findTable(schema, id)!.color = area.color;
       }
-      return `영역 ${before}${area.name !== before ? ` → ${area.name}` : ''} 수정${follow.length ? ` (테이블 ${follow.length}개 색을 ${area.color}로)` : ''}`;
+      return `영역 ${before}${area.name !== before ? ` → ${area.name}` : ''} 수정${clash ? ` (${command.color}은(는) 영역 ${clash.name}과(와) 겹쳐 ${area.color}로)` : ''}${follow.length ? ` (테이블 ${follow.length}개 색을 ${area.color}로)` : ''}`;
     }
     case 'dropArea': {
       const area = requireArea(schema, command.area);
@@ -530,7 +535,7 @@ export function describeSchema(schema: Schema) {
     objects: schema.objects?.length ? schema.objects.map((o) => ({ kind: o.kind, name: o.name, ...(o.table ? { table: o.table } : {}), ...(o.comment ? { comment: o.comment } : {}) })) : undefined,
     // 주제영역: 이름과 들어 있는 테이블 (화면에서 나눠 보는 탭)
     areas: schema.areas?.length
-      ? schema.areas.map((a) => ({ name: a.name, tables: a.tableIds.map((id) => findTable(schema, id)?.name).filter(Boolean) }))
+      ? schema.areas.map((a) => ({ name: a.name, color: a.color, tables: a.tableIds.map((id) => findTable(schema, id)?.name).filter(Boolean) }))
       : undefined,
   };
 }

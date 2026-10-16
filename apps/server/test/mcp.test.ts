@@ -59,7 +59,8 @@ describe('MCP', () => {
     await approve();
     let schema = await call('get_schema', { project: '영역' });
     // 제안을 승인하면 영역도 함께 반영된다
-    expect(schema.areas).toEqual([{ name: '회원', tables: ['member'] }, { name: '주문', tables: ['orders', 'settlement'] }]);
+    expect(schema.areas).toEqual([{ name: '회원', color: expect.stringMatching(/^#/), tables: ['member'] }, { name: '주문', color: expect.stringMatching(/^#/), tables: ['orders', 'settlement'] }]);
+    expect(schema.areas[0].color).not.toBe(schema.areas[1].color);
 
     // 영역 명령만 있으면 제안 모드라도 바로 반영 (화면 구분일 뿐)
     const moved = await call('edit_schema', {
@@ -68,7 +69,8 @@ describe('MCP', () => {
     });
     expect(moved.mode).toBe('apply');
     schema = await call('get_schema', { project: '영역' });
-    expect(schema.areas).toEqual([{ name: '회원', tables: ['member'] }, { name: '주문', tables: ['orders', 'member'] }, { name: '정산', tables: ['settlement'] }]);
+    expect(schema.areas.map(({ name, tables }: { name: string; tables: string[] }) => ({ name, tables }))).toEqual([{ name: '회원', tables: ['member'] }, { name: '주문', tables: ['orders', 'member'] }, { name: '정산', tables: ['settlement'] }]);
+    expect(new Set(schema.areas.map((a: { color: string }) => a.color)).size).toBe(3); // 영역 색이 서로 다르다
 
     // 새 테이블을 영역에 바로 (제안 → 승인 후에도 그 영역에)
     await call('edit_schema', { project: '영역', commands: [{ op: 'createTable', name: 'payment', area: '주문', columns: [{ name: 'payment_id', type: 'BIGINT', primaryKey: true }] }] });
