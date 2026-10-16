@@ -1312,3 +1312,61 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .notice-item__body .release-notes li { position: relative; padding-left: 14px; margin: 3px 0; }
 .notice-item__body .release-notes li::before { content: ''; position: absolute; left: 3px; top: 0.7em; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
 .notice-item__body .release-notes code { font-size: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+
+/* ── 마크다운 글 (공지·업데이트): 표·인용·코드·체크리스트·이미지·링크 ── */
+.release-notes.md { line-height: 1.6; overflow-wrap: anywhere; }
+.release-notes.md h1, .release-notes.md h2, .release-notes.md h3 { margin: 12px 0 4px; line-height: 1.35; }
+.release-notes.md h1 { font-size: 17px; }
+.release-notes.md h2 { font-size: 15px; }
+.release-notes.md h3, .release-notes.md h4, .release-notes.md h5, .release-notes.md h6 { font-size: 13px; margin: 10px 0 2px; }
+.release-notes.md > :first-child { margin-top: 0; }
+.release-notes.md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.release-notes.md del { color: var(--muted); }
+.release-notes.md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.release-notes.md blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--border-strong); background: var(--bg); color: var(--muted); border-radius: 0 6px 6px 0; }
+.release-notes.md blockquote p { margin: 2px 0; }
+.release-notes.md code { font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.release-notes.md pre { background: var(--code-bg); color: var(--code-text); border-radius: 8px; padding: 10px 12px; overflow: auto; font-size: 12px; }
+.release-notes.md pre code { background: none; border: none; padding: 0; color: inherit; }
+.release-notes.md table { border-collapse: collapse; margin: 8px 0; font-size: 12px; display: block; max-width: 100%; overflow-x: auto; }
+.release-notes.md th, .release-notes.md td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; vertical-align: top; }
+.release-notes.md th { background: var(--bg); font-weight: 700; white-space: nowrap; }
+.release-notes.md img { max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); margin: 4px 0; }
+.release-notes.md li:has(> input[type='checkbox']) { list-style: none; }
+.release-notes.md li > input[type='checkbox'] { margin: 0 6px 0 -2px; vertical-align: -1px; }
+.release-notes.md ol { padding-left: 20px; }
+/* 새 소식 펼친 글: 목록 점은 앞서 만든 작은 점, 번호 목록은 번호 그대로 */
+.notice-item__body .release-notes.md ol { list-style: decimal; padding-left: 20px; }
+.notice-item__body .release-notes.md ol > li { padding-left: 2px; }
+.notice-item__body .release-notes.md ol > li::before { display: none; }
+.notice-item__body .release-notes.md li:has(> input[type='checkbox'])::before { display: none; }
+.notice-item__body .release-notes.md li:has(> input[type='checkbox']) { padding-left: 0; }
+
+/* ── 관리자 글쓰기: 꾸미기 버튼 + 쓰기|미리보기 두 칸 ── */
+.md-editor { border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.md-editor__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.md-tool { min-width: 28px; height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; font-size: 13px; color: var(--text); }
+.md-tool:hover { background: var(--panel); border-color: var(--border); }
+.md-tool.b { font-weight: 800; }
+.md-tool.i { font-style: italic; font-family: Georgia, serif; }
+.md-tool.s { text-decoration: line-through; }
+.md-emoji { position: relative; }
+.md-emoji__menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; display: grid; grid-template-columns: repeat(9, 30px); gap: 2px; padding: 6px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15); }
+.md-emoji__menu button { width: 30px; height: 30px; border: none; background: none; border-radius: 6px; cursor: pointer; font-size: 17px; }
+.md-emoji__menu button:hover { background: var(--accent-soft); }
+.md-editor__tabs { margin-left: auto; display: none; gap: 2px; }
+.md-editor__tabs button { border: none; background: none; padding: 4px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+.md-editor__tabs button.active { background: var(--panel); color: var(--text); font-weight: 600; }
+.md-editor__panes { display: grid; grid-template-columns: 1fr 1fr; min-height: 320px; }
+.md-editor__input.admin-body { border: none; border-radius: 0; min-height: 320px; height: 100%; font-family: 'JetBrains Mono', Consolas, 'D2Coding', monospace; font-size: 12.5px; outline: none; }
+.md-editor__preview.admin-preview { border: none; border-left: 1px solid var(--border); border-radius: 0; padding: 10px 14px; min-height: 320px; overflow: auto; max-height: 560px; }
+.md-editor__preview .release-notes.md { border: none; padding: 0; max-height: none; overflow: visible; }
+@media (max-width: 1100px) {
+  .md-editor__tabs { display: inline-flex; }
+  .md-editor__panes { grid-template-columns: 1fr; }
+  .md-editor.tab-write .md-editor__preview { display: none; }
+  .md-editor.tab-preview .md-editor__input { display: none; }
+  .md-editor__preview.admin-preview { border-left: none; }
+}
+/* 글쓰기 칸은 넓게: 관리자 페이지 편집 쪽 폭을 더 */
+.admin-notices { grid-template-columns: minmax(0, 340px) minmax(0, 1fr); }

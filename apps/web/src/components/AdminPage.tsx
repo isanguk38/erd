@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { adminApi, NOTICE_KIND_LABEL, useAdminRole, type AdminEntry, type AdminInviteInfo, type AdminNotice, type NoticeInput, type NoticeKind } from '../lib/notices';
-import { NoteText } from './NoteText';
+import { MarkdownEditor } from './MarkdownEditor';
 import { UserMenu } from './Toolbar';
 
 const when = (v?: string) => (v ? new Date(v).toLocaleString() : '');
@@ -48,14 +48,12 @@ function NoticesAdmin() {
   const [editing, setEditing] = useState<{ id: string | null; input: NoticeInput } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [preview, setPreview] = useState(false);
   const load = () => adminApi.notices().then(setList).catch((e) => setError(e instanceof Error ? e.message : String(e)));
   useEffect(() => void load(), []);
   const current = editing?.id ? list?.find((n) => n.id === editing.id) : null;
 
   const pick = (n: AdminNotice) => {
     setError('');
-    setPreview(false);
     setEditing({ id: n.id, input: { kind: n.kind, title: n.title, body: n.body, version: n.version ?? '', pinned: n.pinned, published: n.published } });
   };
   const set = (patch: NoticeInput) => editing && setEditing({ ...editing, input: { ...editing.input, ...patch } });
@@ -78,7 +76,7 @@ function NoticesAdmin() {
   return (
     <div className="admin-notices">
       <section className="admin-notices__list">
-        <button className="btn btn-primary" onClick={() => { setError(''); setPreview(false); setEditing({ id: null, input: { ...EMPTY } }); }}>+ 새 글</button>
+        <button className="btn btn-primary" onClick={() => { setError(''); setEditing({ id: null, input: { ...EMPTY } }); }}>+ 새 글</button>
         {!list ? (
           <p className="muted small">불러오는 중…</p>
         ) : list.length === 0 ? (
@@ -121,16 +119,8 @@ function NoticesAdmin() {
               <input value={editing.input.title ?? ''} onChange={(e) => set({ title: e.target.value })} placeholder="예: 테스트 데이터 만들기가 빨라졌습니다" />
               <label>내용</label>
               <div>
-                <div className="tabs admin-body-tabs">
-                  <button className={!preview ? 'active' : ''} onClick={() => setPreview(false)}>쓰기</button>
-                  <button className={preview ? 'active' : ''} onClick={() => setPreview(true)}>미리보기</button>
-                </div>
-                {preview ? (
-                  <div className="admin-preview"><NoteText text={editing.input.body ?? ''} /></div>
-                ) : (
-                  <textarea className="admin-body" value={editing.input.body ?? ''} onChange={(e) => set({ body: e.target.value })} placeholder={'## 바뀐 점\n- **테스트 데이터**: 큰 ERD에서도 바로 열립니다\n- 헤더 디자인 정리'} />
-                )}
-                <p className="muted small">## 제목, - 목록, **굵게**, `코드`를 쓸 수 있습니다.</p>
+                <MarkdownEditor value={editing.input.body ?? ''} onChange={(body) => set({ body })} />
+                <p className="muted small">위 버튼으로 꾸미거나 마크다운을 바로 써도 됩니다 (표·링크·이미지 주소·체크리스트·인용·이모지). 오른쪽이 사용자에게 보이는 모양입니다.</p>
               </div>
               <label>표시</label>
               <div className="admin-flags">

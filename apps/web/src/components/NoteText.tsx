@@ -1,34 +1,45 @@
-import type { ReactNode } from 'react';
+import { useMemo } from 'react';
+import { Marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 /**
- * 간단한 마크다운(## 제목, - 목록, **굵게**, `코드`)을 보여 준다. HTML은 넣지 않는다 (글자 그대로).
- * 앱 업데이트 안내·공지사항·관리자 페이지 미리보기에서 함께 쓴다.
+ * 공지·업데이트 글(마크다운)을 보여 준다: 제목, 굵게·기울임·취소선, 목록·체크리스트, 표, 인용, 코드, 구분선, 링크, 이미지(주소), 이모지.
+ * 글에 HTML이나 스크립트를 넣어도 실행되지 않게 걸러서 보여 준다 (관리자 계정이 털려도 사용자 화면이 위험해지지 않게).
+ * 앱 업데이트 창·새 소식·관리자 페이지 미리보기에서 함께 쓴다.
  */
-export function NoteText({ text, empty = '내용이 없습니다.' }: { text: string; empty?: string }) {
-  const blocks: ReactNode[] = [];
-  let items: ReactNode[] = [];
-  const flush = () => {
-    if (items.length) blocks.push(<ul key={blocks.length}>{items.map((t, i) => <li key={i}>{t}</li>)}</ul>);
-    items = [];
-  };
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (/^[-*]\s+/.test(line)) {
-      items.push(inline(line.replace(/^[-*]\s+/, '')));
-      continue;
-    }
-    flush();
-    if (/^#{1,6}\s+/.test(line)) blocks.push(<h4 key={blocks.length}>{inline(line.replace(/^#{1,6}\s+/, ''))}</h4>);
-    else if (line) blocks.push(<p key={blocks.length}>{inline(line)}</p>);
+const marked = new Marked({ gfm: true, breaks: true });
+
+let hooked = false;
+function sanitize(html: string): string {
+  if (!hooked) {
+    hooked = true;
+    // 링크는 새 창으로 (설치형 앱에서는 기본 브라우저로 열린다), 이미지·링크는 http(s)만
+    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+      if (node.tagName === 'A') {
+        const href = node.getAttribute('href') ?? '';
+        if (!/^(https?:|mailto:|#)/i.test(href)) node.removeAttribute('href');
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      }
+      if (node.tagName === 'IMG') {
+        const src = node.getAttribute('src') ?? '';
+        if (!/^https?:/i.test(src)) node.removeAttribute('src');
+        node.setAttribute('loading', 'lazy');
+      }
+      // 체크리스트 칸은 보기만
+      if (node.tagName === 'INPUT') node.setAttribute('disabled', '');
+    });
   }
-  flush();
-  return <div className="release-notes">{blocks.length ? blocks : <p className="muted">{empty}</p>}</div>;
+  const clean = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'del', 's', 'code', 'pre', 'blockquote', 'ul', 'ol', 'li', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input', 'span'],
+    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'align', 'type', 'checked', 'disabled', 'start'],
+  });
+  // 주소가 걸러진(http(s)가 아닌) 이미지는 깨진 그림으로 남지 않게 뺀다
+  return clean.replace(/<img(?![^>]*\ssrc=)[^>]*>/g, '');
 }
 
-/** **굵게**, `코드` */
-function inline(text: string): ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
-  return parts.map((p, i) =>
-    p.startsWith('**') && p.endsWith('**') ? <b key={i}>{p.slice(2, -2)}</b> : p.startsWith('`') && p.endsWith('`') ? <code key={i}>{p.slice(1, -1)}</code> : <span key={i}>{p}</span>,
-  );
+export function NoteText({ text, empty = '내용이 없습니다.' }: { text: string; empty?: string }) {
+  const html = useMemo(() => (text.trim() ? sanitize(marked.parse(text, { async: false }) as string) : ''), [text]);
+  if (!html) return <div className="release-notes md"><p className="muted">{empty}</p></div>;
+  return <div className="release-notes md" dangerouslySetInnerHTML={{ __html: html }} />;
 }
