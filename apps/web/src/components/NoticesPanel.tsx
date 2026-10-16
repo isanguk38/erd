@@ -7,6 +7,7 @@ import { markNoticesSeen, NOTICE_KIND_LABEL, noticeApi, seenNotices, type Notice
 import { useStore } from '../store';
 import { Modal } from './Modal';
 import { NoteText } from './NoteText';
+import { Icon } from './ui';
 
 const date = (v?: string) => (v ? new Date(v).toLocaleDateString() : '');
 const kindText = (n: NoticeItem) => (n.kind === 'app' && n.version ? `앱 ${n.version}` : NOTICE_KIND_LABEL[n.kind]);
@@ -41,6 +42,7 @@ function NoticeList({ list, compact, seen, onSeen }: { list: NoticeItem[]; compa
             <span className="notice-item__title">{n.pinned && '📌 '}{n.title}</span>
             {!seen.has(n.id) && <span className="notice-new">NEW</span>}
             <span className="notice-item__date">{date(n.publishedAt)}</span>
+            <span className="notice-item__chev" aria-hidden="true"><Icon name="chevron" size={14} /></span>
           </button>
           {open === n.id && <div className="notice-item__body"><NoteText text={n.body} /></div>}
         </li>

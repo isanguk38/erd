@@ -1283,3 +1283,32 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .admin-notice-row .admin-status { justify-self: end; }
 .admin-link, .admin-page__head a.back { text-decoration: none; }
 .admin-page__head a.back { font-size: 18px; color: var(--text); }
+
+/* ── 다듬기: "+ 테이블" 나눔 버튼을 한 덩어리로 (헤더의 일반 도구 버튼 모양이 ▾ 쪽에 덮이지 않게) ── */
+.toolbar .split-btn { border-radius: 8px; box-shadow: 0 1px 2px rgb(37 99 235 / 0.25); }
+.toolbar .split-btn > .btn { border-radius: 8px 0 0 8px; }
+.toolbar .split-btn .dropdown > .btn.btn-tool {
+  border-radius: 0 8px 8px 0; background: var(--accent); border-color: var(--accent); color: #fff;
+  border-left: 1px solid rgb(255 255 255 / 0.35); padding: 0 7px;
+}
+.toolbar .split-btn .dropdown > .btn.btn-tool:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); border-left-color: rgb(255 255 255 / 0.35); filter: brightness(1.08); }
+.toolbar .split-btn .dropdown > .btn.btn-tool svg { color: #fff; }
+
+/* ── 다듬기: 새 소식 펼친 내용 (상자 안 상자 대신, 제목 아래 종류 색 선과 함께) ── */
+.notice-item__head { grid-template-columns: auto 1fr auto auto; grid-template-areas: 'kind title new chev' 'kind date date chev'; }
+.notice-item__chev { grid-area: chev; align-self: center; color: var(--muted); display: inline-flex; transition: transform 0.15s; }
+.notice-item.open .notice-item__chev { transform: rotate(180deg); }
+.notice-item.open { background: var(--bg); }
+.notice-item.pinned.open { background: color-mix(in srgb, #f59e0b 10%, transparent); }
+.notice-item__body { margin: 0 10px 10px 10px; padding: 2px 0 2px 12px; border-left: 2px solid var(--border-strong); }
+.notice-item.kind-notice .notice-item__body { border-left-color: #f59e0b; }
+.notice-item.kind-web .notice-item__body { border-left-color: #3b82f6; }
+.notice-item.kind-app .notice-item__body { border-left-color: #10b981; }
+.notice-item__body .release-notes { border: none; padding: 0; max-height: none; overflow: visible; font-size: 13px; line-height: 1.65; color: var(--text); }
+.notice-item__body .release-notes h4 { margin: 10px 0 2px; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
+.notice-item__body .release-notes h4:first-child { margin-top: 0; }
+.notice-item__body .release-notes p { margin: 2px 0 6px; }
+.notice-item__body .release-notes ul { margin: 2px 0 6px; padding-left: 0; list-style: none; }
+.notice-item__body .release-notes li { position: relative; padding-left: 14px; margin: 3px 0; }
+.notice-item__body .release-notes li::before { content: ''; position: absolute; left: 3px; top: 0.7em; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+.notice-item__body .release-notes code { font-size: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
