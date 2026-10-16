@@ -293,6 +293,17 @@ function classify(diff: DiffResult, erd: Schema, dbAligned: Schema, baseline: Sc
     const dbChanged = byDb.has(key);
     origins[c.id] = erdChanged && dbChanged ? 'conflict' : erdChanged ? 'erd' : dbChanged ? 'db' : 'unknown';
   }
+  // 기준 시점에 DB 객체 목록이 없으면(객체 기능 전에 맞춘 것) 객체는 어느 쪽에만 있는지로 판단한다:
+  // ERD에만 있으면 ERD에서 만든 것(내보내기 배지), DB에만 있으면 DB에서 생긴 것(가져오기 배지)
+  if (!Array.isArray(baseline.objects)) {
+    const has = (s: Schema, k: string) => Boolean(s.objects?.some((o) => objectKey(o) === k));
+    for (const c of diff.changes) {
+      if (c.kind !== 'createObject' && c.kind !== 'dropObject') continue;
+      const k = objectKey(c.object);
+      if (has(erd, k) && !has(dbAligned, k)) origins[c.id] = 'erd';
+      else if (has(dbAligned, k) && !has(erd, k)) origins[c.id] = 'db';
+    }
+  }
   return origins;
 }
 

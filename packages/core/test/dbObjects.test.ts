@@ -87,6 +87,24 @@ describe('DB 객체 (뷰·함수·프로시저·트리거)', () => {
     }
   });
 
+  it('기준 시점에 객체 목록이 없을 때(객체 기능 전에 맞춤): ERD에서 만든 객체는 내보내기 배지, DB에만 있는 객체는 가져오기 배지', () => {
+    const pg = getDialect('postgresql');
+    const db = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 't', columns: [{ name: 'id', type: 'INT', primaryKey: true }] },
+      { op: 'createObject', definition: 'CREATE VIEW v_db AS SELECT 1' },
+    ], pg).schema;
+    const erd = applyCommands({ ...structuredClone(db), objects: [] }, [{ op: 'createObject', definition: 'CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$' }], pg).schema;
+    const baseline: Schema = { ...structuredClone(db), objects: undefined };
+    const pull = planPull(erd, db, { dialect: pg, baseline });
+    const origin = (p: typeof pull, summary: string) => p.origins[p.diff.changes.find((c) => c.summary === summary)!.id];
+    expect(origin(pull, '함수 f 삭제')).toBe('erd');
+    expect(origin(pull, '뷰 v_db 생성')).toBe('db');
+    expect(summarizePlan(pull)).toMatchObject({ erd: 1, db: 1, unknown: 0 });
+    const push = planPush(erd, db, { dialect: pg, baseline });
+    expect(origin(push, '함수 f 생성')).toBe('erd');
+    expect(push.defaultSelected.has(push.diff.changes.find((c) => c.summary === '함수 f 생성')!.id)).toBe(true);
+  });
+
   it('문서(Yjs)에 저장하고 읽으면 같다', () => {
     const doc = new Y.Doc();
     const s = applyCommands(emptySchema(), [{ op: 'createObject', definition: 'CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1', comment: '설명' }], getDialect('mysql')).schema;
