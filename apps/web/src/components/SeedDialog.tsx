@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { dbmsMismatch, generateSeedData, getDialect, planPush, SEED_MAX_ROWS, seedScript, type SeedResult } from '@erd/core';
+import { dbmsMismatch, getDialect, planPush, SEED_MAX_ROWS, seedScript, type SeedResult } from '@erd/core';
+import { runSeedData } from '../lib/seed';
 import { api, projectApi, type Connection, type ExecuteResult } from '../lib/api';
 import { downloadText, safeFileName } from '../lib/download';
 import { useDbAvailable, useDialect, useProjectName } from '../lib/hooks';
@@ -39,24 +40,35 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState<ExecuteResult | null>(null);
 
-  // 창을 먼저 띄우고 데이터는 그다음에 만든다 (테이블이 많아도 눌렀는데 반응이 없는 것처럼 보이지 않게)
+  // 데이터는 백그라운드(Web Worker)에서 만든다: 테이블이 많아도 창과 화면이 멈추지 않는다.
+  // 설정을 바꾸면(행 수 입력 등) 잠깐 기다렸다가, 앞에서 만들던 것은 버리고 다시 만든다
   const [seedResult, setSeedResult] = useState<SeedResult>(EMPTY);
   const [making, setMaking] = useState(true);
   useEffect(() => {
     setMaking(true);
+    let run: ReturnType<typeof runSeedData> | null = null;
+    let alive = true;
     const timer = setTimeout(() => {
-      try {
-        setSeedResult(generateSeedData(schema, dialect, { rows, startId, seed, tableIds: [...picked] }));
-        setError('');
-      } catch (e) {
-        setSeedResult(EMPTY);
-        setError(`테스트 데이터를 만들지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        setMaking(false);
-      }
-    }, 30);
-    return () => clearTimeout(timer);
-  }, [schema, dialect, rows, startId, seed, picked]);
+      run = runSeedData(schema, projectDialect, { rows, startId, seed, tableIds: [...picked] });
+      run.promise
+        .then((r) => {
+          if (!alive) return;
+          setSeedResult(r);
+          setError('');
+        })
+        .catch((e) => {
+          if (!alive) return;
+          setSeedResult(EMPTY);
+          setError(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => alive && setMaking(false));
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      run?.cancel();
+    };
+  }, [schema, projectDialect, rows, startId, seed, picked]);
   const script = useMemo(() => seedScript(seedResult), [seedResult]);
   const preview = useMemo(() => {
     const lines = script.split('\n');
@@ -158,14 +170,29 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
           </details>
           <div className="seed-summary">
             {making ? <b className="muted">테스트 데이터를 만드는 중… (테이블 {picked.size}개)</b> : <b>{seedResult.tables.length}개 테이블 · {total}행</b>}
-            {seedResult.tables.length > 0 && <span className="muted small"> 넣는 순서: {seedResult.tables.map((t) => `${t.name}(${t.rows})`).join(' → ')}</span>}
+            {!making && seedResult.tables.length > 0 && (
+              <span className="muted small" title={seedResult.tables.map((t) => `${t.name}(${t.rows})`).join(' → ')}>
+                {' '}넣는 순서: {seedResult.tables.slice(0, 12).map((t) => `${t.name}(${t.rows})`).join(' → ')}{seedResult.tables.length > 12 ? ` → … 외 ${seedResult.tables.length - 12}개` : ''}
+              </span>
+            )}
           </div>
           {seedResult.added.length > 0 && <p className="muted small">NOT NULL 외래키 때문에 부모 테이블도 함께 넣습니다: {seedResult.added.join(', ')}</p>}
           {(seedResult.skipped.length > 0 || seedResult.warnings.length > 0) && (
-            <ul className="seed-warnings">
-              {seedResult.skipped.map((s) => <li key={`s:${s.name}`} className="warning">⚠ {s.name}: 만들지 않음 — {s.reason}</li>)}
-              {seedResult.warnings.map((w, i) => <li key={i} className="muted small">ⓘ {w}</li>)}
-            </ul>
+            <>
+              {/* 만들지 않은 테이블·참고가 많으면 접어 둔다 (창이 끝없이 길어지지 않게) */}
+              {seedResult.skipped.length > 0 && (
+                <details className="seed-warnings" open={seedResult.skipped.length <= 5}>
+                  <summary className="warning">⚠ 만들지 않은 테이블 {seedResult.skipped.length}개 (NOT NULL 외래키 순환)</summary>
+                  <ul>{seedResult.skipped.map((s) => <li key={`s:${s.name}`}>{s.name} — {s.reason}</li>)}</ul>
+                </details>
+              )}
+              {seedResult.warnings.length > 0 && (
+                <details className="seed-warnings" open={seedResult.warnings.length <= 5}>
+                  <summary className="muted small">ⓘ 참고 {seedResult.warnings.length}건</summary>
+                  <ul>{seedResult.warnings.map((w, i) => <li key={i} className="muted small">{w}</li>)}</ul>
+                </details>
+              )}
+            </>
           )}
           <pre className="sql-view seed-sql">{making ? '-- 만드는 중…' : preview || '-- 고른 테이블이 없습니다'}</pre>
           <div className="btn-row">

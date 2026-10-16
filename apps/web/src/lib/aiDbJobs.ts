@@ -7,7 +7,6 @@ import {
   appliedChanges,
   pushedObjectKeys,
   dbmsMismatch,
-  generateSeedData,
   generateStatements,
   getDialect,
   planPush,
@@ -18,6 +17,7 @@ import {
   type SafetyFinding,
 } from '@erd/core';
 import { api, projectApi, type Connection, type ConnectionInput, type DbJob } from './api';
+import { runSeedData } from './seed';
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -282,7 +282,8 @@ async function seedJob(job: DbJob, hooks: JobHooks): Promise<Record<string, unkn
         return t.id;
       })
     : undefined;
-  const seed = generateSeedData(schema, dialect, { rows: Number(p.rows) || undefined, startId: p.startId === undefined ? undefined : Number(p.startId), seed: Number(p.seed) || undefined, tableIds });
+  // 백그라운드에서 만든다 (큰 ERD에서도 앱 화면이 멈추지 않게)
+  const seed = await runSeedData(schema, meta.dialect, { rows: Number(p.rows) || undefined, startId: p.startId === undefined ? undefined : Number(p.startId), seed: Number(p.seed) || undefined, tableIds }).promise;
   const summary = { tables: seed.tables.map((t) => ({ name: t.name, rows: t.rows })), added: seed.added, skipped: seed.skipped, warnings: seed.warnings };
   const base = { connection: connection.name, database: connection.database, ...summary };
   if (!seed.statements.length) return { ...base, ok: false, executed: false, message: '넣을 데이터가 없습니다' };

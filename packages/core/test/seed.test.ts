@@ -160,3 +160,25 @@ describe('테스트 데이터: 큰 ERD·꼬인 외래키에서 멈추지 않는�
     expect(r.tables.length + r.skipped.length).toBe(300);
   });
 });
+
+describe('테스트 데이터: 큰 ERD 속도', () => {
+  it('테이블 276개, 값이 몇 개뿐인 UNIQUE(상태)까지 있어도 2초 안에 (예전에는 27초 동안 화면이 멈춤)', () => {
+    const commands: Parameters<typeof applyCommands>[1] = [];
+    for (let i = 0; i < 276; i++) {
+      commands.push({ op: 'createTable', name: `t${i}`, columns: [
+        { name: `t${i}_id`, type: 'BIGINT', primaryKey: true },
+        { name: 'status', type: 'VARCHAR(20)', unique: true },
+        { name: 'use_yn', type: 'CHAR(1)', nullable: false },
+        ...Array.from({ length: 25 }, (_, k) => ({ name: `col_${k}_name`, logicalName: `항목${k}`, type: 'VARCHAR(100)' })),
+      ] });
+    }
+    const s = applyCommands(emptySchema(), commands).schema;
+    const started = Date.now();
+    const r = generateSeedData(s, getDialect('postgresql'), { rows: 20 });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(r.tables.every((t) => t.rows === 20)).toBe(true);
+    // 상태처럼 값이 몇 개뿐인 UNIQUE 글자 컬럼은 행 번호를 붙여 겹치지 않게
+    const statuses = rowsOf(generateSeedData(applyCommands(emptySchema(), [commands[0]!]).schema, getDialect('mysql'), { rows: 20 }).statements, 't0').map((row) => row.split(', ')[1]);
+    expect(new Set(statuses).size).toBe(20);
+  });
+});

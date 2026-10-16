@@ -178,8 +178,8 @@ function checkRules(table: Table, warnings: string[]): Map<string, Rule> {
 }
 
 /** 값 하나 만들기. i: 0부터 시작하는 행 번호 */
-function makeValue(c: Column, kind: Kind, i: number, rng: Rng, ctx: { start: number; values: string[] | null; rule?: Rule; byteLimit: boolean }): unknown {
-  const hint = nameHint(c);
+function makeValue(c: Column, kind: Kind, i: number, rng: Rng, ctx: { start: number; values: string[] | null; rule?: Rule; byteLimit: boolean; hint: string; text?: TextMaker; uniqueText?: boolean }): unknown {
+  const hint = ctx.hint;
   const rule = ctx.rule;
   if (rule?.values?.length) {
     const v = rng.pick(rule.values);
@@ -235,40 +235,54 @@ function makeValue(c: Column, kind: Kind, i: number, rng: Rng, ctx: { start: num
       return `${hex(rng, 8)}-${hex(rng, 4)}-4${hex(rng, 3)}-a${hex(rng, 3)}-${hex(rng, 12)}`;
     case 'binary':
       return { binary: hex(rng, 8) };
-    case 'string':
-      return fitText(c, makeText(c, hint, i, rng, ctx.start), ctx.byteLimit);
+    case 'string': {
+      const n = ctx.start + i;
+      let text = ctx.text!(n, rng);
+      // 하나만으로 UNIQUE(또는 기본키)인 글자 컬럼: 행 번호가 들어 있지 않으면 붙여 늘 다르게 (상태·코드처럼 값이 몇 개뿐인 것도)
+      if (ctx.uniqueText && !new RegExp(`(^|\\D)${n}(\\D|$)`).test(text)) text = `${text}_${n}`;
+      return fitText(c, text, ctx.byteLimit);
+    }
     default:
       return null;
   }
 }
 
-function makeText(c: Column, hint: string, i: number, rng: Rng, start: number): string {
-  const n = start + i;
+type TextMaker = (n: number, rng: Rng) => string;
+
+/**
+ * 컬럼 이름·논리명을 보고 글자 값을 만드는 방법을 한 번 정한다 (행마다 이름 규칙 20여 개를 다시 보지 않게).
+ * n: 행 번호(시작 번호 + i)
+ */
+function textMaker(c: Column): TextMaker {
+  const hint = nameHint(c);
   const p = c.privacy;
   // 암호화해 저장하는 개인정보는 암호문처럼, 비밀번호는 해시처럼
-  if (p?.kind === 'password' || has(hint, /(^|_)(password|passwd|pwd|pw)(_|$| )|비밀번호|패스워드/)) return `$2b$10$${hex(rng, 53)}`;
-  if (p?.encrypted) return hex(rng, 64);
-  if (p?.kind === 'unique' || has(hint, /(^|_)(rrn|ssn|jumin)(_|$| )|주민/)) return `${pad(rng.int(60, 99))}${pad(rng.int(1, 12))}${pad(rng.int(1, 28))}-${rng.int(1, 2)}${String(rng.int(0, 999999)).padStart(6, '0')}`;
-  if (has(hint, /e_?mail|이메일|메일/)) return `user${n}@example.com`;
-  if (has(hint, /(^|_)(phone|mobile|tel|hp|cell|telephone)(_|$| |no|num)|전화|휴대|핸드폰|연락처/)) return `010-${rng.int(1000, 9999)}-${rng.int(1000, 9999)}`;
-  if (has(hint, /(^|_)(zip|zipcode|post_?code|postal_?code)(_|$| )|우편/)) return String(rng.int(10000, 63999));
-  if (has(hint, /(^|_)(addr|address)(_|$| |1|2)|주소/)) return has(hint, /detail|addr2|상세/) ? `${rng.int(1, 20)}층 ${rng.int(1, 30)}호` : `${rng.pick(STREETS)} ${rng.int(1, 300)}`;
-  if (has(hint, /(^|_)(account|acct|acnt)_?(no|num)|계좌/)) return `${rng.int(100, 999)}-${rng.int(100000, 999999)}-${rng.int(10, 99)}-${rng.int(100, 999)}`;
-  if (has(hint, /card_?(no|num)|카드\s*번호/)) return `${rng.int(4000, 4999)}-${rng.int(1000, 9999)}-${rng.int(1000, 9999)}-${rng.int(1000, 9999)}`;
-  if (has(hint, /(^|_)(ip|ip_addr|ip_address)(_|$| )|IP\s*주소|접속\s*IP/)) return `192.168.${rng.int(0, 255)}.${rng.int(1, 254)}`;
-  if (has(hint, /(^|_)(url|link|homepage|website|img|image|thumbnail|path|file)(_|$| )|주소\s*URL|링크|이미지|파일/)) return `https://example.com/files/${n}`;
-  if (has(hint, /(^|_)(login_id|user_id|username|login|account_id|nickname|nick)(_|$| )|아이디|닉네임/) && !c.primaryKey) return `user${n}`;
-  if (has(hint, /(^|_)(gender|sex)(_|$| )|성별/)) return rng.pick(['M', 'F']);
-  if (has(hint, /(^|_)[a-z]*_?yn(_|$| )|(^|_)(use|del|is)_|여부/) || (baseOf(c) === 'CHAR' && c.length.trim() === '1')) return rng.next() < 0.8 ? 'Y' : 'N';
-  if (has(hint, /(^|_)(company|corp|vendor|shop|store|brand)_?(name|nm)?(_|$| )|회사|업체|상호|거래처/)) return `${rng.pick(COMPANIES)} ${n}`;
-  if (has(hint, /((^|_)(user|member|mbr|cust|customer|real|full|first|last|person|emp|employee|buyer|receiver|recipient|sender|owner|holder|guardian|writer|author|manager)_?(name|nm))(_|$| )|(^|\s)(이름|성명|실명)$|(회원|고객|사용자|수령인|수취인|주문자|보호자|예금주|직원|담당자|작성자)\s*(명|이름)/)) return `${rng.pick(SURNAMES)}${rng.pick(GIVEN)}`;
-  if (has(hint, /(^|_)(status|state|stat|stts)(_|$| )|상태/)) return rng.pick(STATUS);
-  if (has(hint, /(^|_)(title|subject)(_|$| )|제목/)) return `샘플 제목 ${n}`;
-  if (has(hint, /(^|_)(content|contents|body|desc|description|memo|remark|note|comment|text|message|msg)(_|$| )|내용|설명|메모|비고/)) return `샘플 내용입니다 (${n})`;
-  if (has(hint, /(^|_)(code|cd|type|kind|div|gb|cls)(_|$| )|코드|구분|유형|종류/)) return `C${String(rng.int(1, 99)).padStart(2, '0')}`;
-  if (c.primaryKey || c.unique) return `${c.name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'ID'}${String(n).padStart(6, '0')}`;
+  if (p?.kind === 'password' || has(hint, /(^|_)(password|passwd|pwd|pw)(_|$| )|비밀번호|패스워드/)) return (_n, rng) => `$2b$10$${hex(rng, 53)}`;
+  if (p?.encrypted) return (_n, rng) => hex(rng, 64);
+  if (p?.kind === 'unique' || has(hint, /(^|_)(rrn|ssn|jumin)(_|$| )|주민/)) return (_n, rng) => `${pad(rng.int(60, 99))}${pad(rng.int(1, 12))}${pad(rng.int(1, 28))}-${rng.int(1, 2)}${String(rng.int(0, 999999)).padStart(6, '0')}`;
+  if (has(hint, /e_?mail|이메일|메일/)) return (n) => `user${n}@example.com`;
+  if (has(hint, /(^|_)(phone|mobile|tel|hp|cell|telephone)(_|$| |no|num)|전화|휴대|핸드폰|연락처/)) return (_n, rng) => `010-${rng.int(1000, 9999)}-${rng.int(1000, 9999)}`;
+  if (has(hint, /(^|_)(zip|zipcode|post_?code|postal_?code)(_|$| )|우편/)) return (_n, rng) => String(rng.int(10000, 63999));
+  if (has(hint, /(^|_)(addr|address)(_|$| |1|2)|주소/)) return has(hint, /detail|addr2|상세/) ? (_n, rng) => `${rng.int(1, 20)}층 ${rng.int(1, 30)}호` : (_n, rng) => `${rng.pick(STREETS)} ${rng.int(1, 300)}`;
+  if (has(hint, /(^|_)(account|acct|acnt)_?(no|num)|계좌/)) return (_n, rng) => `${rng.int(100, 999)}-${rng.int(100000, 999999)}-${rng.int(10, 99)}-${rng.int(100, 999)}`;
+  if (has(hint, /card_?(no|num)|카드\s*번호/)) return (_n, rng) => `${rng.int(4000, 4999)}-${rng.int(1000, 9999)}-${rng.int(1000, 9999)}-${rng.int(1000, 9999)}`;
+  if (has(hint, /(^|_)(ip|ip_addr|ip_address)(_|$| )|IP\s*주소|접속\s*IP/)) return (_n, rng) => `192.168.${rng.int(0, 255)}.${rng.int(1, 254)}`;
+  if (has(hint, /(^|_)(url|link|homepage|website|img|image|thumbnail|path|file)(_|$| )|주소\s*URL|링크|이미지|파일/)) return (n) => `https://example.com/files/${n}`;
+  if (has(hint, /(^|_)(login_id|user_id|username|login|account_id|nickname|nick)(_|$| )|아이디|닉네임/) && !c.primaryKey) return (n) => `user${n}`;
+  if (has(hint, /(^|_)(gender|sex)(_|$| )|성별/)) return (_n, rng) => rng.pick(['M', 'F']);
+  if (has(hint, /(^|_)[a-z]*_?yn(_|$| )|(^|_)(use|del|is)_|여부/) || (baseOf(c) === 'CHAR' && c.length.trim() === '1')) return (_n, rng) => (rng.next() < 0.8 ? 'Y' : 'N');
+  if (has(hint, /(^|_)(company|corp|vendor|shop|store|brand)_?(name|nm)?(_|$| )|회사|업체|상호|거래처/)) return (n, rng) => `${rng.pick(COMPANIES)} ${n}`;
+  if (has(hint, /((^|_)(user|member|mbr|cust|customer|real|full|first|last|person|emp|employee|buyer|receiver|recipient|sender|owner|holder|guardian|writer|author|manager)_?(name|nm))(_|$| )|(^|\s)(이름|성명|실명)$|(회원|고객|사용자|수령인|수취인|주문자|보호자|예금주|직원|담당자|작성자)\s*(명|이름)/)) return (_n, rng) => `${rng.pick(SURNAMES)}${rng.pick(GIVEN)}`;
+  if (has(hint, /(^|_)(status|state|stat|stts)(_|$| )|상태/)) return (_n, rng) => rng.pick(STATUS);
+  if (has(hint, /(^|_)(title|subject)(_|$| )|제목/)) return (n) => `샘플 제목 ${n}`;
+  if (has(hint, /(^|_)(content|contents|body|desc|description|memo|remark|note|comment|text|message|msg)(_|$| )|내용|설명|메모|비고/)) return (n) => `샘플 내용입니다 (${n})`;
+  if (has(hint, /(^|_)(code|cd|type|kind|div|gb|cls)(_|$| )|코드|구분|유형|종류/)) return (_n, rng) => `C${String(rng.int(1, 99)).padStart(2, '0')}`;
+  if (c.primaryKey || c.unique) {
+    const prefix = c.name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'ID';
+    return (n) => `${prefix}${String(n).padStart(6, '0')}`;
+  }
   const label = c.logicalName.trim() || c.name;
-  return `${label} ${n}`;
+  return (n) => `${label} ${n}`;
 }
 
 /** 길이 안에 맞추기. byteLimit: 길이가 바이트인 DB(Oracle VARCHAR2·SQL Server VARCHAR)면 UTF-8 바이트로 */
@@ -305,7 +319,10 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
   const warnings: string[] = [];
   const skipped: SeedResult['skipped'] = [];
   const byId = new Map(schema.tables.map((t) => [t.id, t]));
-  const fksOf = (t: Table) => schema.relations.filter((r) => r.fromTableId === t.id && byId.has(r.toTableId));
+  // 테이블별 외래키 (큰 ERD에서 순서를 정할 때 매번 전체 관계를 훑지 않게)
+  const fkIndex = new Map<string, Relation[]>();
+  for (const r of schema.relations) if (byId.has(r.toTableId)) fkIndex.set(r.fromTableId, [...(fkIndex.get(r.fromTableId) ?? []), r]);
+  const fksOf = (t: Table) => fkIndex.get(t.id) ?? [];
   const required = (t: Table, r: Relation) => r.fromColumnIds.some((id) => {
     const c = t.columns.find((x) => x.id === id);
     return c && (!c.nullable || c.primaryKey);
@@ -347,7 +364,25 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
       warnings.push(`${byId.get(cut.fromTableId)!.name} → ${byId.get(cut.toTableId)!.name}: 서로 가리키는 외래키라 이번에는 NULL로 둡니다`);
       continue;
     }
-    for (const id of pending) skipped.push({ name: byId.get(id)!.name, reason: 'NOT NULL 외래키가 서로를 가리켜 먼저 넣을 수 있는 쪽이 없습니다' });
+    // 순환 안에 있는 테이블과, 그 순환 테이블을 부모로 가져 못 넣는 테이블을 나눠 알린다
+    const parentsOf = (id: string) => fksOf(byId.get(id)!).filter((r) => r.toTableId !== id && pending.has(r.toTableId) && !nulled.has(r.id) && required(byId.get(id)!, r)).map((r) => r.toTableId);
+    const inCycle = (id: string) => {
+      const seenIds = new Set<string>();
+      const stack = [...parentsOf(id)];
+      while (stack.length) {
+        const next = stack.pop()!;
+        if (next === id) return true;
+        if (seenIds.has(next)) continue;
+        seenIds.add(next);
+        stack.push(...parentsOf(next));
+      }
+      return false;
+    };
+    for (const id of pending) {
+      const cycle = inCycle(id);
+      const parent = parentsOf(id).map((p) => byId.get(p)!.name)[0];
+      skipped.push({ name: byId.get(id)!.name, reason: cycle ? 'NOT NULL 외래키가 서로를 가리켜(순환) 먼저 넣을 수 있는 쪽이 없습니다' : `부모 테이블 ${parent}을(를) 순환 때문에 넣을 수 없습니다` });
+    }
     break;
   }
 
@@ -393,16 +428,31 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
     const seen = uniqueKeys.map(() => new Set<string>());
     const rows: Map<string, unknown>[] = [];
     rowsOf.set(table.id, rows);
-    const byteLimit = (c: Column) => Boolean(byteLimitTypes?.test(baseOf(c)));
-    let tries = 0;
-    while (rows.length < want && tries < want * 30) {
-      tries++;
+    // 컬럼마다 값 만드는 방법을 한 번만 정한다 (행마다 이름 규칙을 다시 보지 않게)
+    const singleUnique = new Set(uniqueKeys.filter((k) => k.length === 1).map((k) => k[0]!));
+    const ctxOf = new Map(
+      columns.map((c) => [
+        c.id,
+        {
+          start,
+          values: enumValues.get(c.id) ?? null,
+          rule: rules.get(c.id),
+          byteLimit: Boolean(byteLimitTypes?.test(baseOf(c))),
+          hint: nameHint(c),
+          text: kinds.get(c.id) === 'string' ? textMaker(c) : undefined,
+          uniqueText: singleUnique.has(c.id) && !fkColumns.has(c.id),
+        },
+      ]),
+    );
+    // 겹치는 값이 연달아 나오면(값이 몇 개뿐인 UNIQUE, 부모 행보다 많은 1:1 등) 더 만들 수 없는 것으로 보고 멈춘다
+    let misses = 0;
+    while (rows.length < want && misses < 50) {
       const i = rows.length;
       const row = new Map<string, unknown>();
       for (const c of columns) {
         if (fkColumns.has(c.id)) continue;
         const nullable = c.nullable && !c.primaryKey && !c.unique;
-        row.set(c.id, nullable && c.defaultValue === null && rng.next() < 0.1 ? null : makeValue(c, kinds.get(c.id)!, i, rng, { start, values: enumValues.get(c.id) ?? null, rule: rules.get(c.id), byteLimit: byteLimit(c) }));
+        row.set(c.id, nullable && c.defaultValue === null && rng.next() < 0.1 ? null : makeValue(c, kinds.get(c.id)!, i, rng, ctxOf.get(c.id)!));
       }
       for (const c of columns) if (fkColumns.has(c.id)) row.set(c.id, null);
       for (const r of fks) {
@@ -416,7 +466,11 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
         r.fromColumnIds.forEach((cid, k) => row.set(cid, parent.get(r.toColumnIds[k]!) ?? null));
       }
       const keys = uniqueKeys.map((k) => (k.some((id) => row.get(id) === null || row.get(id) === undefined) ? null : JSON.stringify(k.map((id) => row.get(id)))));
-      if (keys.some((key, k) => key !== null && seen[k]!.has(key))) continue;
+      if (keys.some((key, k) => key !== null && seen[k]!.has(key))) {
+        misses++;
+        continue;
+      }
+      misses = 0;
       keys.forEach((key, k) => key !== null && seen[k]!.add(key));
       rows.push(row);
     }
@@ -446,6 +500,9 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
 /** 실행할 수 있는 SQL 파일 내용 (문장마다 ;) */
 export function seedScript(result: SeedResult): string {
   if (!result.statements.length) return '';
-  const head = `-- 테스트 데이터: ${result.tables.map((t) => `${t.name} ${t.rows}행`).join(', ')}`;
+  // 테이블이 많아도 한 줄이 끝없이 길어지지 않게 개수만 (테이블별 행 수는 INSERT에 있다)
+  const total = result.tables.reduce((n, t) => n + t.rows, 0);
+  const names = result.tables.slice(0, 8).map((t) => t.name).join(', ') + (result.tables.length > 8 ? ` 외 ${result.tables.length - 8}개` : '');
+  const head = `-- 테스트 데이터: ${result.tables.length}개 테이블 · ${total}행 (${names})`;
   return [head, ...result.statements.map((s) => `${s};`)].join('\n\n');
 }
