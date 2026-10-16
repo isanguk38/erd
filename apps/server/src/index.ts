@@ -7,6 +7,7 @@
 //   ERD_PUBLIC_URL        외부 주소 (예: https://erd.onrender.com)
 //   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET   GitHub 로그인 (OAuth App 콜백: <ERD_PUBLIC_URL>/auth/github/callback)
 //   ERD_ALLOW_PRIVATE_DB  1이면 로그인 모드에서도 내부망 주소의 DB 연결 허용 (기본 금지)
+//   ERD_ADMIN_GITHUB      관리자 페이지 주인 GitHub 계정 (쉼표로 여럿, 아이디 또는 숫자 id). 다른 관리자는 주인이 초대
 //   PORT                  포트 (NODE_ENV=production일 때, Render가 지정)
 
 import { dirname, resolve } from 'node:path';
@@ -28,7 +29,7 @@ const publicUrl = (env.ERD_PUBLIC_URL || env.ERD_WEB_URL || 'http://localhost:51
 
 /** 설정 값이 들어왔는지만 보여준다 (값 자체는 절대 출력하지 않는다) */
 function settingsReport(): string {
-  const keys = ['NODE_ENV', 'DATABASE_URL', 'ERD_SECRET', 'ERD_PUBLIC_URL', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'];
+  const keys = ['NODE_ENV', 'DATABASE_URL', 'ERD_SECRET', 'ERD_PUBLIC_URL', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'ERD_ADMIN_GITHUB'];
   return keys.map((k) => `  ${k.padEnd(22)} ${env[k] ? (k === 'NODE_ENV' ? env[k] : '설정됨') : '없음'}`).join('\n');
 }
 
@@ -88,6 +89,7 @@ const { app, mcpToken, auth } = buildApp({
   staticDir: env.NODE_ENV === 'production' || env.ERD_SERVE_WEB === '1' ? staticDir : undefined,
   // 배포 모드에서는 서버가 DB에 접속하지 않는다 (설치형 앱이 사용자 PC에서 처리). ERD_SERVER_DB=1이면 공개된 클라우드 DB에 한해 허용
   serverDb: !authEnabled || env.ERD_SERVER_DB === '1',
+  adminOwners: (env.ERD_ADMIN_GITHUB ?? '').split(',').map((s) => s.trim()).filter(Boolean),
 });
 
 // 종료할 때(재배포·잠들기) 접속을 정리하고 메모리의 문서를 저장한 뒤 끈다.

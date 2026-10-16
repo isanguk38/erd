@@ -1,30 +1,9 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect } from 'react';
 import { desktop } from '../lib/desktop';
 import { startDesktopUpdateCheck, useDesktopUpdate } from '../lib/desktopUpdate';
 import { Modal } from './Modal';
 import { Icon } from './ui';
-
-/** 릴리스 설명(마크다운 일부: ## 제목, - 목록)을 보여 준다 */
-function ReleaseNotes({ text }: { text: string }) {
-  const blocks: ReactNode[] = [];
-  let items: string[] = [];
-  const flush = () => {
-    if (items.length) blocks.push(<ul key={blocks.length}>{items.map((t, i) => <li key={i}>{t}</li>)}</ul>);
-    items = [];
-  };
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim().replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-    if (/^[-*]\s+/.test(line)) {
-      items.push(line.replace(/^[-*]\s+/, ''));
-      continue;
-    }
-    flush();
-    if (/^#{1,6}\s+/.test(line)) blocks.push(<h4 key={blocks.length}>{line.replace(/^#{1,6}\s+/, '')}</h4>);
-    else if (line) blocks.push(<p key={blocks.length}>{line}</p>);
-  }
-  flush();
-  return <div className="release-notes">{blocks.length ? blocks : <p className="muted">변경 내용이 적혀 있지 않습니다.</p>}</div>;
-}
+import { NoteText } from './NoteText';
 
 /** 새 버전 안내 창 (설치형 앱에서만). 어느 화면에서든 뜬다 */
 export function DesktopUpdateDialog() {
@@ -58,7 +37,7 @@ export function DesktopUpdateDialog() {
           ERD 앱 <b>{desktop.version}</b> → <b>{release.version}</b> 업데이트가 있습니다. 업데이트하시겠습니까?
         </p>
         <h3>바뀐 점</h3>
-        <ReleaseNotes text={release.notes} />
+        <NoteText text={release.notes} empty="변경 내용이 적혀 있지 않습니다." />
         {openedInBrowser ? (
           <p className="notice-box">
             브라우저에서 설치 파일(ERD-Setup-{release.version}.exe)을 받고 있습니다. 받은 파일을 실행하면 이 앱이 새 버전으로 바뀝니다. 설치 중 앱을 닫으라고 하면 이 창을 닫아 주세요.

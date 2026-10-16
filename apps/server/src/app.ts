@@ -18,6 +18,8 @@ import { DbJobQueue } from './dbJobs';
 import { registerDbJobRoutes } from './routes/dbJobs';
 import { atLeast, Auth, DESKTOP_ONLY_MESSAGE, LOCAL_USER, parseCookies, type AuthOptions, type User } from './auth';
 import { FileStorage, type Storage } from './storage';
+import { AdminStore, NoticeStore } from './admin';
+import { registerAdminRoutes } from './routes/admin';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -39,6 +41,8 @@ export interface AppOptions {
   mcpToken?: string;
   /** 화면 주소 (MCP 응답의 링크, 로그인 콜백, 초대 링크) */
   webUrl?: string;
+  /** 주인 관리자 GitHub 계정 (아이디 또는 숫자 id, ERD_ADMIN_GITHUB). 로컬 모드에서는 내 PC 사용자가 주인 */
+  adminOwners?: string[];
   /** 로그인 모드 설정. 없으면 로컬 모드 */
   auth?: Omit<AuthOptions, 'publicUrl' | 'secret'> & { secret?: string };
   /** 빌드한 화면 폴더 (배포 시 같은 서버에서 제공) */
@@ -126,6 +130,9 @@ export function buildApp(options: AppOptions): ErdApp {
   const dbJobs = new DbJobQueue(options.dbJobPickupMs);
   const projects = new ProjectStore(storage);
   const mcpToken = loadMcpToken(storage, options.mcpToken);
+  const adminOwners = (options.adminOwners ?? []).map((s) => s.trim().replace(/^@/, '')).filter(Boolean);
+  const admins = new AdminStore(storage, adminOwners, !auth.enabled);
+  const notices = new NoticeStore(storage);
 
   /** 쿠키(화면) 또는 Bearer 토큰(MCP·API)으로 사용자를 찾는다 */
   const userFrom = (headers: { cookie?: string; authorization?: string }, query?: URLSearchParams): User | null => {
@@ -243,7 +250,9 @@ export function buildApp(options: AppOptions): ErdApp {
   // MCP 로그인(OAuth): 로그인 모드에서만. 로컬 모드는 공용 토큰을 쓴다
   if (auth.enabled) registerOAuthRoutes(app, auth, auth.oauth);
   registerTemplateRoutes(app, storage);
-  registerDesktopRoutes(app, options.fetchDesktopRelease);
+  // 앱 업데이트 안내: 관리자 페이지에 그 버전의 "앱 업데이트" 글이 있으면 그 내용을, 없으면 GitHub 릴리스 설명을 보여 준다
+  registerDesktopRoutes(app, options.fetchDesktopRelease, (version) => notices.appNotes(version)?.body ?? null);
+  registerAdminRoutes(app, admins, notices, { publicUrl, owners: adminOwners });
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
   // AI가 요청한 DB 작업은 사용자의 앱이 가져가 처리한다 (웹 서비스는 DB에 직접 접속하지 않음)
   registerDbJobRoutes(app, dbJobs, auth);

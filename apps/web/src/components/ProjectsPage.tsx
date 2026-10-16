@@ -6,6 +6,8 @@ import { UserMenu } from './Toolbar';
 import { DB_ORDER, dbLabel } from '../lib/dbInfo';
 
 import { DesktopUpdateButton } from './DesktopUpdate';
+import { NoticesPanel } from './NoticesPanel';
+import { useAdminRole } from '../lib/notices';
 
 type SortKey = 'recent' | 'name';
 const SORT_KEY = 'erd.projectSort';
@@ -43,6 +45,7 @@ export function ProjectsPage() {
   const userName = useStore((s) => s.userName);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>(readSort);
+  const adminRole = useAdminRole();
   const changeSort = (next: SortKey) => {
     setSort(next);
     try {
@@ -79,11 +82,13 @@ export function ProjectsPage() {
   };
 
   return (
+    <div className="projects-layout">
     <div className="projects-page">
       <header className="projects-page__head">
         <div className="projects-page__title">
           <h1>ERD</h1>
           <DesktopUpdateButton />
+          {adminRole && <a className="btn btn-ghost btn-sm admin-link" href="#/admin" title="공지사항·업데이트 소식 쓰기">관리자 페이지</a>}
           <UserMenu />
         </div>
         <p className="muted">함께 그리고, DB와 바로 동기화하고, AI와 같이 설계하는 ERD</p>
@@ -167,6 +172,8 @@ export function ProjectsPage() {
           </li>
         ))}
       </ul>
+    </div>
+    <NoticesPanel />
     </div>
   );
 }

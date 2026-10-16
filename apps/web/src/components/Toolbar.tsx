@@ -20,6 +20,7 @@ import { FIT_MAX_ZOOM, freeSpot } from '../lib/graph';
 import { arrangeTables } from '../lib/arrange';
 import { sideWidth } from './ResizableSide';
 import { requestFocus } from '../lib/focus';
+import { useAdminRole } from '../lib/notices';
 
 export type DialogName = 'sql' | 'versions' | 'dbPull' | 'dbPush' | 'definition' | 'ai' | 'proposals' | 'aiLog' | 'share' | 'help' | 'image' | 'templates' | 'lint' | 'comments' | 'dictionary' | 'dbCompare' | 'seed';
 
@@ -80,6 +81,7 @@ function Participants() {
 /** 로그인 모드에서 내 계정과 로그아웃 */
 export function UserMenu() {
   const me = useStore((s) => s.me);
+  const adminRole = useAdminRole();
   if (!me?.authEnabled || !me.user) return null;
   const user = me.user;
   return (
@@ -92,6 +94,7 @@ export function UserMenu() {
       }
       title={`${user.name} (@${user.login})`}
       items={[
+        ...(adminRole ? [{ label: '관리자 페이지', hint: '공지·업데이트 소식', onClick: () => (location.hash = '#/admin') }] : []),
         {
           label: '로그아웃',
           onClick: async () => {
