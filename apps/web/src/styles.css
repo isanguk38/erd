@@ -1209,3 +1209,9 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 /* 넘치지 않게: 이름·표기 배지·검색이 먼저 줄어든다 */
 @media (max-width: 1280px) { .toolbar .naming-chip { max-width: 170px; } .toolbar .project-name { flex-basis: 150px; } }
 @media (max-width: 1180px) { .toolbar .search-trigger { min-width: 0; flex: 0 0 auto; } .toolbar .naming-chip { max-width: 120px; } }
+
+.seed-tables__tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.seed-tables__search { flex: 1 1 220px; min-width: 160px; }
+.seed-tables__only { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.seed-tables__list mark { background: var(--warning-soft); color: inherit; border-radius: 2px; }
+.seed-auto { margin-left: 4px; font-size: 10px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; }

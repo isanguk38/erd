@@ -32,6 +32,9 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
   // 영역 탭이면 그 영역 테이블만으로 시작
   const [picked, setPicked] = useState<Set<string>>(() => new Set(area ? area.tableIds : tables.map((t) => t.id)));
   const [copied, setCopied] = useState(false);
+  // 테이블 목록 찾기 (특정 테이블만 넣을 때)
+  const [query, setQuery] = useState('');
+  const [onlyPicked, setOnlyPicked] = useState(false);
   const [step, setStep] = useState<'make' | 'confirm' | 'result'>('make');
   const [connection, setConnection] = useState<Connection | null>(null);
   const [confirmText, setConfirmText] = useState('');
@@ -75,6 +78,14 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
     return lines.length > PREVIEW_LINES ? `${lines.slice(0, PREVIEW_LINES).join('\n')}\n-- … (${lines.length - PREVIEW_LINES}줄 더 — 복사·다운로드에는 모두 들어갑니다)` : script;
   }, [script]);
   const total = seedResult.tables.reduce((n, t) => n + t.rows, 0);
+  const q = query.trim().toLowerCase();
+  const filtering = Boolean(q) || onlyPicked;
+  const shown = tables.filter((t) => (!q || t.name.toLowerCase().includes(q) || t.logicalName.toLowerCase().includes(q)) && (!onlyPicked || picked.has(t.id)));
+  // 체크하지 않았는데 NOT NULL 외래키 때문에 함께 들어가는 테이블
+  const autoAdded = useMemo(() => {
+    const names = new Set(seedResult.added);
+    return new Set(tables.filter((t) => names.has(t.name) && !picked.has(t.id)).map((t) => t.id));
+  }, [seedResult, tables, picked]);
 
   const toggle = (id: string, on: boolean) => {
     const next = new Set(picked);
@@ -156,16 +167,34 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
           <details className="seed-tables" open={tables.length <= 12}>
             <summary>
               테이블 {picked.size}/{tables.length}개{area ? ` (지금 영역: ${area.name})` : ''}
-              <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); setPicked(new Set(tables.map((t) => t.id))); }}>모두</button>
-              <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); setPicked(new Set()); }}>없음</button>
+              {autoAdded.size > 0 && <span className="muted small"> · 자동 포함 {autoAdded.size}개</span>}
             </summary>
+            <div className="seed-tables__tools">
+              <input
+                className="seed-tables__search"
+                type="search"
+                placeholder="테이블 찾기 (물리명·논리명)"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="테이블 찾기"
+              />
+              <label className="seed-tables__only">
+                <input type="checkbox" checked={onlyPicked} onChange={(e) => setOnlyPicked(e.target.checked)} /> 체크한 것만
+              </label>
+              {/* 찾는 중이면 찾은 테이블만 체크·해제 */}
+              <button className="btn btn-sm" onClick={() => setPicked(new Set([...picked, ...shown.map((t) => t.id)]))}>{filtering ? `찾은 ${shown.length}개 체크` : '모두'}</button>
+              <button className="btn btn-sm" onClick={() => { const off = new Set(shown.map((t) => t.id)); setPicked(new Set([...picked].filter((id) => !off.has(id)))); }}>{filtering ? `찾은 ${shown.length}개 해제` : '없음'}</button>
+            </div>
             <div className="seed-tables__list">
-              {tables.map((t) => (
-                <label key={t.id}>
+              {shown.map((t) => (
+                <label key={t.id} className={autoAdded.has(t.id) ? 'auto-added' : undefined}>
                   <input type="checkbox" checked={picked.has(t.id)} onChange={(e) => toggle(t.id, e.target.checked)} />
-                  {t.name}{t.logicalName ? <span className="muted small"> {t.logicalName}</span> : null}
+                  <Highlight text={t.name} query={query} />
+                  {t.logicalName ? <span className="muted small"> <Highlight text={t.logicalName} query={query} /></span> : null}
+                  {autoAdded.has(t.id) && <span className="seed-auto" title="체크하지 않았지만, 체크한 테이블이 NOT NULL 외래키로 이 테이블을 가리켜 함께 넣습니다">자동 포함</span>}
                 </label>
               ))}
+              {!shown.length && <span className="muted small">찾는 테이블이 없습니다</span>}
             </div>
           </details>
           <div className="seed-summary">
@@ -176,7 +205,11 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
               </span>
             )}
           </div>
-          {seedResult.added.length > 0 && <p className="muted small">NOT NULL 외래키 때문에 부모 테이블도 함께 넣습니다: {seedResult.added.join(', ')}</p>}
+          {!making && seedResult.added.length > 0 && (
+            <p className="muted small" title={seedResult.added.join(', ')}>
+              NOT NULL 외래키 때문에 체크하지 않은 부모 테이블 {seedResult.added.length}개도 함께 넣습니다: {seedResult.added.slice(0, 10).join(', ')}{seedResult.added.length > 10 ? ` 외 ${seedResult.added.length - 10}개` : ''}
+            </p>
+          )}
           {(seedResult.skipped.length > 0 || seedResult.warnings.length > 0) && (
             <>
               {/* 만들지 않은 테이블·참고가 많으면 접어 둔다 (창이 끝없이 길어지지 않게) */}
@@ -265,5 +298,19 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+/** 찾는 글자를 굵게 */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark>{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
   );
 }

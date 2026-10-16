@@ -495,7 +495,9 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
     tables.push({ id: table.id, name: table.name, rows: rows.length });
   }
   statements.push(...after);
-  return { statements, tables, added, skipped, warnings };
+  // 함께 넣기로 한 부모라도 순환 때문에 못 만든 것은 빼고 알린다 (만들지 않은 테이블 쪽에 나온다)
+  const madeNames = new Set(tables.map((t) => t.name));
+  return { statements, tables, added: added.filter((n) => madeNames.has(n)), skipped, warnings };
 }
 
 /** 실행할 수 있는 SQL 파일 내용 (문장마다 ;) */
