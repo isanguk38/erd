@@ -121,3 +121,42 @@ describe('테스트 데이터', () => {
     expect(ok.tables.map((t) => t.name)).toEqual(['a', 'b']);
   });
 });
+
+describe('테스트 데이터: 큰 ERD·꼬인 외래키에서 멈추지 않는다', () => {
+  it('끊을 수 있는 외래키를 끊어도 순환이 남으면(같은 것을 다시 끊으려다 멈추던 문제) 만들 수 없다고 알린다', () => {
+    const s = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 'x', columns: [{ name: 'x_id', type: 'INT', primaryKey: true }] },
+      { op: 'createTable', name: 'z', columns: [{ name: 'z_id', type: 'INT', primaryKey: true }] },
+      { op: 'createTable', name: 'w', columns: [{ name: 'w_id', type: 'INT', primaryKey: true }] },
+      { op: 'addRelation', parent: 'z', child: 'x' },
+      { op: 'addRelation', parent: 'w', child: 'x' },
+      { op: 'addRelation', parent: 'x', child: 'z' },
+      { op: 'addRelation', parent: 'x', child: 'w' },
+      { op: 'updateColumn', table: 'x', column: 'z_id', changes: { nullable: true } },
+      { op: 'updateColumn', table: 'x', column: 'w_id', changes: { nullable: false } },
+      { op: 'updateColumn', table: 'z', column: 'x_id', changes: { nullable: false } },
+      { op: 'updateColumn', table: 'w', column: 'x_id', changes: { nullable: false } },
+    ]).schema;
+    expect(generateSeedData(s, getDialect('mysql'), { rows: 5 }).skipped.map((x) => x.name).sort()).toEqual(['w', 'x', 'z']);
+  });
+
+  it('테이블 300개·외래키 600개(순환 포함)도 금방 끝난다', () => {
+    let n = 7;
+    const rand = (k: number) => ((n = (n * 1103515245 + 12345) % 2147483648) % k);
+    const commands: Parameters<typeof applyCommands>[1] = [];
+    for (let i = 0; i < 300; i++) commands.push({ op: 'createTable', name: `t${i}`, columns: [{ name: `t${i}_id`, type: 'BIGINT', primaryKey: true }, { name: 'name', type: 'VARCHAR(50)', nullable: false }, { name: 'email', type: 'VARCHAR(100)', unique: true }] });
+    const schema = applyCommands(emptySchema(), commands).schema;
+    const ids = schema.tables.map((t) => t.id);
+    for (let k = 0; k < 600; k++) {
+      const from = schema.tables[rand(300)]!;
+      const to = schema.tables[rand(300)]!;
+      const col = { ...from.columns[0]!, id: `c${k}`, name: `ref${k}`, primaryKey: false, unique: false, nullable: rand(3) > 0 };
+      from.columns.push(col);
+      schema.relations.push({ id: `r${k}`, name: `fk${k}`, fromTableId: from.id, fromColumnIds: [col.id], toTableId: to.id, toColumnIds: [to.columns[0]!.id], cardinality: '1:N', onDelete: 'NO ACTION', onUpdate: 'NO ACTION' });
+    }
+    const started = Date.now();
+    const r = generateSeedData(schema, getDialect('postgresql'), { rows: 20, tableIds: ids });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(r.tables.length + r.skipped.length).toBe(300);
+  });
+});

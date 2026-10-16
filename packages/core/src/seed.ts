@@ -341,7 +341,7 @@ export function generateSeedData(schema: Schema, dialect: Dialect, options: Seed
       continue;
     }
     // 순환: NULL이 되는 외래키 하나를 끊는다. 없으면 남은 테이블은 만들 수 없다
-    const cut = [...pending].flatMap((id) => fksOf(byId.get(id)!).filter((r) => r.toTableId !== id && pending.has(r.toTableId) && !required(byId.get(id)!, r)))[0];
+    const cut = [...pending].flatMap((id) => fksOf(byId.get(id)!).filter((r) => r.toTableId !== id && pending.has(r.toTableId) && !nulled.has(r.id) && !required(byId.get(id)!, r)))[0];
     if (cut) {
       nulled.add(cut.id);
       warnings.push(`${byId.get(cut.fromTableId)!.name} → ${byId.get(cut.toTableId)!.name}: 서로 가리키는 외래키라 이번에는 NULL로 둡니다`);

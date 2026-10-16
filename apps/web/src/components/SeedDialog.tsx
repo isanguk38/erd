@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { dbmsMismatch, generateSeedData, getDialect, planPush, SEED_MAX_ROWS, seedScript } from '@erd/core';
+import { useEffect, useMemo, useState } from 'react';
+import { dbmsMismatch, generateSeedData, getDialect, planPush, SEED_MAX_ROWS, seedScript, type SeedResult } from '@erd/core';
 import { api, projectApi, type Connection, type ExecuteResult } from '../lib/api';
 import { downloadText, safeFileName } from '../lib/download';
 import { useDbAvailable, useDialect, useProjectName } from '../lib/hooks';
@@ -9,6 +9,7 @@ import { ConnectionPicker } from './ConnectionPicker';
 import { DbErrorHint } from './SyncParts';
 
 const PREVIEW_LINES = 300;
+const EMPTY: SeedResult = { statements: [], tables: [], added: [], skipped: [], warnings: [] };
 
 /**
  * 테스트 데이터: ERD를 보고 외래키·NOT NULL·UNIQUE·ENUM·간단한 CHECK를 지키는 INSERT 문을 만든다 (core/seed.ts).
@@ -38,10 +39,24 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState<ExecuteResult | null>(null);
 
-  const seedResult = useMemo(
-    () => generateSeedData(schema, dialect, { rows, startId, seed, tableIds: [...picked] }),
-    [schema, dialect, rows, startId, seed, picked],
-  );
+  // 창을 먼저 띄우고 데이터는 그다음에 만든다 (테이블이 많아도 눌렀는데 반응이 없는 것처럼 보이지 않게)
+  const [seedResult, setSeedResult] = useState<SeedResult>(EMPTY);
+  const [making, setMaking] = useState(true);
+  useEffect(() => {
+    setMaking(true);
+    const timer = setTimeout(() => {
+      try {
+        setSeedResult(generateSeedData(schema, dialect, { rows, startId, seed, tableIds: [...picked] }));
+        setError('');
+      } catch (e) {
+        setSeedResult(EMPTY);
+        setError(`테스트 데이터를 만들지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setMaking(false);
+      }
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [schema, dialect, rows, startId, seed, picked]);
   const script = useMemo(() => seedScript(seedResult), [seedResult]);
   const preview = useMemo(() => {
     const lines = script.split('\n');
@@ -97,7 +112,7 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
     <>
       <button className="btn" onClick={onClose}>닫기</button>
       {step === 'make' && dbAvailable && (
-        <button className="btn btn-primary" disabled={!seedResult.statements.length || !connection} onClick={toConfirm} title={connection ? '' : '아래에서 넣을 DB 연결을 고르세요'}>
+        <button className="btn btn-primary" disabled={making || !seedResult.statements.length || !connection} onClick={toConfirm} title={connection ? '' : '아래에서 넣을 DB 연결을 고르세요'}>
           다음: DB에 넣기 확인
         </button>
       )}
@@ -142,7 +157,7 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
             </div>
           </details>
           <div className="seed-summary">
-            <b>{seedResult.tables.length}개 테이블 · {total}행</b>
+            {making ? <b className="muted">테스트 데이터를 만드는 중… (테이블 {picked.size}개)</b> : <b>{seedResult.tables.length}개 테이블 · {total}행</b>}
             {seedResult.tables.length > 0 && <span className="muted small"> 넣는 순서: {seedResult.tables.map((t) => `${t.name}(${t.rows})`).join(' → ')}</span>}
           </div>
           {seedResult.added.length > 0 && <p className="muted small">NOT NULL 외래키 때문에 부모 테이블도 함께 넣습니다: {seedResult.added.join(', ')}</p>}
@@ -152,7 +167,7 @@ export function SeedDialog({ onClose }: { onClose: () => void }) {
               {seedResult.warnings.map((w, i) => <li key={i} className="muted small">ⓘ {w}</li>)}
             </ul>
           )}
-          <pre className="sql-view seed-sql">{preview || '-- 고른 테이블이 없습니다'}</pre>
+          <pre className="sql-view seed-sql">{making ? '-- 만드는 중…' : preview || '-- 고른 테이블이 없습니다'}</pre>
           <div className="btn-row">
             <button className="btn" disabled={!script} onClick={async () => { await navigator.clipboard.writeText(script); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
               {copied ? '복사됨' : '복사'}
