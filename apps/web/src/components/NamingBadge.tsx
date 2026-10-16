@@ -46,7 +46,18 @@ export function NamingBadge({ disabled }: { disabled: boolean }) {
     return `${NAME_STYLE_LABEL[style]}${FROM_LABEL[from] ? ` (${FROM_LABEL[from]})` : ''}`;
   };
   const same = tableStyle === columnStyle && tableFrom === columnFrom;
-  const label = !tableStyle && !columnStyle ? '표기 기준: 자동' : same ? text('table') : `테이블 ${text('table')} · 컬럼 ${text('column')}`;
+  // 헤더가 넘치지 않게 짧게: 같으면 "snake_case (사전)", 다르면 "테이블 snake_case · 컬럼 camelCase" (어디서 정했는지는 마우스를 올리면)
+  const short = (kind: NameKind) => (info[kind].style ? NAME_STYLE_LABEL[info[kind].style!] : '자동');
+  // 표기가 같으면 하나로 (정한 곳이 다르면 사전을 따른 쪽을 보여 줌)
+  const sameStyleFrom = tableFrom === 'dictionary' || columnFrom === 'dictionary' ? 'dictionary' : tableFrom;
+  const label = !tableStyle && !columnStyle
+    ? '표기 기준: 자동'
+    : same
+      ? text('table')
+      : tableStyle === columnStyle
+        ? `${NAME_STYLE_LABEL[tableStyle!]}${FROM_LABEL[sameStyleFrom] ? ` (${FROM_LABEL[sameStyleFrom]})` : ''}`
+        : `테이블 ${short('table')} · 컬럼 ${short('column')}`;
+  const detail = `테이블 ${text('table')} · 컬럼 ${text('column')}`;
   const auto = !savedTable && !savedColumn;
 
   const choose = (kind: NameKind, value: string) => {
@@ -66,9 +77,9 @@ export function NamingBadge({ disabled }: { disabled: boolean }) {
         onClick={() => setOpen(!open)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="이름 표기 기준: 테이블·컬럼 물리명을 이 표기로 맞춥니다 (따로 정할 수 있음). 설계 검사가 다른 이름을 알려 주고, AI도 이 기준으로 만듭니다."
+        title={`이름 표기 기준: ${detail}\n테이블·컬럼 물리명을 이 표기로 맞춥니다 (따로 정할 수 있음). 설계 검사가 다른 이름을 알려 주고, AI도 이 기준으로 만듭니다.`}
       >
-        {label} ▾
+        <span className="naming-chip__text">{label}</span> ▾
       </button>
       {open && (
         <div className="dropdown__menu naming-panel" role="dialog" aria-label="이름 표기 기준">

@@ -84,8 +84,8 @@ export function DbCompareDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="DB끼리 비교" onClose={onClose} wide footer={<button className="btn" onClick={onClose}>닫기</button>}>
       <p className="muted small">
-        두 DB(예: 개발과 운영)의 테이블·컬럼·인덱스·외래키{dialect.features.objects ? '·뷰·함수 등 객체' : ''}를 읽어 차이를 보여 줍니다. 두 DB 모두 읽기만 하고,
-        대상 DB를 기준과 같게 만드는 SQL은 <b>복사·다운로드만</b> 합니다 (실행하지 않음).
+        <b>기준 DB의 구조를 대상 DB에 옮기는 SQL</b>을 만듭니다. 예) 기준 = 개발, 대상 = 운영이면 개발에만 있는 테이블·컬럼{dialect.features.objects ? '·함수·프로시저' : ''}을
+        운영에 추가하는 SQL이 나옵니다. 두 DB 모두 읽기만 하고, SQL은 <b>복사·다운로드만</b> 합니다 (대상 DB에 실행하지 않음).
       </p>
       {connections && connections.length < 2 && (
         <div className="empty-state">
@@ -95,14 +95,14 @@ export function DbCompareDialog({ onClose }: { onClose: () => void }) {
       {connections && connections.length >= 2 && (
         <div className="compare-pick">
           <label>
-            <span>기준 DB <span className="muted small">(맞출 모양, 예: 개발)</span></span>
+            <span>기준 DB <span className="muted small">— 이 구조를 따라감 (예: 개발)</span></span>
             <select value={sourceId} onChange={(e) => { setSourceId(e.target.value); setRead(null); }}>
               {connections.map((c) => <option key={c.id} value={c.id}>{label(c)}</option>)}
             </select>
           </label>
-          <button className="btn btn-sm compare-swap" title="기준·대상 바꾸기" onClick={() => { setSourceId(targetId); setTargetId(sourceId); setRead(null); }}>⇄</button>
+          <button className="btn btn-sm compare-swap" title="기준·대상 바꾸기 (기준 → 대상 방향)" onClick={() => { setSourceId(targetId); setTargetId(sourceId); setRead(null); }}>⇄</button>
           <label>
-            <span>대상 DB <span className="muted small">(바꿀 쪽, 예: 운영)</span></span>
+            <span>대상 DB <span className="muted small">— SQL로 업데이트할 DB (예: 운영)</span></span>
             <select value={targetId} onChange={(e) => { setTargetId(e.target.value); setRead(null); }}>
               {connections.map((c) => <option key={c.id} value={c.id}>{label(c)}</option>)}
             </select>
@@ -138,7 +138,7 @@ export function DbCompareDialog({ onClose }: { onClose: () => void }) {
             groups={COMPARE_GROUPS}
             fileName={safeFileName(`${projectName}_${read.targetName}_to_${read.sourceName}`)}
             emptyMessage={`두 DB의 구조가 같습니다.`}
-            sqlTitle={`${read.targetName}을(를) ${read.sourceName}과(와) 같게 만드는 SQL`}
+            sqlTitle={`${read.sourceName} → ${read.targetName}: 대상 DB(${read.targetName})에서 실행하면 기준(${read.sourceName})과 같아지는 SQL`}
           />
         </>
       )}

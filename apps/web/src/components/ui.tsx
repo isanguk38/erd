@@ -50,7 +50,7 @@ export interface MenuItem {
 }
 
 /** 버튼을 누르면 아래로 펼쳐지는 메뉴 */
-export function Dropdown({ label, icon, items, title, iconOnly }: { label: ReactNode; icon?: string; items: MenuItem[]; title?: string; /** 아이콘만 (좁은 도구 막대) */ iconOnly?: boolean }) {
+export function Dropdown({ label, icon, items, title, iconOnly, className }: { label: ReactNode; icon?: string; items: MenuItem[]; title?: string; /** 아이콘만 (좁은 도구 막대) */ iconOnly?: boolean; className?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -65,7 +65,7 @@ export function Dropdown({ label, icon, items, title, iconOnly }: { label: React
     };
   }, [open]);
   return (
-    <div className="dropdown" ref={ref}>
+    <div className={`dropdown${className ? ` ${className}` : ''}`} ref={ref}>
       <button className={`btn btn-tool${open ? ' active' : ''}${iconOnly ? ' icon-only' : ''}`} onClick={() => setOpen(!open)} title={title} aria-label={iconOnly ? title : undefined} aria-haspopup="menu" aria-expanded={open}>
         {icon && <Icon name={icon} />}
         {iconOnly ? <span className="sr-only">{label}</span> : <span>{label}</span>}

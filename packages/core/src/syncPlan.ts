@@ -303,8 +303,13 @@ function classify(diff: DiffResult, erd: Schema, dbAligned: Schema, baseline: Sc
 export function planPull(erd: Schema, db: Schema, options: PlanOptions): SyncPlan {
   const { dialect, baseline, links = [] } = options;
   const dbAligned = alignDb(db, erd, baseline, links);
-  const diff = diffSchemas(erd, dbAligned, dialect);
+  // DB 객체를 한 번도 가져온 적 없는 ERD(객체 기능 전에 만든 프로젝트)는 가져오기에서는 "객체 없음"으로 본다.
+  // 그래야 DB의 뷰·함수·프로시저가 가져오기와 배지에 나온다 (내보내기는 그대로 — 모르는 것을 지우지 않는다)
+  const unknownObjects = Boolean(dialect.features.objects) && !Array.isArray(erd.objects) && erd.tables.length > 0 && Array.isArray(dbAligned.objects);
+  const diff = diffSchemas(unknownObjects ? { ...erd, objects: [] } : erd, dbAligned, dialect);
   const origins = classify(diff, erd, dbAligned, baseline, dialect);
+  // ERD는 객체를 가진 적이 없으니 DB에 있는 객체는 모두 DB 쪽 것
+  if (unknownObjects && baseline) for (const c of diff.changes) if (c.kind === 'createObject' || c.kind === 'dropObject' || c.kind === 'alterObject') origins[c.id] = 'db';
   const defaultSelected = new Set(
     diff.changes
       .filter((c) => {

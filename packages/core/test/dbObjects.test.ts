@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { applyCommands, diffSchemas, emptySchema, generateStatements, getDialect, normalizeDefinition, parseObjectDdl, readSchema, writeSchema, type Schema } from '../src';
+import { applyCommands, diffSchemas, emptySchema, generateStatements, getDialect, normalizeDefinition, parseObjectDdl, planPull, planPush, readSchema, summarizePlan, writeSchema, type Schema } from '../src';
 
 describe('DB 객체 (뷰·함수·프로시저·트리거)', () => {
   it('DDL에서 종류·이름·트리거 테이블을 읽는다 (DB마다 다른 머리말)', () => {
@@ -68,6 +68,23 @@ describe('DB 객체 (뷰·함수·프로시저·트리거)', () => {
     const unknown: Schema = { ...structuredClone(erd), objects: undefined };
     expect(diffSchemas(unknown, erd, pg).changes.filter((c) => c.kind.endsWith('Object'))).toEqual([]);
     expect(diffSchemas({ ...unknown, objects: [] }, erd, pg).changes.map((c) => c.summary)).toEqual(['뷰 v 생성']);
+  });
+
+  it('객체를 가져온 적 없는 ERD(예전 프로젝트): 가져오기에는 DB 객체가 "DB에서 바뀜"으로 나오고, 내보내기는 지우지 않는다', () => {
+    const pg = getDialect('postgresql');
+    const db = applyCommands(emptySchema(), [
+      { op: 'createTable', name: 't', columns: [{ name: 'id', type: 'INT', primaryKey: true }] },
+      { op: 'createObject', definition: 'CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$' },
+    ], pg).schema;
+    const erd: Schema = { ...structuredClone(db), objects: undefined };
+    // 기준 시점이 있어도 (객체가 들어 있는 DB 구조로 저장된 것)
+    for (const baseline of [undefined, structuredClone(db)]) {
+      const pull = planPull(erd, db, { dialect: pg, baseline });
+      expect(pull.diff.changes.map((c) => c.summary)).toEqual(['함수 f 생성']);
+      expect(summarizePlan(pull)).toMatchObject({ db: baseline ? 1 : 0, erd: 0 });
+      expect(pull.defaultSelected.size).toBe(1);
+      expect(planPush(erd, db, { dialect: pg, baseline }).diff.changes).toEqual([]);
+    }
   });
 
   it('문서(Yjs)에 저장하고 읽으면 같다', () => {

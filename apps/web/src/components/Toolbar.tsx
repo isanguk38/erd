@@ -225,18 +225,19 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         </button>
         <span className="spacer" />
         <Participants />
-        <button className="btn btn-ghost btn-with-badge" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
+        <button className="btn btn-ghost btn-with-badge tb-text" onClick={() => onOpen('comments')} title="댓글·확인 요청 모아 보기">
           <Icon name="comment" />
           <span className="hide-narrow">댓글</span>
           {commentCount > 0 && <span className="db-badge comment">{commentCount}</span>}
         </button>
         {/* 프로젝트 전체에 하는 일: 버전(저장·비교·복원)과 추출(SQL·정의서·도면) */}
-        <button className="btn btn-ghost" onClick={() => onOpen('versions')} title="버전 저장·비교·복원">
+        <button className="btn btn-ghost tb-text" onClick={() => onOpen('versions')} title="버전 저장·비교·복원">
           <Icon name="history" />
           <span className="hide-narrow">버전</span>
         </button>
         <Dropdown
           label="추출"
+          className="tb-text"
           icon="download"
           title="SQL·테이블 정의서·ERD 도면(HTML·이미지)으로 추출"
           items={[
@@ -247,12 +248,10 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
         />
         <span className="divider" />
         <button className={`btn btn-ghost btn-ai${pendingProposals ? ' has-badge' : ''}`} onClick={() => onOpen(pendingProposals ? 'proposals' : 'ai')} title={pendingProposals ? `AI 제안 ${pendingProposals}건이 검토를 기다립니다` : 'AI(MCP) 연결·적용 방식'}>
-          <Icon name="sparkles" />
           <span>AI</span>
           {pendingProposals ? <span className="badge-count">{pendingProposals}</span> : null}
         </button>
-        <button className="btn btn-outline" onClick={() => onOpen('share')} title="함께 작업할 사람 초대">
-          <Icon name="share" />
+        <button className="btn btn-share" onClick={() => onOpen('share')} title="함께 작업할 사람 초대">
           <span>공유</span>
         </button>
         <span className="divider" />
