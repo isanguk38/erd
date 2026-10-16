@@ -488,6 +488,8 @@ export function describeSchema(schema: Schema) {
       name: t.name,
       logicalName: t.logicalName || undefined,
       comment: t.comment || undefined,
+      /** 화면의 테이블 색 (없으면 기본색) */
+      color: t.color || undefined,
       columns: t.columns.map((c) => ({
         name: c.name,
         logicalName: c.logicalName || undefined,

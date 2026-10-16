@@ -36,6 +36,12 @@ const colorTables = z
   .optional()
   .describe('영역 색을 그 영역 테이블 색으로도 칠한다 (기본 true). 여러 영역에 들어 있는 공통 테이블은 첫 영역(탭 순서)의 색을 쓴다');
 
+const tableColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/)
+  .optional()
+  .describe('화면의 테이블 색 (#rrggbb, ERD에만 저장). 색만 바꾸는 updateTable은 제안 모드에서도 바로 반영된다. 보통은 영역 색을 따르게 두고 직접 주지 않는다');
+
 const columnSpec = z.object({
   name: z.string().describe('물리명 (예: member_id)'),
   logicalName: z.string().optional().describe('논리명 (예: 회원번호)'),
@@ -60,9 +66,10 @@ const command = z.discriminatedUnion('op', [
     logicalName: z.string().optional(),
     comment: z.string().optional().describe('상세 설명 — ERD에만 저장 (DB comment에는 logicalName)'),
     columns: z.array(columnSpec).optional(),
-    area: z.string().optional().describe('넣을 주제영역 이름 (그 영역 탭에 함께 놓인다)'),
+    area: z.string().optional().describe('넣을 주제영역 이름 (그 영역 탭에 함께 놓이고, 색을 주지 않으면 영역 색으로 칠해진다)'),
+    color: tableColor,
   }),
-  z.object({ op: z.literal('updateTable'), table: z.string(), name: z.string().optional(), logicalName: z.string().optional(), comment: z.string().optional() }),
+  z.object({ op: z.literal('updateTable'), table: z.string(), name: z.string().optional(), logicalName: z.string().optional(), comment: z.string().optional(), color: tableColor }),
   z.object({ op: z.literal('dropTable'), table: z.string() }),
   z.object({ op: z.literal('addColumn'), table: z.string(), column: columnSpec, after: z.string().optional().describe('이 컬럼 뒤에 추가') }),
   z.object({ op: z.literal('updateColumn'), table: z.string(), column: z.string(), changes: columnSpec.partial() }),

@@ -72,6 +72,16 @@ describe('MCP', () => {
     expect(schema.areas.map(({ name, tables }: { name: string; tables: string[] }) => ({ name, tables }))).toEqual([{ name: '회원', tables: ['member'] }, { name: '주문', tables: ['orders', 'member'] }, { name: '정산', tables: ['settlement'] }]);
     expect(new Set(schema.areas.map((a: { color: string }) => a.color)).size).toBe(3); // 영역 색이 서로 다르다
 
+    // 테이블 색: get_schema에 보이고(영역 색과 같음), 색만 바꾸는 명령은 제안 모드에서도 바로 반영. 바뀐 것 없으면 빈 제안을 만들지 않는다
+    expect(schema.tables.find((t: { name: string }) => t.name === 'orders').color).toBe(schema.areas.find((a: { name: string }) => a.name === '주문').color);
+    const pendingBefore = (await pending()).filter((x) => x.status === 'pending').length;
+    const recolor = await call('edit_schema', { project: '영역', commands: [{ op: 'updateTable', table: 'member', color: '#dc2626' }] });
+    expect(recolor.mode).toBe('apply');
+    expect((await call('get_schema', { project: '영역' })).tables.find((t: { name: string }) => t.name === 'member').color).toBe('#dc2626');
+    const same = await call('edit_schema', { project: '영역', commands: [{ op: 'updateTable', table: 'member', logicalName: '회원' }] });
+    expect(same.unchanged).toBe(true);
+    expect((await pending()).filter((x) => x.status === 'pending').length).toBe(pendingBefore);
+
     // 새 테이블을 영역에 바로 (제안 → 승인 후에도 그 영역에)
     await call('edit_schema', { project: '영역', commands: [{ op: 'createTable', name: 'payment', area: '주문', columns: [{ name: 'payment_id', type: 'BIGINT', primaryKey: true }] }] });
     await approve();

@@ -70,6 +70,9 @@ const AI_SESSION_IDLE_MS = 30 * 60 * 1000;
 
 type Mode = 'apply' | 'propose';
 const AREA_OPS = new Set(['createArea', 'updateArea', 'dropArea', 'addToArea', 'removeFromArea', 'moveToArea']);
+/** 화면에서만 보이는 명령 (영역, 테이블 색만 바꾸기): 설계·DB가 바뀌지 않아 제안 모드에서도 바로 반영한다 */
+const visualOnly = (c: Command) =>
+  AREA_OPS.has(c?.op) || (c?.op === 'updateTable' && Object.keys(c).every((k) => k === 'op' || k === 'table' || k === 'color'));
 type Source = 'user' | 'ai' | 'api';
 
 const badRequest = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
@@ -325,12 +328,12 @@ export function registerProjectRoutes(
       const { commands, source = 'api', title = 'AI 제안' } = req.body ?? ({} as never);
       if (!Array.isArray(commands) || !commands.length) throw badRequest('commands가 필요합니다');
       let mode = modeOf(id, req.body.mode, source);
-      // 영역 명령만 있으면 제안 없이 바로 반영한다 (화면에서 나눠 보는 구분일 뿐 설계·DB는 바뀌지 않음).
+      // 영역·테이블 색 명령만 있으면 제안 없이 바로 반영한다 (화면에서 보는 구분일 뿐 설계·DB는 바뀌지 않음).
       // 아직 제안에만 있는 테이블을 가리키면 제안에 이어서 넣는다
-      if (mode === 'propose' && commands.every((c) => AREA_OPS.has(c?.op))) {
+      if (mode === 'propose' && commands.every(visualOnly)) {
         try {
           const direct = applyCommands(store.schema(id), commands, getDialect(store.dialect(id)));
-          return change(id, direct.schema, { mode: 'apply', source, title, messages: [...direct.messages, '영역은 화면에서 나눠 보는 구분이라 제안 없이 바로 반영했습니다'] });
+          return change(id, direct.schema, { mode: 'apply', source, title, messages: [...direct.messages, '영역·테이블 색은 화면에서 보는 구분이라 제안 없이 바로 반영했습니다'] });
         } catch (e) {
           if (!(e instanceof CommandError)) throw e;
         }
@@ -346,6 +349,8 @@ export function registerProjectRoutes(
       }
       // 함께 바뀐 것(영향도)과 표준 용어 사전과 다른 컬럼을 알려 준다 (AI가 바로 이어서 고치게)
       const extra = reviewNotes(id, base, result.schema);
+      // 바뀐 것이 없으면 빈 제안을 만들지 않는다
+      if (JSON.stringify(result.schema) === JSON.stringify(base)) return { mode, messages: [...result.messages, '바뀐 것이 없어 반영하지 않았습니다'], unchanged: true };
       if (mode === 'propose') {
         const proposal = store.upsertProposal(id, source === 'ai' ? 'ai' : 'api', title, () => ({ schema: result.schema, messages: result.messages }));
         // 사전에 없는 용어는 사람이 제안을 승인할 때 사전에 넣는다
