@@ -1342,9 +1342,7 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .notice-item__body .release-notes.md li:has(> input[type='checkbox'])::before { display: none; }
 .notice-item__body .release-notes.md li:has(> input[type='checkbox']) { padding-left: 0; }
 
-/* ── 관리자 글쓰기: 꾸미기 버튼 + 쓰기|미리보기 두 칸 ── */
-.md-editor { border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: var(--panel); }
-.md-editor__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--border); background: var(--bg); }
+/* ── 관리자 글쓰기: 꾸미기 버튼 (RichEditor) ── */
 .md-tool { min-width: 28px; height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; font-size: 13px; color: var(--text); }
 .md-tool:hover { background: var(--panel); border-color: var(--border); }
 .md-tool.b { font-weight: 800; }
@@ -1354,19 +1352,43 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .md-emoji__menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; display: grid; grid-template-columns: repeat(9, 30px); gap: 2px; padding: 6px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15); }
 .md-emoji__menu button { width: 30px; height: 30px; border: none; background: none; border-radius: 6px; cursor: pointer; font-size: 17px; }
 .md-emoji__menu button:hover { background: var(--accent-soft); }
-.md-editor__tabs { margin-left: auto; display: none; gap: 2px; }
-.md-editor__tabs button { border: none; background: none; padding: 4px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); }
-.md-editor__tabs button.active { background: var(--panel); color: var(--text); font-weight: 600; }
-.md-editor__panes { display: grid; grid-template-columns: 1fr 1fr; min-height: 320px; }
-.md-editor__input.admin-body { border: none; border-radius: 0; min-height: 320px; height: 100%; font-family: 'JetBrains Mono', Consolas, 'D2Coding', monospace; font-size: 12.5px; outline: none; }
-.md-editor__preview.admin-preview { border: none; border-left: 1px solid var(--border); border-radius: 0; padding: 10px 14px; min-height: 320px; overflow: auto; max-height: 560px; }
-.md-editor__preview .release-notes.md { border: none; padding: 0; max-height: none; overflow: visible; }
-@media (max-width: 1100px) {
-  .md-editor__tabs { display: inline-flex; }
-  .md-editor__panes { grid-template-columns: 1fr; }
-  .md-editor.tab-write .md-editor__preview { display: none; }
-  .md-editor.tab-preview .md-editor__input { display: none; }
-  .md-editor__preview.admin-preview { border-left: none; }
-}
 /* 글쓰기 칸은 넓게: 관리자 페이지 편집 쪽 폭을 더 */
 .admin-notices { grid-template-columns: minmax(0, 340px) minmax(0, 1fr); }
+
+/* ── 관리자 글쓰기: 보이는 그대로 편집 · HTML · 미리보기 ── */
+.rich-editor { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); overflow: hidden; }
+.rich-editor--loading { padding: 16px; }
+.rich-editor__bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 6px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.rich-editor__hint { padding: 4px 6px; }
+.rich-toolbar { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.rich-toolbar__block { height: 28px; font-size: 12px; padding: 0 4px; margin-right: 4px; }
+.rich-toolbar__sep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 4px; }
+.md-tool.u { text-decoration: underline; }
+.md-tool.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.md-tool.table { font-weight: 700; }
+.rich-editor__modes { margin-left: auto; display: inline-flex; gap: 2px; background: var(--border); border-radius: 7px; padding: 2px; }
+.rich-editor__modes button { border: none; background: transparent; padding: 3px 10px; border-radius: 5px; cursor: pointer; color: var(--muted); font-size: 12px; }
+.rich-editor__modes button.active { background: var(--panel); color: var(--text); font-weight: 700; box-shadow: 0 1px 2px rgb(15 23 42 / 0.12); }
+.rich-tablebar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.rich-tablebar .btn-sm { height: 24px; padding: 0 8px; font-size: 12px; }
+.rich-editor__body { min-height: 340px; max-height: 620px; overflow: auto; }
+.rich-editor__content { padding: 12px 16px; }
+.rich-editor__content .ProseMirror { outline: none; min-height: 300px; }
+.rich-editor__content .ProseMirror p.is-editor-empty:first-child::before { content: '여기에 내용을 쓰세요'; color: var(--muted); pointer-events: none; float: left; height: 0; }
+.rich-editor__content table { display: table; width: auto; min-width: 50%; table-layout: fixed; }
+.rich-editor__content td, .rich-editor__content th { min-width: 60px; position: relative; }
+.rich-editor__content td p, .rich-editor__content th p { margin: 0; }
+.rich-editor__content .selectedCell::after { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); pointer-events: none; }
+.rich-editor__content img.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+.rich-editor__html { display: block; width: 100%; min-height: 340px; border: none; outline: none; resize: vertical; padding: 12px 14px; font-family: 'JetBrains Mono', Consolas, 'D2Coding', monospace; font-size: 12.5px; line-height: 1.55; background: var(--code-bg); color: var(--code-text); }
+.rich-editor__preview { padding: 12px 16px; }
+.rich-editor__preview .release-notes, .rich-editor__content.release-notes { border: none; max-height: none; overflow: visible; }
+/* 체크리스트 (편집기와 보여 주는 글 모두) */
+.release-notes.md ul[data-type='taskList'] { list-style: none; padding-left: 2px; }
+.release-notes.md ul[data-type='taskList'] li { display: flex; align-items: flex-start; gap: 6px; padding-left: 0; }
+.release-notes.md ul[data-type='taskList'] li::before { display: none; }
+.release-notes.md ul[data-type='taskList'] li > label { margin-top: 2px; flex: none; }
+.release-notes.md ul[data-type='taskList'] li > div { flex: 1; }
+.release-notes.md ul[data-type='taskList'] li > div p { margin: 0; }
+.release-notes.md ul[data-type='taskList'] li[data-checked='true'] > div { color: var(--muted); text-decoration: line-through; }
+.release-notes.md u { text-underline-offset: 2px; }

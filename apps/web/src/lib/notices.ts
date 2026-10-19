@@ -11,6 +11,8 @@ export interface NoticeItem {
   kind: NoticeKind;
   title: string;
   body: string;
+  /** html(편집기로 쓴 글) 또는 markdown(예전 글). 없으면 markdown */
+  format?: 'html' | 'markdown';
   version?: string;
   pinned: boolean;
   published: boolean;
@@ -22,7 +24,7 @@ export interface NoticeItem {
 export interface AdminNotice extends NoticeItem {
   createdBy: string;
   updatedBy: string;
-  revisions: { at: string; by: string; title: string; body: string; kind: NoticeKind; version?: string; pinned: boolean }[];
+  revisions: { at: string; by: string; title: string; body: string; format?: 'html' | 'markdown'; kind: NoticeKind; version?: string; pinned: boolean }[];
 }
 
 export interface AdminInviteInfo {
@@ -44,7 +46,7 @@ export interface AdminEntry {
   addedBy: string;
 }
 
-export type NoticeInput = Partial<Pick<AdminNotice, 'kind' | 'title' | 'body' | 'pinned' | 'published'>> & { version?: string | null };
+export type NoticeInput = Partial<Pick<AdminNotice, 'kind' | 'title' | 'body' | 'format' | 'pinned' | 'published'>> & { version?: string | null };
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, { method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });

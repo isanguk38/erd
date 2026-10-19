@@ -44,7 +44,7 @@ export function toDesktopRelease(release: GithubRelease): DesktopRelease | null 
   };
 }
 
-export function registerDesktopRoutes(app: FastifyInstance, fetchLatest: () => Promise<GithubRelease> = defaultFetch, appNotes?: (version: string) => string | null) {
+export function registerDesktopRoutes(app: FastifyInstance, fetchLatest: () => Promise<GithubRelease> = defaultFetch, appNotes?: (version: string) => { notes: string; format: 'html' | 'markdown' } | null) {
   let cache: { at: number; value: DesktopRelease | null } | null = null;
   app.get('/api/desktop/latest', async (_req, reply) => {
     if (!cache || Date.now() - cache.at > CACHE_MS) {
@@ -58,8 +58,8 @@ export function registerDesktopRoutes(app: FastifyInstance, fetchLatest: () => P
     }
     if (!cache?.value) return reply.status(404).send({ error: '내려받을 수 있는 릴리스가 없습니다' });
     // 관리자 페이지에서 쓴 그 버전의 업데이트 글이 있으면 그 내용 (릴리스 뒤에도 고칠 수 있게)
-    const notes = appNotes?.(cache.value.version);
-    return notes ? { ...cache.value, notes } : cache.value;
+    const override = appNotes?.(cache.value.version);
+    return override ? { ...cache.value, notes: override.notes, notesFormat: override.format } : { ...cache.value, notesFormat: 'markdown' };
   });
 }
 

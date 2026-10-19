@@ -105,6 +105,8 @@ describe('관리자 페이지', () => {
     const { app } = setup();
     const owner = await login(app, 'owner');
     const n = (await owner('POST', '/api/admin/notices', { kind: 'web', title: '첫 제목', body: '첫 내용', published: true })).body;
+    expect(n.format).toBe('html');
+    expect((await owner('POST', '/api/admin/notices', { kind: 'web', title: 'x', format: 'docx' })).body.error).toMatch(/형식/);
     const edited = (await owner('PATCH', `/api/admin/notices/${n.id}`, { title: '고친 제목' })).body;
     expect(edited.title).toBe('고친 제목');
     expect(edited.publishedAt).toBe(n.publishedAt);
@@ -123,10 +125,13 @@ describe('관리자 페이지', () => {
     const { app } = setup({ version: '0.2.9', body: 'GitHub 설명' });
     const owner = await login(app, 'owner');
     expect((await owner('GET', '/api/desktop/latest')).body.notes).toBe('GitHub 설명');
+    expect((await owner('GET', '/api/desktop/latest')).body.notesFormat).toBe('markdown');
     const n = (await owner('POST', '/api/admin/notices', { kind: 'app', version: '0.2.9', title: '0.2.9', body: '## 바뀐 점\n- 테스트 데이터', published: false })).body;
     expect((await owner('GET', '/api/desktop/latest')).body.notes).toBe('GitHub 설명');
     await owner('PATCH', `/api/admin/notices/${n.id}`, { published: true });
     expect((await owner('GET', '/api/desktop/latest')).body.notes).toBe('## 바뀐 점\n- 테스트 데이터');
+    // 편집기로 쓴 글은 html, GitHub 릴리스 설명은 markdown — 앱 업데이트 창이 형식에 맞게 보여 준다
+    expect((await owner('GET', '/api/desktop/latest')).body.notesFormat).toBe('html');
   });
 
   it('로컬 모드(로그인 없음)에서는 내 PC 사용자가 주인', async () => {

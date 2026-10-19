@@ -37,7 +37,7 @@ export function DesktopUpdateDialog() {
           ERD 앱 <b>{desktop.version}</b> → <b>{release.version}</b> 업데이트가 있습니다. 업데이트하시겠습니까?
         </p>
         <h3>바뀐 점</h3>
-        <NoteText text={release.notes} empty="변경 내용이 적혀 있지 않습니다." />
+        <NoteText text={release.notes} format={release.notesFormat ?? 'markdown'} empty="변경 내용이 적혀 있지 않습니다." />
         {openedInBrowser ? (
           <p className="notice-box">
             브라우저에서 설치 파일(ERD-Setup-{release.version}.exe)을 받고 있습니다. 받은 파일을 실행하면 이 앱이 새 버전으로 바뀝니다. 설치 중 앱을 닫으라고 하면 이 창을 닫아 주세요.

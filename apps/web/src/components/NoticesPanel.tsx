@@ -44,7 +44,7 @@ function NoticeList({ list, compact, seen, onSeen }: { list: NoticeItem[]; compa
             <span className="notice-item__date">{date(n.publishedAt)}</span>
             <span className="notice-item__chev" aria-hidden="true"><Icon name="chevron" size={14} /></span>
           </button>
-          {open === n.id && <div className="notice-item__body"><NoteText text={n.body} /></div>}
+          {open === n.id && <div className="notice-item__body"><NoteText text={n.body} format={n.format ?? 'markdown'} /></div>}
         </li>
       ))}
     </ul>

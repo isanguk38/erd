@@ -108,11 +108,15 @@ export class AdminStore {
 export type NoticeKind = 'notice' | 'web' | 'app';
 export const NOTICE_KINDS: NoticeKind[] = ['notice', 'web', 'app'];
 
+/** 글 형식: html(편집기에서 쓴 글, 기본), markdown(예전 글·GitHub 릴리스 설명) */
+export type NoticeFormat = 'html' | 'markdown';
+
 export interface NoticeRevision {
   at: string;
   by: string;
   title: string;
   body: string;
+  format?: NoticeFormat;
   kind: NoticeKind;
   version?: string;
   pinned: boolean;
@@ -122,8 +126,10 @@ export interface Notice {
   id: string;
   kind: NoticeKind;
   title: string;
-  /** 간단한 마크다운 (## 제목, - 목록, **굵게**) */
+  /** 내용 (format에 따라 HTML 또는 마크다운). 보여 줄 때 화면이 위험한 태그·스크립트를 걸러 낸다 */
   body: string;
+  /** 없으면 markdown (예전 글) */
+  format?: NoticeFormat;
   /** 앱 업데이트 글이면 그 앱 버전 (예: 0.2.9) */
   version?: string;
   /** 위에 고정 (중요한 주의사항) */
@@ -142,6 +148,7 @@ export interface NoticeInput {
   kind?: NoticeKind;
   title?: string;
   body?: string;
+  format?: NoticeFormat;
   version?: string | null;
   pinned?: boolean;
   published?: boolean;
@@ -186,6 +193,7 @@ export class NoticeStore {
       kind: clean.kind!,
       title: clean.title!,
       body: clean.body ?? '',
+      format: clean.format ?? 'html',
       ...(clean.version ? { version: clean.version } : {}),
       pinned: Boolean(clean.pinned),
       published: Boolean(clean.published),
@@ -202,15 +210,17 @@ export class NoticeStore {
 
   update(id: string, input: NoticeInput, by: User): Notice {
     const old = this.require(id);
-    const clean = validate({ ...old, ...input, version: input.version === undefined ? old.version : input.version }, false);
-    const contentChanged = clean.title !== old.title || clean.body !== old.body || clean.kind !== old.kind || (clean.version ?? undefined) !== old.version || Boolean(clean.pinned) !== old.pinned;
-    const revision: NoticeRevision = { at: old.updatedAt, by: old.updatedBy, title: old.title, body: old.body, kind: old.kind, ...(old.version ? { version: old.version } : {}), pinned: old.pinned };
+    const oldFormat = old.format ?? 'markdown';
+    const clean = validate({ ...old, format: oldFormat, ...input, version: input.version === undefined ? old.version : input.version }, false);
+    const contentChanged = clean.title !== old.title || clean.body !== old.body || clean.format !== oldFormat || clean.kind !== old.kind || (clean.version ?? undefined) !== old.version || Boolean(clean.pinned) !== old.pinned;
+    const revision: NoticeRevision = { at: old.updatedAt, by: old.updatedBy, title: old.title, body: old.body, format: oldFormat, kind: old.kind, ...(old.version ? { version: old.version } : {}), pinned: old.pinned };
     const now = new Date().toISOString();
     const next: Notice = {
       ...old,
       kind: clean.kind!,
       title: clean.title!,
       body: clean.body ?? '',
+      format: clean.format,
       pinned: Boolean(clean.pinned),
       published: Boolean(clean.published),
       // 처음 게시할 때의 시각 (내렸다 다시 올리면 새로 올린 시각)
@@ -231,7 +241,7 @@ export class NoticeStore {
     const old = this.require(id);
     const rev = old.revisions.find((r) => r.at === at);
     if (!rev) throw Object.assign(new Error('그 이력을 찾을 수 없습니다'), { statusCode: 404 });
-    return this.update(id, { title: rev.title, body: rev.body, kind: rev.kind, version: rev.version ?? null, pinned: rev.pinned }, by);
+    return this.update(id, { title: rev.title, body: rev.body, format: rev.format ?? 'markdown', kind: rev.kind, version: rev.version ?? null, pinned: rev.pinned }, by);
   }
 
   remove(id: string): void {
@@ -254,9 +264,11 @@ function validate(input: NoticeInput, creating: boolean): NoticeInput {
   if (!title) throw fail('제목을 적어 주세요');
   if (title.length > 200) throw fail('제목은 200자까지입니다');
   const body = (input.body ?? '').replace(/\r\n/g, '\n');
-  if (body.length > 20000) throw fail('내용은 2만 자까지입니다');
+  if (body.length > 100000) throw fail('내용이 너무 깁니다 (10만 자까지)');
+  const format = input.format ?? 'html';
+  if (format !== 'html' && format !== 'markdown') throw fail('형식은 html 또는 markdown입니다');
   const version = input.version?.trim().replace(/^v/i, '') || undefined;
   if (kind === 'app' && !version) throw fail('앱 업데이트 글에는 버전(예: 0.2.9)을 적어 주세요');
   if (version && !/^\d+\.\d+\.\d+$/.test(version)) throw fail('버전은 0.2.9 같은 모양으로 적어 주세요');
-  return { kind, title, body, version: kind === 'app' ? version : undefined, pinned: Boolean(input.pinned), published: Boolean(input.published) };
+  return { kind, title, body, format, version: kind === 'app' ? version : undefined, pinned: Boolean(input.pinned), published: Boolean(input.published) };
 }

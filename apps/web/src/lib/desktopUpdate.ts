@@ -9,6 +9,8 @@ export interface DesktopRelease {
   version: string;
   name: string;
   notes: string;
+  /** 관리자 페이지에서 쓴 앱 업데이트 글이면 html, GitHub 릴리스 설명이면 markdown */
+  notesFormat?: 'html' | 'markdown';
   url: string;
   page: string;
   publishedAt: string;

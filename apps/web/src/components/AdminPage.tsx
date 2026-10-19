@@ -1,13 +1,16 @@
 // 관리자 페이지 (#/admin): 공지사항·업데이트 소식 쓰기, 관리자 초대·관리(주인만).
 // 관리자 권한은 프로젝트 권한과 따로라 여기서는 소식과 관리자 목록만 다룬다.
 
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { adminApi, NOTICE_KIND_LABEL, useAdminRole, type AdminEntry, type AdminInviteInfo, type AdminNotice, type NoticeInput, type NoticeKind } from '../lib/notices';
-import { MarkdownEditor } from './MarkdownEditor';
+import { markdownToHtml } from './NoteText';
+
+// 편집기 라이브러리는 커서 관리자 페이지에서 글을 쓸 때만 불러온다
+const RichEditor = lazy(() => import('./RichEditor').then((m) => ({ default: m.RichEditor })));
 import { UserMenu } from './Toolbar';
 
 const when = (v?: string) => (v ? new Date(v).toLocaleString() : '');
-const EMPTY: NoticeInput = { kind: 'notice', title: '', body: '', version: '', pinned: false, published: false };
+const EMPTY: NoticeInput = { kind: 'notice', title: '', body: '', format: 'html', version: '', pinned: false, published: false };
 
 export function AdminPage() {
   const role = useAdminRole();
@@ -54,7 +57,9 @@ function NoticesAdmin() {
 
   const pick = (n: AdminNotice) => {
     setError('');
-    setEditing({ id: n.id, input: { kind: n.kind, title: n.title, body: n.body, version: n.version ?? '', pinned: n.pinned, published: n.published } });
+    // 예전(마크다운) 글은 편집기 형식(HTML)으로 바꿔 연다 (저장하면 HTML로)
+    const html = n.format === 'html' ? n.body : markdownToHtml(n.body);
+    setEditing({ id: n.id, input: { kind: n.kind, title: n.title, body: html, format: 'html', version: n.version ?? '', pinned: n.pinned, published: n.published } });
   };
   const set = (patch: NoticeInput) => editing && setEditing({ ...editing, input: { ...editing.input, ...patch } });
   const save = async () => {
@@ -62,10 +67,10 @@ function NoticesAdmin() {
     setBusy(true);
     setError('');
     try {
-      const input = { ...editing.input, version: editing.input.kind === 'app' ? editing.input.version : null };
+      const input = { ...editing.input, format: 'html' as const, version: editing.input.kind === 'app' ? editing.input.version : null };
       const saved = editing.id ? await adminApi.update(editing.id, input) : await adminApi.create(input);
       await load();
-      setEditing({ id: saved.id, input: { kind: saved.kind, title: saved.title, body: saved.body, version: saved.version ?? '', pinned: saved.pinned, published: saved.published } });
+      setEditing({ id: saved.id, input: { kind: saved.kind, title: saved.title, body: saved.body, format: 'html', version: saved.version ?? '', pinned: saved.pinned, published: saved.published } });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -119,8 +124,10 @@ function NoticesAdmin() {
               <input value={editing.input.title ?? ''} onChange={(e) => set({ title: e.target.value })} placeholder="예: 테스트 데이터 만들기가 빨라졌습니다" />
               <label>내용</label>
               <div>
-                <MarkdownEditor value={editing.input.body ?? ''} onChange={(body) => set({ body })} />
-                <p className="muted small">위 버튼으로 꾸미거나 마크다운을 바로 써도 됩니다 (표·링크·이미지 주소·체크리스트·인용·이모지). 오른쪽이 사용자에게 보이는 모양입니다.</p>
+                <Suspense fallback={<div className="rich-editor rich-editor--loading muted small">편집기를 불러오는 중…</div>}>
+                  <RichEditor key={editing.id ?? 'new'} value={editing.input.body ?? ''} onChange={(body) => set({ body })} />
+                </Suspense>
+                <p className="muted small">편집 칸에서 보이는 그대로 씁니다. 표 안을 누르면 행·열 넣기·지우기 단추가 나오고, "HTML"에서 코드를 직접 고치거나 붙여 넣을 수 있습니다.</p>
               </div>
               <label>표시</label>
               <div className="admin-flags">

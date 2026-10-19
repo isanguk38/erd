@@ -251,7 +251,10 @@ export function buildApp(options: AppOptions): ErdApp {
   if (auth.enabled) registerOAuthRoutes(app, auth, auth.oauth);
   registerTemplateRoutes(app, storage);
   // 앱 업데이트 안내: 관리자 페이지에 그 버전의 "앱 업데이트" 글이 있으면 그 내용을, 없으면 GitHub 릴리스 설명을 보여 준다
-  registerDesktopRoutes(app, options.fetchDesktopRelease, (version) => notices.appNotes(version)?.body ?? null);
+  registerDesktopRoutes(app, options.fetchDesktopRelease, (version) => {
+    const n = notices.appNotes(version);
+    return n ? { notes: n.body, format: n.format ?? 'markdown' } : null;
+  });
   registerAdminRoutes(app, admins, notices, { publicUrl, owners: adminOwners });
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
   // AI가 요청한 DB 작업은 사용자의 앱이 가져가 처리한다 (웹 서비스는 DB에 직접 접속하지 않음)
