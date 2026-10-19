@@ -13,6 +13,16 @@ const EMOJIS = ['📢', '🎉', '✨', '🚀', '✅', '⚠️', '❗', '🔧', '
 
 type Mode = 'edit' | 'html' | 'preview';
 
+/**
+ * 편집기 내용 (HTML). 빈 줄 하나뿐일 때만 빈 글로 본다.
+ * (editor.isEmpty는 글자가 없으면 참이라, 빈 칸뿐인 표·구분선·이미지만 넣은 글을 빈 글로 잘못 본다)
+ */
+function htmlOf(editor: Editor): string {
+  const doc = editor.state.doc;
+  const blank = doc.childCount === 1 && doc.firstChild?.type.name === 'paragraph' && doc.firstChild.content.size === 0;
+  return blank ? '' : editor.getHTML();
+}
+
 /** HTML 칸에서 읽기 쉽게: 문단·표·목록 단위로 줄을 나눈다 (보이는 모양은 그대로) */
 function prettyHtml(html: string): string {
   return html
@@ -38,14 +48,14 @@ export function RichEditor({ value, onChange }: { value: string; onChange: (html
     ],
     content: value,
     shouldRerenderOnTransaction: true,
-    onUpdate: ({ editor: e }) => onChange(e.isEmpty ? '' : e.getHTML()),
+    onUpdate: ({ editor: e }) => onChange(htmlOf(e)),
   });
 
   // 다른 글을 고르면(바깥에서 value가 바뀌면) 편집기 내용도 바꾼다
   const lastEmitted = useRef(value);
   useEffect(() => {
     if (!editor) return;
-    const current = editor.isEmpty ? '' : editor.getHTML();
+    const current = htmlOf(editor);
     if (value !== current && value !== lastEmitted.current) editor.commands.setContent(value || '', { emitUpdate: false });
     lastEmitted.current = value;
   }, [value, editor]);
@@ -56,7 +66,7 @@ export function RichEditor({ value, onChange }: { value: string; onChange: (html
     if (mode === 'html' && next !== 'html') {
       // HTML 칸에서 고친 내용을 편집기로 (편집기가 모르는 태그는 정리된다)
       editor.commands.setContent(htmlDraft, { emitUpdate: false });
-      onChange(htmlDraft.trim() ? editor.getHTML() : '');
+      onChange(htmlDraft.trim() ? htmlOf(editor) : '');
     }
     setMode(next);
   };
