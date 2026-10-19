@@ -30,6 +30,10 @@ const PATHS: Record<string, string> = {
   tag: 'M3 12V4h8l10 10-8 8zM7.5 7.5h.01',
   code: 'M8 6l-6 6 6 6M16 6l6 6-6 6',
   lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4',
+  alignLeft: 'M4 6h16M4 10h10M4 14h16M4 18h10',
+  alignCenter: 'M4 6h16M7 10h10M4 14h16M7 18h10',
+  alignRight: 'M4 6h16M10 10h10M4 14h16M10 18h10',
+  alignJustify: 'M4 6h16M4 10h16M4 14h16M4 18h16',
   book: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z',
 };
 

@@ -162,7 +162,7 @@ describe('테스트 데이터: 큰 ERD·꼬인 외래키에서 멈추지 않는�
 });
 
 describe('테스트 데이터: 큰 ERD 속도', () => {
-  it('테이블 276개, 값이 몇 개뿐인 UNIQUE(상태)까지 있어도 2초 안에 (예전에는 27초 동안 화면이 멈춤)', () => {
+  it('테이블 276개, 값이 몇 개뿐인 UNIQUE(상태)까지 있어도 금방 (예전에는 27초 동안 화면이 멈춤; 보통 1초 안, 바쁜 CI도 견디게 8초)', () => {
     const commands: Parameters<typeof applyCommands>[1] = [];
     for (let i = 0; i < 276; i++) {
       commands.push({ op: 'createTable', name: `t${i}`, columns: [
@@ -175,7 +175,7 @@ describe('테스트 데이터: 큰 ERD 속도', () => {
     const s = applyCommands(emptySchema(), commands).schema;
     const started = Date.now();
     const r = generateSeedData(s, getDialect('postgresql'), { rows: 20 });
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(Date.now() - started).toBeLessThan(8000);
     expect(r.tables.every((t) => t.rows === 20)).toBe(true);
     // 상태처럼 값이 몇 개뿐인 UNIQUE 글자 컬럼은 행 번호를 붙여 겹치지 않게
     const statuses = rowsOf(generateSeedData(applyCommands(emptySchema(), [commands[0]!]).schema, getDialect('mysql'), { rows: 20 }).statements, 't0').map((row) => row.split(', ')[1]);

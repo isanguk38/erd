@@ -1392,3 +1392,14 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .release-notes.md ul[data-type='taskList'] li > div p { margin: 0; }
 .release-notes.md ul[data-type='taskList'] li[data-checked='true'] > div { color: var(--muted); text-decoration: line-through; }
 .release-notes.md u { text-underline-offset: 2px; }
+
+/* ── 표: 편집 칸과 보여 주는 글(미리보기·새 소식·앱 업데이트)이 같은 모양 ── */
+.release-notes.md .note-table, .rich-editor__content .tableWrapper { overflow-x: auto; margin: 8px 0; }
+.release-notes.md table, .rich-editor__content table { display: table; table-layout: auto; width: auto; min-width: 0; max-width: none; border-collapse: collapse; margin: 0; font-size: 13px; overflow: visible; }
+.release-notes.md th, .release-notes.md td, .rich-editor__content th, .rich-editor__content td { min-width: 80px; padding: 6px 10px; border: 1px solid var(--border-strong); vertical-align: top; }
+.release-notes.md th, .rich-editor__content th { background: var(--bg); font-weight: 700; white-space: normal; }
+.release-notes.md td p, .release-notes.md th p, .rich-editor__content td p, .rich-editor__content th p { margin: 0; }
+/* 맞춤 단추 */
+.md-tool.align { display: inline-flex; align-items: center; justify-content: center; }
+/* 빈 칸도 편집 칸처럼 한 줄 높이 */
+.release-notes.md td p:empty::after, .release-notes.md th p:empty::after, .release-notes.md td:empty::after, .release-notes.md th:empty::after { content: '\00a0'; }

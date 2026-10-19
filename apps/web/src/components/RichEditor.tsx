@@ -1,13 +1,15 @@
 // 관리자 글쓰기: 보이는 그대로 편집(표를 편집 칸에서 바로 만들고 고치기) · HTML(코드로 보고 고치기·붙여넣기) · 미리보기(사용자에게 보일 모양).
 // 저장 형식은 HTML. 편집기 라이브러리(TipTap)가 커서 관리자 페이지에서만 불러온다 (AdminPage에서 lazy).
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { TableKit } from '@tiptap/extension-table';
 import { TaskItem, TaskList } from '@tiptap/extension-list';
 import Image from '@tiptap/extension-image';
+import TextAlign from '@tiptap/extension-text-align';
 import { NoteText } from './NoteText';
+import { Icon } from './ui';
 
 const EMOJIS = ['📢', '🎉', '✨', '🚀', '✅', '⚠️', '❗', '🔧', '🛠️', '🐛', '💡', '📌', '📝', '📦', '🔒', '⏰', '🗓️', '👍', '🙏', '❤️', '🔥', '⭐', '➡️', '⬆️', '🆕', '💾', '🧪', '📊', '🔗', '📣', '😊', '😅', '🙇', '👀', '🎁', '🛑'];
 
@@ -18,6 +20,7 @@ type Mode = 'edit' | 'html' | 'preview';
  * (editor.isEmpty는 글자가 없으면 참이라, 빈 칸뿐인 표·구분선·이미지만 넣은 글을 빈 글로 잘못 본다)
  */
 function htmlOf(editor: Editor): string {
+  if (editor.isDestroyed) return '';
   const doc = editor.state.doc;
   const blank = doc.childCount === 1 && doc.firstChild?.type.name === 'paragraph' && doc.firstChild.content.size === 0;
   return blank ? '' : editor.getHTML();
@@ -39,12 +42,14 @@ export function RichEditor({ value, onChange }: { value: string; onChange: (html
     extensions: [
       StarterKit.configure({
         heading: { levels: [2, 3, 4] },
-        link: { openOnClick: false, autolink: true, protocols: ['http', 'https', 'mailto'] },
+        link: { openOnClick: false, autolink: true },
       }),
       TableKit.configure({ table: { resizable: false } }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Image.configure({ inline: false }),
+      // 왼쪽·가운데·오른쪽·양쪽 맞춤 (문단·제목, 표 칸 안 글자도)
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
     ],
     content: value,
     shouldRerenderOnTransaction: true,
@@ -54,14 +59,15 @@ export function RichEditor({ value, onChange }: { value: string; onChange: (html
   // 다른 글을 고르면(바깥에서 value가 바뀌면) 편집기 내용도 바꾼다
   const lastEmitted = useRef(value);
   useEffect(() => {
-    if (!editor) return;
+    // 화면이 다시 붙을 때(React가 효과를 다시 돌릴 때) 이미 닫힌 편집기는 건드리지 않는다
+    if (!editor || editor.isDestroyed) return;
     const current = htmlOf(editor);
     if (value !== current && value !== lastEmitted.current) editor.commands.setContent(value || '', { emitUpdate: false });
     lastEmitted.current = value;
   }, [value, editor]);
 
   const switchMode = (next: Mode) => {
-    if (next === mode || !editor) return;
+    if (next === mode || !editor || editor.isDestroyed) return;
     if (next === 'html') setHtmlDraft(prettyHtml(value));
     if (mode === 'html' && next !== 'html') {
       // HTML 칸에서 고친 내용을 편집기로 (편집기가 모르는 태그는 정리된다)
@@ -114,7 +120,7 @@ function Toolbar({ editor }: { editor: Editor }) {
     return () => document.removeEventListener('pointerdown', close, true);
   }, [emojiOpen]);
   const chain = () => editor.chain().focus();
-  const btn = (label: string, title: string, run: () => void, active = false, className = '') => (
+  const btn = (label: ReactNode, title: string, run: () => void, active = false, className = '') => (
     <button type="button" className={`md-tool ${className}${active ? ' active' : ''}`} title={title} aria-label={title} aria-pressed={active} onMouseDown={(e) => e.preventDefault()} onClick={run}>
       {label}
     </button>
@@ -152,6 +158,11 @@ function Toolbar({ editor }: { editor: Editor }) {
       {btn('I', '기울임 (Ctrl+I)', () => chain().toggleItalic().run(), editor.isActive('italic'), 'i')}
       {btn('U', '밑줄 (Ctrl+U)', () => chain().toggleUnderline().run(), editor.isActive('underline'), 'u')}
       {btn('S', '취소선', () => chain().toggleStrike().run(), editor.isActive('strike'), 's')}
+      <span className="rich-toolbar__sep" />
+      {btn(<Icon name="alignLeft" size={14} />, '왼쪽 맞춤', () => chain().setTextAlign('left').run(), editor.isActive({ textAlign: 'left' }), 'align')}
+      {btn(<Icon name="alignCenter" size={14} />, '가운데 맞춤', () => chain().setTextAlign('center').run(), editor.isActive({ textAlign: 'center' }), 'align')}
+      {btn(<Icon name="alignRight" size={14} />, '오른쪽 맞춤', () => chain().setTextAlign('right').run(), editor.isActive({ textAlign: 'right' }), 'align')}
+      {btn(<Icon name="alignJustify" size={14} />, '양쪽 맞춤', () => chain().setTextAlign('justify').run(), editor.isActive({ textAlign: 'justify' }), 'align')}
       <span className="rich-toolbar__sep" />
       {btn('•', '목록', () => chain().toggleBulletList().run(), editor.isActive('bulletList'))}
       {btn('1.', '번호 목록', () => chain().toggleOrderedList().run(), editor.isActive('orderedList'))}

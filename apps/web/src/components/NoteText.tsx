@@ -30,6 +30,12 @@ export function sanitizeNoteHtml(html: string): string {
       }
       // 체크리스트 칸은 보기만
       if (node.tagName === 'INPUT') node.setAttribute('disabled', '');
+      // style은 글자 맞춤(text-align)만 남긴다 (그 밖의 꾸밈·숨기기·위치 조작은 뺀다)
+      if (node.hasAttribute('style')) {
+        const align = /(?:^|;)\s*text-align\s*:\s*(left|center|right|justify)\s*(?:;|$)/i.exec(node.getAttribute('style') ?? '')?.[1];
+        if (align) node.setAttribute('style', `text-align: ${align.toLowerCase()}`);
+        else node.removeAttribute('style');
+      }
     });
   }
   const clean = DOMPurify.sanitize(html, {
@@ -37,12 +43,16 @@ export function sanitizeNoteHtml(html: string): string {
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 'del', 's', 'mark', 'code', 'pre', 'blockquote',
       'ul', 'ol', 'li', 'a', 'img', 'table', 'colgroup', 'col', 'thead', 'tbody', 'tr', 'th', 'td', 'input', 'label', 'span', 'div',
     ],
-    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'align', 'type', 'checked', 'disabled', 'start', 'colspan', 'rowspan'],
+    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'align', 'type', 'checked', 'disabled', 'start', 'colspan', 'rowspan', 'style'],
     // 체크리스트 모양(data-type·data-checked)은 남긴다 (data-* 속성은 실행되지 않음)
     ALLOW_DATA_ATTR: true,
   });
-  // 주소가 걸러진(http(s)가 아닌) 이미지는 깨진 그림으로 남지 않게 뺀다
-  return clean.replace(/<img(?![^>]*\ssrc=)[^>]*>/g, '');
+  // 주소가 걸러진(http(s)가 아닌) 이미지는 깨진 그림으로 남지 않게 뺀다.
+  // 표는 넓으면 가로로 넘겨 보게 감싼다 (편집 칸과 같은 칸 너비로 보이게, CSS .note-table)
+  return clean
+    .replace(/<img(?![^>]*\ssrc=)[^>]*>/g, '')
+    .replace(/<table/g, '<div class="note-table"><table')
+    .replace(/<\/table>/g, '</table></div>');
 }
 
 /** 마크다운(예전 글) → HTML (편집기로 옮길 때도 쓴다) */
