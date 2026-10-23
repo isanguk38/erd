@@ -202,7 +202,7 @@ function AdminsAdmin() {
     <div className="admin-admins">
       <section>
         <h3>주인</h3>
-        <p className="muted small">서버 설정(ERD_ADMIN_GITHUB)에 적은 GitHub 계정입니다. 화면에서는 뺄 수 없습니다.</p>
+        <p className="muted small">서버 설정(ERD_ADMIN_GITHUB)에 적은 계정입니다 (GitHub 아이디 또는 Microsoft 이메일). 화면에서는 뺄 수 없습니다.</p>
         <ul>{(data?.owners.length ? data.owners : ['(로컬 모드: 내 PC 사용자)']).map((o) => <li key={o}><b>{o}</b></li>)}</ul>
       </section>
       <section>
@@ -211,7 +211,7 @@ function AdminsAdmin() {
         <ul>
           {data?.admins.map((a) => (
             <li key={a.userId}>
-              <b>{a.name}</b> <span className="muted">@{a.login} · {when(a.addedAt)} 추가 ({a.addedBy} 초대)</span>
+              <b>{a.name}</b> <span className="muted">{a.login.includes('@') ? a.login : `@${a.login}`} · {when(a.addedAt)} 추가 ({a.addedBy} 초대)</span>
               <button
                 className="btn btn-sm btn-danger"
                 onClick={async () => {
@@ -228,9 +228,9 @@ function AdminsAdmin() {
       </section>
       <section>
         <h3>관리자 초대</h3>
-        <p className="muted small">링크는 한 번만 쓸 수 있고 24시간 뒤 만료됩니다. GitHub 아이디를 적으면 그 계정만 수락할 수 있습니다 (권장).</p>
+        <p className="muted small">링크는 한 번만 쓸 수 있고 24시간 뒤 만료됩니다. GitHub 아이디나 Microsoft 계정 이메일을 적으면 그 계정만 수락할 수 있습니다 (권장).</p>
         <div className="toolbar-row">
-          <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="GitHub 아이디 (예: octocat)" />
+          <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="GitHub 아이디 또는 Microsoft 이메일" />
           <button
             className="btn btn-primary"
             onClick={async () => {

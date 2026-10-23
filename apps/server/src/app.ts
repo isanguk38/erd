@@ -41,7 +41,7 @@ export interface AppOptions {
   mcpToken?: string;
   /** 화면 주소 (MCP 응답의 링크, 로그인 콜백, 초대 링크) */
   webUrl?: string;
-  /** 주인 관리자 GitHub 계정 (아이디 또는 숫자 id, ERD_ADMIN_GITHUB). 로컬 모드에서는 내 PC 사용자가 주인 */
+  /** 주인 관리자 계정 (GitHub 아이디·숫자 id 또는 Microsoft 이메일, ERD_ADMIN_GITHUB). 로컬 모드에서는 내 PC 사용자가 주인 */
   adminOwners?: string[];
   /** 로그인 모드 설정. 없으면 로컬 모드 */
   auth?: Omit<AuthOptions, 'publicUrl' | 'secret'> & { secret?: string };

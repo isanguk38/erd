@@ -1,7 +1,7 @@
-// 관리자: 공지사항·업데이트 소식을 쓰는 사람. 계정은 따로 만들지 않고 GitHub 로그인 계정에 "관리자" 권한만 붙인다
+// 관리자: 공지사항·업데이트 소식을 쓰는 사람. 계정은 따로 만들지 않고 로그인 계정(GitHub·Microsoft)에 "관리자" 권한만 붙인다
 // (프로젝트 권한과는 따로라 관리자여도 남의 프로젝트는 볼 수 없고, 관리자를 빼도 그 사람의 프로젝트는 그대로).
-// - 주인(owner): 서버 설정 ERD_ADMIN_GITHUB에 적은 GitHub 계정 (화면에서 뺄 수 없음). 로컬 모드에서는 내 PC 사용자.
-// - 관리자(admin): 주인이 만든 초대 링크(한 번만, 24시간, 특정 GitHub 아이디만 가능하게도)로 승인된 계정.
+// - 주인(owner): 서버 설정 ERD_ADMIN_GITHUB에 적은 계정 (GitHub 아이디 또는 Microsoft 이메일, 화면에서 뺄 수 없음). 로컬 모드에서는 내 PC 사용자.
+// - 관리자(admin): 주인이 만든 초대 링크(한 번만, 24시간, 특정 계정(GitHub 아이디·Microsoft 이메일)만 가능하게도)로 승인된 계정.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { User } from './auth';
@@ -36,7 +36,7 @@ const KEY = 'admin/admins.json';
 const inviteKey = (id: string) => `admin/invites/${id}.json`;
 
 export class AdminStore {
-  /** owners: 서버 설정의 GitHub 아이디(소문자) 또는 숫자 GitHub id. localOwner: 로컬 모드(로그인 없음)면 내 PC 사용자가 주인 */
+  /** owners: 서버 설정의 GitHub 아이디·Microsoft 이메일 또는 숫자 GitHub id. localOwner: 로컬 모드(로그인 없음)면 내 PC 사용자가 주인 */
   constructor(private readonly storage: Storage, private readonly owners: string[], private readonly localOwner: boolean) {}
 
   private isOwner(user: User): boolean {
@@ -86,7 +86,7 @@ export class AdminStore {
     this.storage.delete(inviteKey(id));
   }
 
-  /** 초대 수락: 한 번만, 만료 전, 지정한 GitHub 아이디면 그 계정만 */
+  /** 초대 수락: 한 번만, 만료 전, 계정(GitHub 아이디·Microsoft 이메일)을 지정했으면 그 계정만 */
   accept(raw: string, user: User): AdminEntry {
     const [id, token] = raw.split('.');
     const invite = id && token ? getJson<AdminInvite | null>(this.storage, inviteKey(id), null) : null;
@@ -94,7 +94,7 @@ export class AdminStore {
     if (!invite || invite.hash !== sha(token!)) throw fail('초대 링크가 올바르지 않습니다');
     if (invite.usedBy) throw fail('이미 사용한 초대 링크입니다');
     if (Date.parse(invite.expiresAt) < Date.now()) throw fail('만료된 초대 링크입니다. 관리자에게 새 링크를 받으세요');
-    if (invite.login && invite.login.toLowerCase() !== user.login.toLowerCase()) throw fail(`이 초대는 GitHub 계정 ${invite.login}만 수락할 수 있습니다 (지금 로그인: ${user.login})`);
+    if (invite.login && invite.login.toLowerCase() !== user.login.toLowerCase()) throw fail(`이 초대는 ${invite.login.includes('@') ? 'Microsoft' : 'GitHub'} 계정 ${invite.login}만 수락할 수 있습니다 (지금 로그인: ${user.login})`);
     putJson(this.storage, inviteKey(invite.id), { ...invite, usedBy: user.login, usedAt: new Date().toISOString() });
     const entry: AdminEntry = { userId: user.id, login: user.login, name: user.name, addedAt: new Date().toISOString(), addedBy: invite.createdBy };
     if (!this.isOwner(user)) putJson(this.storage, KEY, [...this.list().filter((a) => a.userId !== user.id), entry]);

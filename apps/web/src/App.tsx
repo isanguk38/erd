@@ -44,7 +44,7 @@ function isTyping(target: EventTarget | null): boolean {
 
 /** 로그인하러 간 사이 기억해 둘 초대 토큰 (30분 뒤엔 버린다) */
 const PENDING_JOIN = 'erd-pending-join';
-/** 관리자 초대 링크: 로그인(GitHub)을 다녀오면 주소가 사라지므로 기억해 둔다 */
+/** 관리자 초대 링크: 로그인(GitHub·Microsoft)을 다녀오면 주소가 사라지므로 기억해 둔다 */
 const PENDING_ADMIN = 'erd-pending-admin-join';
 const storage = {
   get(key: string): string | null {

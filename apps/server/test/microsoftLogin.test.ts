@@ -79,6 +79,26 @@ describe('Microsoft 로그인', () => {
     expect(me2.user.id).toBe(me.user.id);
   });
 
+  it('관리자 초대를 Microsoft 이메일로 지정하면 그 계정만 수락할 수 있다', async () => {
+    const { app } = setup();
+    fakeMicrosoft({ id: 'ms-owner', displayName: '주인', mail: 'owner@outlook.com', userPrincipalName: 'owner@outlook.com' });
+    const owner = await signIn(app);
+    const made = await app.inject({ method: 'POST', url: '/api/admin/invites', headers: { cookie: owner.session }, payload: { login: 'Kim@Company.com' } });
+    const token = (made.json().url as string).split('/join/')[1];
+
+    fakeMicrosoft({ id: 'ms-other', displayName: '다른 사람', mail: 'other@company.com', userPrincipalName: 'other@company.com' });
+    const other = await signIn(app);
+    const refused = await app.inject({ method: 'POST', url: '/api/admin/invites/accept', headers: { cookie: other.session }, payload: { token } });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error).toMatch(/Microsoft 계정 Kim@Company.com만/);
+
+    fakeMicrosoft({ id: 'ms-kim', displayName: '김', mail: 'kim@company.com', userPrincipalName: 'kim@company.com' });
+    const kim = await signIn(app);
+    const accepted = await app.inject({ method: 'POST', url: '/api/admin/invites/accept', headers: { cookie: kim.session }, payload: { token } });
+    expect(accepted.statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/admin/me', headers: { cookie: kim.session } })).json().role).toBe('admin');
+  });
+
   it('상태 값이 다르거나, 사용자가 취소하면 로그인하지 않는다', async () => {
     const { app } = setup();
     fakeMicrosoft({ id: 'x', displayName: 'x', mail: 'x@x.com', userPrincipalName: 'x@x.com' });

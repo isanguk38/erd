@@ -8,7 +8,7 @@
 //   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET   GitHub 로그인 (OAuth App 콜백: <ERD_PUBLIC_URL>/auth/github/callback)
 //   MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET   Microsoft 로그인 (Azure 앱 등록, 웹 리디렉션 URI: <ERD_PUBLIC_URL>/auth/microsoft/callback). MICROSOFT_TENANT 기본 common
 //   ERD_ALLOW_PRIVATE_DB  1이면 로그인 모드에서도 내부망 주소의 DB 연결 허용 (기본 금지)
-//   ERD_ADMIN_GITHUB      관리자 페이지 주인 GitHub 계정 (쉼표로 여럿, 아이디 또는 숫자 id). 다른 관리자는 주인이 초대
+//   ERD_ADMIN_GITHUB      관리자 페이지 주인 계정 (쉼표로 여럿, GitHub 아이디·숫자 id 또는 Microsoft 이메일). 다른 관리자는 주인이 초대
 //   PORT                  포트 (NODE_ENV=production일 때, Render가 지정)
 
 import { dirname, resolve } from 'node:path';

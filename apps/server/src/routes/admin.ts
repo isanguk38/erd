@@ -25,7 +25,7 @@ export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, no
   /** 내가 관리자인지 (화면의 "관리자 페이지" 메뉴) */
   app.get('/api/admin/me', async (req) => ({ role: admins.role(req.user) }));
 
-  /** 관리자 초대 수락 (GitHub로 로그인한 상태에서) */
+  /** 관리자 초대 수락 (GitHub·Microsoft로 로그인한 상태에서) */
   app.post<{ Body: { token?: string } }>('/api/admin/invites/accept', async (req) => {
     if (!req.user) throw forbidden('로그인이 필요합니다');
     if (admins.role(req.user)) return { ok: true, already: true, role: admins.role(req.user) };
