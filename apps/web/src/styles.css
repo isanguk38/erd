@@ -1440,8 +1440,7 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .home .projects-page { padding-top: 36px; gap: 22px; }
 .home .projects-page__title { align-items: flex-start; }
 .home-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.home-logo { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 12px; color: #fff;
-  background: linear-gradient(135deg, #3b82f6, #6366f1); box-shadow: 0 6px 16px -6px rgb(79 70 229 / 0.6); }
+.home-logo { width: 44px; height: 44px; flex: none; display: block; filter: drop-shadow(0 6px 10px rgb(13 148 136 / 0.3)); }
 .home .projects-page__head h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
 .home .projects-page__head p { margin: 2px 0 0; font-size: 13px; }
 .home-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

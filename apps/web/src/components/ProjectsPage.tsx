@@ -102,7 +102,7 @@ export function ProjectsPage() {
       <header className="projects-page__head">
         <div className="projects-page__title">
           <div className="home-brand">
-            <span className="home-logo" aria-hidden="true"><Icon name="table" size={18} /></span>
+            <img className="home-logo" src="/favicon.svg" alt="" aria-hidden="true" />
             <div>
               <h1>ERD</h1>
               <p className="muted">함께 그리고, DB와 바로 동기화하고, AI와 같이 설계하는 ERD</p>
