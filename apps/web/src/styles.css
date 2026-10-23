@@ -1587,8 +1587,14 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .admin-page .admin-provider { padding: 2px 8px; font-weight: 600; }
 .admin-page .admin-users__pager { margin-top: 12px; }
 .admin-page .admin-users__pager .btn { height: 30px; border-radius: 8px; }
+@media (max-width: 900px) {
+  .admin-page .admin-notices { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 640px) {
   .admin-page { padding: 20px 16px 32px; }
+  .admin-page .admin-notices__edit { padding: 16px; }
+  .admin-page .admin-form { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
+  .admin-page .admin-form > label { padding-top: 6px; }
   .admin-page .admin-tabs { align-self: stretch; }
   .admin-page .admin-tabs button { flex: 1; justify-content: center; padding: 7px 8px; }
   .admin-card { padding: 16px; }

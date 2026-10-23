@@ -111,7 +111,8 @@ export function RichEditor({ value, onChange }: { value: string; onChange: (html
 }
 
 function Toolbar({ editor }: { editor: Editor }) {
-  // 이모지 판은 화면 기준 위치(편집 칸 밖으로 나가도 잘리지 않게, 오른쪽 끝이면 왼쪽으로 당김)
+  // 이모지 판은 화면 기준 위치로 띄워 잘리지 않게 하고, 편집 칸 안쪽(오른쪽 끝을 넘지 않게)에 맞춘다.
+  // 화면 폭은 스크롤 막대를 뺀 실제 보이는 폭으로, 열 때마다 다시 잰다
   const [emojiAt, setEmojiAt] = useState<{ top: number; left: number } | null>(null);
   const emojiOpen = emojiAt !== null;
   const emojiRef = useRef<HTMLDivElement>(null);
@@ -120,7 +121,13 @@ function Toolbar({ editor }: { editor: Editor }) {
     const r = emojiRef.current?.getBoundingClientRect();
     if (!r) return;
     const width = 9 * 30 + 8 * 2 + 14; // 9칸 + 간격 + 안쪽 여백·테두리
-    setEmojiAt({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
+    const box = emojiRef.current?.closest('.rich-editor')?.getBoundingClientRect();
+    const viewRight = document.documentElement.clientWidth - 8;
+    const right = Math.min(box ? box.right - 8 : viewRight, viewRight);
+    const left = Math.max(box ? box.left + 8 : 8, 8);
+    // 편집 칸 안에 맞추되, 마지막으로 화면 밖으로는 나가지 않게
+    const inBox = Math.max(left, Math.min(r.left, right - width));
+    setEmojiAt({ top: r.bottom + 4, left: Math.max(8, Math.min(inBox, viewRight - width)) });
   };
   const setEmojiOpen = (open: boolean) => !open && setEmojiAt(null);
   useEffect(() => {
