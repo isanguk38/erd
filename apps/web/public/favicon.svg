@@ -1,14 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- 바탕 (단색) -->
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="#0D9488"/>
-  <!-- 관계선: 반투명하게 두어 점(테이블)이 앞에 보이게 -->
-  <g stroke="#ffffff" stroke-width="24" stroke-linecap="round" opacity="0.55">
-    <path d="M176 180 L352 214"/>
-    <path d="M176 180 L232 348"/>
-    <path d="M352 214 L232 348"/>
+  <defs>
+    <!-- 파랑 → 남색 대각선 그라데이션 -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <!-- 테이블: 머리줄과 첫 칸 구분선 -->
+  <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="153" y="166" width="206" height="180" rx="16"/>
+    <path d="M153 230H359M230 230V346"/>
   </g>
-  <!-- 테이블(노드) 3개: 크기를 달리해 리듬감 -->
-  <circle cx="176" cy="180" r="62" fill="#ffffff"/>
-  <circle cx="352" cy="214" r="48" fill="#ffffff"/>
-  <circle cx="232" cy="348" r="40" fill="#ffffff"/>
 </svg>
