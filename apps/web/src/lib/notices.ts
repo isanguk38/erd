@@ -46,6 +46,17 @@ export interface AdminEntry {
   addedBy: string;
 }
 
+/** 가입한 계정 (관리자로 고르기) */
+export interface AdminUserInfo {
+  id: string;
+  login: string;
+  name: string;
+  avatarUrl?: string;
+  provider: 'github' | 'microsoft' | 'other';
+  createdAt: string;
+  role: 'owner' | 'admin' | null;
+}
+
 export type NoticeInput = Partial<Pick<AdminNotice, 'kind' | 'title' | 'body' | 'format' | 'pinned' | 'published'>> & { version?: string | null };
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -69,6 +80,9 @@ export const adminApi = {
   admins: () => call<{ owners: string[]; admins: AdminEntry[]; invites: AdminInviteInfo[] }>('GET', '/api/admin/admins'),
   invite: (login?: string) => call<{ invite: AdminInviteInfo; url: string }>('POST', '/api/admin/invites', { login }),
   cancelInvite: (id: string) => call('DELETE', `/api/admin/invites/${id}`),
+  users: (q: string, page: number, size = 10) =>
+    call<{ items: AdminUserInfo[]; total: number; page: number; pages: number; size: number }>('GET', `/api/admin/users?${new URLSearchParams({ q, page: String(page), size: String(size) })}`),
+  addAdmin: (userId: string) => call<AdminEntry>('POST', '/api/admin/admins', { userId }),
   removeAdmin: (userId: string) => call('DELETE', `/api/admin/admins/${userId}`),
   accept: (token: string) => call<{ ok: true; role: string }>('POST', '/api/admin/invites/accept', { token }),
 };

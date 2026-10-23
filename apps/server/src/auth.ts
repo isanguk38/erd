@@ -91,6 +91,14 @@ export class Auth {
     return getJson<User | null>(this.storage, `users/${id}.json`, null);
   }
 
+  /** 가입한 모든 계정 (관리자 페이지에서 관리자로 고를 때) */
+  users(): User[] {
+    return this.storage
+      .keys('users/')
+      .map((k) => getJson<User | null>(this.storage, k, null))
+      .filter((u): u is User => Boolean(u));
+  }
+
   private saveUser(user: User): User {
     putJson(this.storage, `users/${user.id}.json`, user);
     return user;

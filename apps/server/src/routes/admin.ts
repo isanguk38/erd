@@ -2,13 +2,14 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AdminInvite, AdminRole, AdminStore, NoticeInput, NoticeKind, NoticeStore } from '../admin';
+import type { Auth } from '../auth';
 
 const forbidden = (message: string) => Object.assign(new Error(message), { statusCode: 403 });
 
 /** 화면에 보낼 초대 (토큰 해시는 빼고) */
 const publicInvite = ({ hash: _hash, ...rest }: AdminInvite) => ({ ...rest, status: rest.usedBy ? 'used' : Date.parse(rest.expiresAt) < Date.now() ? 'expired' : 'open' });
 
-export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, notices: NoticeStore, options: { publicUrl: string; owners: string[] }) {
+export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, notices: NoticeStore, auth: Auth, options: { publicUrl: string; owners: string[] }) {
   const need = (req: FastifyRequest, role: AdminRole = 'admin'): AdminRole => {
     const mine = admins.role(req.user);
     if (!mine) throw forbidden('관리자만 할 수 있습니다');
@@ -60,6 +61,34 @@ export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, no
   app.get('/api/admin/admins', async (req) => {
     need(req, 'owner');
     return { owners: options.owners, admins: admins.list(), invites: admins.invites().map(publicInvite) };
+  });
+  /** 가입한 계정 찾기 (이름·아이디 검색, 최근 가입 순, 페이지) — 관리자로 바로 고르기 */
+  app.get<{ Querystring: { q?: string; page?: string; size?: string } }>('/api/admin/users', async (req) => {
+    need(req, 'owner');
+    const q = (req.query.q ?? '').trim().toLowerCase().replace(/^@/, '');
+    const size = Math.min(50, Math.max(1, Number(req.query.size) || 10));
+    const found = auth
+      .users()
+      .filter((u) => !q || u.login.toLowerCase().includes(q) || u.name.toLowerCase().includes(q))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const pages = Math.max(1, Math.ceil(found.length / size));
+    const page = Math.min(pages, Math.max(1, Number(req.query.page) || 1));
+    const items = found.slice((page - 1) * size, page * size).map((u) => ({
+      id: u.id,
+      login: u.login,
+      name: u.name,
+      avatarUrl: u.avatarUrl,
+      provider: u.githubId ? 'github' : u.microsoftId ? 'microsoft' : 'other',
+      createdAt: u.createdAt,
+      role: admins.role(u),
+    }));
+    return { items, total: found.length, page, pages, size };
+  });
+  app.post<{ Body: { userId?: string } }>('/api/admin/admins', async (req) => {
+    need(req, 'owner');
+    const user = auth.user(String(req.body?.userId ?? ''));
+    if (!user) throw Object.assign(new Error('계정을 찾을 수 없습니다'), { statusCode: 404 });
+    return admins.add(user, req.user!);
   });
   app.post<{ Body: { login?: string } }>('/api/admin/invites', async (req) => {
     need(req, 'owner');

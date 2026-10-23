@@ -1,7 +1,7 @@
 // 관리자: 공지사항·업데이트 소식을 쓰는 사람. 계정은 따로 만들지 않고 로그인 계정(GitHub·Microsoft)에 "관리자" 권한만 붙인다
 // (프로젝트 권한과는 따로라 관리자여도 남의 프로젝트는 볼 수 없고, 관리자를 빼도 그 사람의 프로젝트는 그대로).
 // - 주인(owner): 서버 설정 ERD_ADMIN_GITHUB에 적은 계정 (GitHub 아이디 또는 Microsoft 이메일, 화면에서 뺄 수 없음). 로컬 모드에서는 내 PC 사용자.
-// - 관리자(admin): 주인이 만든 초대 링크(한 번만, 24시간, 특정 계정(GitHub 아이디·Microsoft 이메일)만 가능하게도)로 승인된 계정.
+// - 관리자(admin): 주인이 가입한 계정 목록에서 바로 고르거나, 아직 가입 전인 사람은 초대 링크(한 번만, 24시간, 특정 계정(GitHub 아이디·Microsoft 이메일)만 가능하게도)로 승인된 계정.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { User } from './auth';
@@ -56,6 +56,16 @@ export class AdminStore {
 
   remove(userId: string): void {
     putJson(this.storage, KEY, this.list().filter((a) => a.userId !== userId));
+  }
+
+  /** 이미 가입한 계정을 바로 관리자로 (주인이 목록에서 고름) */
+  add(user: User, by: User): AdminEntry {
+    const fail = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
+    if (this.isOwner(user)) throw fail(`${user.login}은(는) 주인 관리자입니다`);
+    if (this.list().some((a) => a.userId === user.id)) throw fail(`${user.login}은(는) 이미 관리자입니다`);
+    const entry: AdminEntry = { userId: user.id, login: user.login, name: user.name, addedAt: new Date().toISOString(), addedBy: by.login };
+    putJson(this.storage, KEY, [...this.list(), entry]);
+    return entry;
   }
 
   createInvite(by: User, login?: string): { invite: AdminInvite; token: string } {

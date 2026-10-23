@@ -2,7 +2,7 @@
 // 관리자 권한은 프로젝트 권한과 따로라 여기서는 소식과 관리자 목록만 다룬다.
 
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { adminApi, NOTICE_KIND_LABEL, useAdminRole, type AdminEntry, type AdminInviteInfo, type AdminNotice, type NoticeInput, type NoticeKind } from '../lib/notices';
+import { adminApi, NOTICE_KIND_LABEL, useAdminRole, type AdminEntry, type AdminInviteInfo, type AdminUserInfo, type AdminNotice, type NoticeInput, type NoticeKind } from '../lib/notices';
 import { markdownToHtml } from './NoteText';
 
 // 편집기 라이브러리는 커서 관리자 페이지에서 글을 쓸 때만 불러온다
@@ -226,9 +226,10 @@ function AdminsAdmin() {
           ))}
         </ul>
       </section>
+      <UserPicker onAdded={load} />
       <section>
-        <h3>관리자 초대</h3>
-        <p className="muted small">링크는 한 번만 쓸 수 있고 24시간 뒤 만료됩니다. GitHub 아이디나 Microsoft 계정 이메일을 적으면 그 계정만 수락할 수 있습니다 (권장).</p>
+        <h3>가입 전인 사람 초대</h3>
+        <p className="muted small">아직 ERD에 로그인한 적 없는 사람은 링크로 초대합니다. 링크는 한 번만 쓸 수 있고 24시간 뒤 만료됩니다. GitHub 아이디나 Microsoft 계정 이메일을 적으면 그 계정만 수락할 수 있습니다 (권장).</p>
         <div className="toolbar-row">
           <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="GitHub 아이디 또는 Microsoft 이메일" />
           <button
@@ -262,7 +263,7 @@ function AdminsAdmin() {
             {data.invites.map((i) => (
               <li key={i.id}>
                 <span className={`admin-status ${i.status === 'open' ? 'on' : 'off'}`}>{status[i.status]}</span>
-                <span>{i.login ? `@${i.login}만` : '누구나'} · {i.createdBy} · {when(i.createdAt)}{i.usedBy ? ` · ${i.usedBy} 수락` : ` · ${when(i.expiresAt)}까지`}</span>
+                <span>{i.login ? `${i.login.includes('@') ? i.login : `@${i.login}`}만` : '누구나'} · {i.createdBy} · {when(i.createdAt)}{i.usedBy ? ` · ${i.usedBy} 수락` : ` · ${when(i.expiresAt)}까지`}</span>
                 {i.status === 'open' && <button className="btn btn-sm" onClick={async () => { await adminApi.cancelInvite(i.id); load(); }}>취소</button>}
               </li>
             ))}
@@ -270,6 +271,112 @@ function AdminsAdmin() {
         )}
       </section>
     </div>
+  );
+}
+
+const PROVIDER_LABEL = { github: 'GitHub', microsoft: 'Microsoft', other: '기타' } as const;
+
+/** 가입한 계정에서 골라 바로 관리자로 (검색·페이지) */
+function UserPicker({ onAdded }: { onAdded: () => void }) {
+  const [q, setQ] = useState('');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ items: AdminUserInfo[]; total: number; page: number; pages: number } | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // 입력이 멈추면 검색 (첫 페이지부터)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQuery(q.trim());
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  const load = () =>
+    adminApi
+      .users(query, page)
+      .then((r) => {
+        setData(r);
+        setError('');
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  useEffect(() => void load(), [query, page]);
+
+  return (
+    <section className="admin-users">
+      <h3>가입한 계정에서 추가</h3>
+      <p className="muted small">ERD에 한 번이라도 로그인한 계정입니다. 골라서 바로 관리자로 추가합니다.</p>
+      <input className="admin-users__search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·아이디·이메일로 검색" />
+      {error && <div className="error-box">{error}</div>}
+      {data && (
+        <>
+          <table className="admin-users__table">
+            <thead>
+              <tr>
+                <th>계정</th>
+                <th>로그인</th>
+                <th>가입</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((u) => (
+                <tr key={u.id}>
+                  <td>
+                    <div className="admin-users__who">
+                      {u.avatarUrl ? <img src={u.avatarUrl} alt="" className="avatar-img" /> : <span className="avatar" style={{ background: 'var(--accent)' }}>{u.name.slice(0, 1)}</span>}
+                      <span>
+                        <b>{u.name}</b>
+                        <span className="muted small">{u.login}</span>
+                      </span>
+                    </div>
+                  </td>
+                  <td><span className={`admin-provider p-${u.provider}`}>{PROVIDER_LABEL[u.provider]}</span></td>
+                  <td className="muted small">{when(u.createdAt)}</td>
+                  <td className="admin-users__act">
+                    {u.role ? (
+                      <span className="admin-status on">{u.role === 'owner' ? '주인' : '관리자'}</span>
+                    ) : (
+                      <button
+                        className="btn btn-sm btn-primary"
+                        disabled={busy === u.id}
+                        onClick={async () => {
+                          if (!confirm(`${u.name} (${u.login})을(를) 관리자로 추가할까요? 공지사항·업데이트 소식을 쓸 수 있게 됩니다.`)) return;
+                          setBusy(u.id);
+                          try {
+                            await adminApi.addAdmin(u.id);
+                            await load();
+                            onAdded();
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : String(e));
+                          } finally {
+                            setBusy(null);
+                          }
+                        }}
+                      >
+                        관리자로 추가
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {data.items.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="muted small">{query ? `"${query}"에 맞는 계정이 없습니다` : '가입한 계정이 없습니다'}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="admin-users__pager">
+            <span className="muted small">{data.total}명</span>
+            <button className="btn btn-sm" disabled={data.page <= 1} onClick={() => setPage(data.page - 1)}>‹ 이전</button>
+            <span className="small">{data.page} / {data.pages}</span>
+            <button className="btn btn-sm" disabled={data.page >= data.pages} onClick={() => setPage(data.page + 1)}>다음 ›</button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

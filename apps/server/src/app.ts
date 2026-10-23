@@ -256,7 +256,7 @@ export function buildApp(options: AppOptions): ErdApp {
     const n = notices.appNotes(version);
     return n ? { notes: n.body, format: n.format ?? 'markdown' } : null;
   });
-  registerAdminRoutes(app, admins, notices, { publicUrl, owners: adminOwners });
+  registerAdminRoutes(app, admins, notices, auth, { publicUrl, owners: adminOwners });
   registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
   // AI가 요청한 DB 작업은 사용자의 앱이 가져가 처리한다 (웹 서비스는 DB에 직접 접속하지 않음)
   registerDbJobRoutes(app, dbJobs, auth);

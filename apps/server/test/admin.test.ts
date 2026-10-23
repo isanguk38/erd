@@ -38,6 +38,38 @@ async function login(app: ErdApp['app'], name: string) {
 }
 
 describe('관리자 페이지', () => {
+  it('가입한 계정을 검색·페이지로 찾아 바로 관리자로 (주인만, 주인·이미 관리자는 안 됨)', async () => {
+    const { app } = setup();
+    const owner = await login(app, 'owner');
+    for (let i = 1; i <= 12; i++) await login(app, `member${String(i).padStart(2, '0')}`);
+    const kim = await login(app, 'kim');
+
+    expect((await kim('GET', '/api/admin/users')).status).toBe(403);
+    const first = (await owner('GET', '/api/admin/users?size=5')).body;
+    expect(first).toMatchObject({ total: 14, page: 1, pages: 3, size: 5 });
+    expect(first.items).toHaveLength(5);
+    const last = (await owner('GET', '/api/admin/users?size=5&page=9')).body;
+    expect(last.page).toBe(3);
+    expect(last.items).toHaveLength(4);
+    // 아이디·이름 검색 (대소문자·앞의 @ 무시)
+    const found = (await owner('GET', '/api/admin/users?q=%40MEMBER1')).body;
+    expect(found.items.map((u: { login: string }) => u.login).sort()).toEqual(['dev-member10', 'dev-member11', 'dev-member12']);
+    expect((await owner('GET', '/api/admin/users?q=dev-owner')).body.items[0]).toMatchObject({ role: 'owner', provider: 'other' });
+
+    const target = (await owner('GET', '/api/admin/users?q=kim')).body.items[0];
+    expect(target.role).toBeNull();
+    expect((await kim('POST', '/api/admin/admins', { userId: target.id })).status).toBe(403);
+    const added = await owner('POST', '/api/admin/admins', { userId: target.id });
+    expect(added.status).toBe(200);
+    expect(added.body).toMatchObject({ login: 'dev-kim', addedBy: 'dev-owner' });
+    expect((await kim('GET', '/api/admin/me')).body.role).toBe('admin');
+    expect((await owner('GET', '/api/admin/users?q=kim')).body.items[0].role).toBe('admin');
+    expect((await owner('POST', '/api/admin/admins', { userId: target.id })).body.error).toMatch(/이미 관리자/);
+    const me = (await owner('GET', '/api/admin/users?q=dev-owner')).body.items[0];
+    expect((await owner('POST', '/api/admin/admins', { userId: me.id })).body.error).toMatch(/주인 관리자/);
+    expect((await owner('POST', '/api/admin/admins', { userId: 'nope' })).status).toBe(404);
+  });
+
   it('주인(서버 설정의 GitHub 계정)만 처음부터 관리자, 일반 사용자는 쓸 수 없고 게시한 글만 읽는다', async () => {
     const { app } = setup();
     const owner = await login(app, 'owner');
