@@ -267,11 +267,15 @@ function registerHandlers() {
 
 // ── 창 ─────────────────────────────
 
+// 로그인 화면 주소. Microsoft 로그인은 이메일·비밀번호를 POST로 보내며 여러 주소(개인 계정은 live.com)를 오가므로,
+// 앱 밖 브라우저로 넘기면 같은 주소가 GET으로 열려 "AADSTS900561: POST만 받습니다"가 난다
+const LOGIN_HOSTS = new Set(['github.com', 'login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'account.live.com', 'signup.live.com', 'account.microsoft.com']);
+
 function isAllowedNavigation(url: string): boolean {
   try {
     const u = new URL(url);
-    // ERD 사이트와 GitHub 로그인 화면만 앱 안에서 연다
-    return u.origin === serverOrigin() || u.hostname === 'github.com';
+    // ERD 사이트와 로그인 화면(GitHub·Microsoft)만 앱 안에서 연다
+    return u.origin === serverOrigin() || (u.protocol === 'https:' && LOGIN_HOSTS.has(u.hostname));
   } catch {
     return false;
   }
