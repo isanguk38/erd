@@ -1,13 +1,10 @@
-// 관리자 페이지 API: 공지사항·업데이트 소식 쓰기, 관리자 초대·관리. 공지 읽기는 로그인한 누구나.
+// 관리자 페이지 API: 공지사항·업데이트 소식 쓰기, 관리자 관리. 공지 읽기는 로그인한 누구나.
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AdminInvite, AdminRole, AdminStore, NoticeInput, NoticeKind, NoticeStore } from '../admin';
+import type { AdminRole, AdminStore, NoticeInput, NoticeKind, NoticeStore } from '../admin';
 import type { Auth } from '../auth';
 
 const forbidden = (message: string) => Object.assign(new Error(message), { statusCode: 403 });
-
-/** 화면에 보낼 초대 (토큰 해시는 빼고) */
-const publicInvite = ({ hash: _hash, ...rest }: AdminInvite) => ({ ...rest, status: rest.usedBy ? 'used' : Date.parse(rest.expiresAt) < Date.now() ? 'expired' : 'open' });
 
 export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, notices: NoticeStore, auth: Auth, options: { publicUrl: string; owners: string[] }) {
   const need = (req: FastifyRequest, role: AdminRole = 'admin'): AdminRole => {
@@ -25,14 +22,6 @@ export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, no
 
   /** 내가 관리자인지 (화면의 "관리자 페이지" 메뉴) */
   app.get('/api/admin/me', async (req) => ({ role: admins.role(req.user) }));
-
-  /** 관리자 초대 수락 (GitHub·Microsoft로 로그인한 상태에서) */
-  app.post<{ Body: { token?: string } }>('/api/admin/invites/accept', async (req) => {
-    if (!req.user) throw forbidden('로그인이 필요합니다');
-    if (admins.role(req.user)) return { ok: true, already: true, role: admins.role(req.user) };
-    const entry = admins.accept(String(req.body?.token ?? ''), req.user);
-    return { ok: true, role: 'admin', entry };
-  });
 
   // ── 관리자: 소식 쓰기 ─────────────
   app.get('/api/admin/notices', async (req) => {
@@ -57,10 +46,10 @@ export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, no
     return { ok: true };
   });
 
-  // ── 주인: 관리자 초대·관리 ─────────────
+  // ── 주인: 관리자 관리 ─────────────
   app.get('/api/admin/admins', async (req) => {
     need(req, 'owner');
-    return { owners: options.owners, admins: admins.list(), invites: admins.invites().map(publicInvite) };
+    return { owners: options.owners, admins: admins.list() };
   });
   /** 가입한 계정 찾기 (이름·아이디 검색, 최근 가입 순, 페이지) — 관리자로 바로 고르기 */
   app.get<{ Querystring: { q?: string; page?: string; size?: string } }>('/api/admin/users', async (req) => {
@@ -89,17 +78,6 @@ export function registerAdminRoutes(app: FastifyInstance, admins: AdminStore, no
     const user = auth.user(String(req.body?.userId ?? ''));
     if (!user) throw Object.assign(new Error('계정을 찾을 수 없습니다'), { statusCode: 404 });
     return admins.add(user, req.user!);
-  });
-  app.post<{ Body: { login?: string } }>('/api/admin/invites', async (req) => {
-    need(req, 'owner');
-    const { invite, token } = admins.createInvite(req.user, req.body?.login);
-    // 링크는 지금 한 번만 보여 준다 (서버에는 해시만 남는다)
-    return { invite: publicInvite(invite), url: `${options.publicUrl}/#/admin/join/${token}` };
-  });
-  app.delete<{ Params: { id: string } }>('/api/admin/invites/:id', async (req) => {
-    need(req, 'owner');
-    admins.cancelInvite(req.params.id);
-    return { ok: true };
   });
   app.delete<{ Params: { userId: string } }>('/api/admin/admins/:userId', async (req) => {
     need(req, 'owner');

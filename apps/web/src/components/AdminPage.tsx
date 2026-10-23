@@ -1,8 +1,8 @@
-// 관리자 페이지 (#/admin): 공지사항·업데이트 소식 쓰기, 관리자 초대·관리(주인만).
+// 관리자 페이지 (#/admin): 공지사항·업데이트 소식 쓰기, 관리자 관리(주인만: 가입한 계정에서 고르기).
 // 관리자 권한은 프로젝트 권한과 따로라 여기서는 소식과 관리자 목록만 다룬다.
 
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { adminApi, NOTICE_KIND_LABEL, useAdminRole, type AdminEntry, type AdminInviteInfo, type AdminUserInfo, type AdminNotice, type NoticeInput, type NoticeKind } from '../lib/notices';
+import { adminApi, NOTICE_KIND_LABEL, useAdminRole, type AdminEntry, type AdminUserInfo, type AdminNotice, type NoticeInput, type NoticeKind } from '../lib/notices';
 import { markdownToHtml } from './NoteText';
 
 // 편집기 라이브러리는 커서 관리자 페이지에서 글을 쓸 때만 불러온다
@@ -189,14 +189,10 @@ function NoticesAdmin() {
 }
 
 function AdminsAdmin() {
-  const [data, setData] = useState<{ owners: string[]; admins: AdminEntry[]; invites: AdminInviteInfo[] } | null>(null);
-  const [login, setLogin] = useState('');
-  const [made, setMade] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [data, setData] = useState<{ owners: string[]; admins: AdminEntry[] } | null>(null);
   const [error, setError] = useState('');
   const load = () => adminApi.admins().then(setData).catch((e) => setError(e instanceof Error ? e.message : String(e)));
   useEffect(() => void load(), []);
-  const status = { open: '기다리는 중', used: '수락함', expired: '만료' } as const;
 
   return (
     <div className="admin-admins">
@@ -207,11 +203,11 @@ function AdminsAdmin() {
       </section>
       <section>
         <h3>관리자</h3>
-        {data && data.admins.length === 0 && <p className="muted small">초대한 관리자가 없습니다.</p>}
+        {data && data.admins.length === 0 && <p className="muted small">추가한 관리자가 없습니다. 아래 가입한 계정에서 고르세요.</p>}
         <ul>
           {data?.admins.map((a) => (
             <li key={a.userId}>
-              <b>{a.name}</b> <span className="muted">{a.login.includes('@') ? a.login : `@${a.login}`} · {when(a.addedAt)} 추가 ({a.addedBy} 초대)</span>
+              <b>{a.name}</b> <span className="muted">{a.login.includes('@') ? a.login : `@${a.login}`} · {when(a.addedAt)} 추가 ({a.addedBy})</span>
               <button
                 className="btn btn-sm btn-danger"
                 onClick={async () => {
@@ -227,49 +223,7 @@ function AdminsAdmin() {
         </ul>
       </section>
       <UserPicker onAdded={load} />
-      <section>
-        <h3>가입 전인 사람 초대</h3>
-        <p className="muted small">아직 ERD에 로그인한 적 없는 사람은 링크로 초대합니다. 링크는 한 번만 쓸 수 있고 24시간 뒤 만료됩니다. GitHub 아이디나 Microsoft 계정 이메일을 적으면 그 계정만 수락할 수 있습니다 (권장).</p>
-        <div className="toolbar-row">
-          <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="GitHub 아이디 또는 Microsoft 이메일" />
-          <button
-            className="btn btn-primary"
-            onClick={async () => {
-              setError('');
-              try {
-                const r = await adminApi.invite(login.trim() || undefined);
-                setMade(r.url);
-                setCopied(false);
-                setLogin('');
-                load();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              }
-            }}
-          >
-            초대 링크 만들기
-          </button>
-        </div>
-        {made && (
-          <div className="admin-invite-link">
-            <code>{made}</code>
-            <button className="btn btn-sm" onClick={async () => { await navigator.clipboard.writeText(made); setCopied(true); }}>{copied ? '복사됨' : '복사'}</button>
-            <p className="muted small">이 링크는 지금만 보입니다. 초대할 사람에게 전달하세요.</p>
-          </div>
-        )}
-        {error && <div className="error-box">{error}</div>}
-        {data && data.invites.length > 0 && (
-          <ul className="admin-invites">
-            {data.invites.map((i) => (
-              <li key={i.id}>
-                <span className={`admin-status ${i.status === 'open' ? 'on' : 'off'}`}>{status[i.status]}</span>
-                <span>{i.login ? `${i.login.includes('@') ? i.login : `@${i.login}`}만` : '누구나'} · {i.createdBy} · {when(i.createdAt)}{i.usedBy ? ` · ${i.usedBy} 수락` : ` · ${when(i.expiresAt)}까지`}</span>
-                {i.status === 'open' && <button className="btn btn-sm" onClick={async () => { await adminApi.cancelInvite(i.id); load(); }}>취소</button>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {error && <div className="error-box">{error}</div>}
     </div>
   );
 }
@@ -380,30 +334,3 @@ function UserPicker({ onAdded }: { onAdded: () => void }) {
   );
 }
 
-/** 초대 링크 (#/admin/join/<token>): 로그인한 계정으로 수락 */
-export function AdminJoin({ token, onDone }: { token: string; onDone: () => void }) {
-  const [state, setState] = useState<{ error?: string; ok?: boolean }>({});
-  useEffect(() => {
-    adminApi
-      .accept(token)
-      .then(() => setState({ ok: true }))
-      .catch((e) => setState({ error: e instanceof Error ? e.message : String(e) }));
-  }, [token]);
-  return (
-    <div className="center-message">
-      {!state.ok && !state.error && <p className="muted">관리자 초대를 확인하는 중…</p>}
-      {state.ok && (
-        <>
-          <p>관리자가 되었습니다. 공지사항과 업데이트 소식을 쓸 수 있습니다.</p>
-          <button className="btn btn-primary" onClick={onDone}>관리자 페이지로</button>
-        </>
-      )}
-      {state.error && (
-        <>
-          <div className="error-box">{state.error}</div>
-          <a className="btn" href="#/">프로젝트 목록으로</a>
-        </>
-      )}
-    </div>
-  );
-}

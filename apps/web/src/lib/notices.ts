@@ -27,17 +27,6 @@ export interface AdminNotice extends NoticeItem {
   revisions: { at: string; by: string; title: string; body: string; format?: 'html' | 'markdown'; kind: NoticeKind; version?: string; pinned: boolean }[];
 }
 
-export interface AdminInviteInfo {
-  id: string;
-  login?: string;
-  createdBy: string;
-  createdAt: string;
-  expiresAt: string;
-  usedBy?: string;
-  usedAt?: string;
-  status: 'open' | 'used' | 'expired';
-}
-
 export interface AdminEntry {
   userId: string;
   login: string;
@@ -77,14 +66,11 @@ export const adminApi = {
   update: (id: string, input: NoticeInput) => call<AdminNotice>('PATCH', `/api/admin/notices/${id}`, input),
   restore: (id: string, at: string) => call<AdminNotice>('POST', `/api/admin/notices/${id}/restore`, { at }),
   remove: (id: string) => call('DELETE', `/api/admin/notices/${id}`),
-  admins: () => call<{ owners: string[]; admins: AdminEntry[]; invites: AdminInviteInfo[] }>('GET', '/api/admin/admins'),
-  invite: (login?: string) => call<{ invite: AdminInviteInfo; url: string }>('POST', '/api/admin/invites', { login }),
-  cancelInvite: (id: string) => call('DELETE', `/api/admin/invites/${id}`),
+  admins: () => call<{ owners: string[]; admins: AdminEntry[] }>('GET', '/api/admin/admins'),
   users: (q: string, page: number, size = 10) =>
     call<{ items: AdminUserInfo[]; total: number; page: number; pages: number; size: number }>('GET', `/api/admin/users?${new URLSearchParams({ q, page: String(page), size: String(size) })}`),
   addAdmin: (userId: string) => call<AdminEntry>('POST', '/api/admin/admins', { userId }),
   removeAdmin: (userId: string) => call('DELETE', `/api/admin/admins/${userId}`),
-  accept: (token: string) => call<{ ok: true; role: string }>('POST', '/api/admin/invites/accept', { token }),
 };
 
 /** 내가 관리자인지 (한 번 묻고 기억) */
@@ -102,10 +88,6 @@ export function useAdminRole(): 'owner' | 'admin' | null {
   return role;
 }
 /** 초대를 수락하면 다시 묻는다 */
-export const forgetAdminRole = () => {
-  rolePromise = null;
-};
-
 // ── 읽음 기억 (이 브라우저·앱마다) ─────────────
 const SEEN_KEY = 'erd.notices.seen';
 export function seenNotices(): Set<string> {

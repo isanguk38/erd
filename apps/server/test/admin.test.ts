@@ -92,36 +92,28 @@ describe('관리자 페이지', () => {
     expect(pub.createdBy).toBe('dev-owner');
   });
 
-  it('초대: 주인만 만들고, 한 번만·지정한 GitHub 아이디만 수락, 관리자는 글만 쓰고 초대는 못 함, 빼면 바로 못 씀', async () => {
+  it('주인이 고른 계정이 관리자: 관리자는 글만 쓰고 관리자 관리는 못 함, 빼면 바로 못 씀', async () => {
     const { app } = setup();
     const owner = await login(app, 'owner');
     const kim = await login(app, 'kim');
-    const lee = await login(app, 'lee');
-    expect((await kim('POST', '/api/admin/invites', {})).status).toBe(403);
-
-    // 특정 계정(dev-kim)만 수락 가능한 초대
-    const { url } = (await owner('POST', '/api/admin/invites', { login: 'dev-kim' })).body;
-    expect(url).toMatch(/^https:\/\/erd\.example\.com\/#\/admin\/join\/[\w-]+\.[\w-]+$/);
-    const token = url.split('/join/')[1];
-    expect((await lee('POST', '/api/admin/invites/accept', { token })).body.error).toMatch(/dev-kim만 수락/);
-    expect((await kim('POST', '/api/admin/invites/accept', { token: token.slice(0, -2) + 'xx' })).body.error).toMatch(/올바르지 않습니다/);
-    expect((await kim('POST', '/api/admin/invites/accept', { token })).body.role).toBe('admin');
-    // 한 번만
-    expect((await lee('POST', '/api/admin/invites/accept', { token })).body.error).toMatch(/이미 사용한/);
+    const kimId = (await owner('GET', '/api/admin/users?q=dev-kim')).body.items[0].id;
+    expect((await owner('POST', '/api/admin/admins', { userId: kimId })).status).toBe(200);
     expect((await kim('GET', '/api/admin/me')).body.role).toBe('admin');
 
     // 관리자는 글을 쓰지만 관리자 관리는 못 한다
     expect((await kim('POST', '/api/admin/notices', { kind: 'web', title: '웹 업데이트', published: true })).status).toBe(200);
     expect((await kim('GET', '/api/admin/admins')).status).toBe(403);
-    expect((await kim('POST', '/api/admin/invites', {})).status).toBe(403);
+    expect((await kim('GET', '/api/admin/users')).status).toBe(403);
+    expect((await kim('POST', '/api/admin/admins', { userId: kimId })).status).toBe(403);
 
     const admins = (await owner('GET', '/api/admin/admins')).body;
     expect(admins.owners).toEqual(['dev-owner']);
     expect(admins.admins.map((a: { login: string }) => a.login)).toEqual(['dev-kim']);
-    expect(admins.invites[0]).toMatchObject({ status: 'used', usedBy: 'dev-kim' });
-    expect(admins.invites[0]).not.toHaveProperty('hash');
+    // 초대 링크는 없앴다 (프로젝트 공유 링크로 가입하면 목록에서 고른다)
+    expect(admins).not.toHaveProperty('invites');
+    expect((await owner('POST', '/api/admin/invites', {})).status).toBe(404);
 
-    await owner('DELETE', `/api/admin/admins/${admins.admins[0].userId}`);
+    await owner('DELETE', `/api/admin/admins/${kimId}`);
     expect((await kim('GET', '/api/admin/me')).body.role).toBeNull();
     expect((await kim('POST', '/api/admin/notices', { title: 'x' })).status).toBe(403);
   });

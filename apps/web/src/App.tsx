@@ -33,9 +33,8 @@ import { copySelection, pasteClipboard, selectAllTables } from './lib/tableClipb
 import { ImageExportDialog } from './components/ImageExportDialog';
 import { ResizableSide } from './components/ResizableSide';
 import { AreaTabs } from './components/AreaTabs';
-import { AdminJoin, AdminPage } from './components/AdminPage';
+import { AdminPage } from './components/AdminPage';
 import { NoticesDialog, useNoticeToast } from './components/NoticesPanel';
-import { forgetAdminRole } from './lib/notices';
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -44,8 +43,6 @@ function isTyping(target: EventTarget | null): boolean {
 
 /** 로그인하러 간 사이 기억해 둘 초대 토큰 (30분 뒤엔 버린다) */
 const PENDING_JOIN = 'erd-pending-join';
-/** 관리자 초대 링크: 로그인(GitHub·Microsoft)을 다녀오면 주소가 사라지므로 기억해 둔다 */
-const PENDING_ADMIN = 'erd-pending-admin-join';
 const storage = {
   get(key: string): string | null {
     try {
@@ -130,32 +127,9 @@ export function App() {
       });
   }, [joinToken, me, loggedIn]);
 
-  // 관리자 초대 링크도 로그인 전이면 기억했다가 로그인 뒤 이어서
-  const adminJoin = hash.match(/^#\/admin\/join\/([A-Za-z0-9_.-]+)/)?.[1];
-  useEffect(() => {
-    if (!me) return;
-    if (adminJoin && !loggedIn) storage.set(PENDING_ADMIN, adminJoin);
-    if (!adminJoin && loggedIn) {
-      const pending = storage.get(PENDING_ADMIN);
-      if (pending) location.hash = `#/admin/join/${pending}`;
-    }
-  }, [adminJoin, me, loggedIn]);
-
   if (error) return <div className="center-message error-box">{error}</div>;
   if (!me) return <div className="center-message muted">불러오는 중…</div>;
   if (me.authEnabled && !me.user) return <LoginPage me={me} onLoggedIn={loadMe} />;
-  if (adminJoin) {
-    return (
-      <AdminJoin
-        token={adminJoin}
-        onDone={() => {
-          storage.remove(PENDING_ADMIN);
-          forgetAdminRole();
-          location.hash = '#/admin';
-        }}
-      />
-    );
-  }
   if (/^#\/admin\/?$/.test(hash)) return <AdminPage />;
   if (joinToken) return <div className="center-message muted">프로젝트에 참여하는 중…</div>;
   const projectId = hash.match(/^#\/p\/([a-zA-Z0-9-]+)/)?.[1];
