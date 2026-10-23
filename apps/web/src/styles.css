@@ -1403,3 +1403,5 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .md-tool.align { display: inline-flex; align-items: center; justify-content: center; }
 /* 빈 칸도 편집 칸처럼 한 줄 높이 */
 .release-notes.md td p:empty::after, .release-notes.md th p:empty::after, .release-notes.md td:empty::after, .release-notes.md th:empty::after { content: '\00a0'; }
+.btn-microsoft { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--panel); border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; }
+.btn-microsoft:hover { background: var(--bg); }

@@ -8,12 +8,12 @@ import type { ProjectStore } from '../projects';
 const badRequest = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
 export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: ProjectStore, serverDb = true) {
-  const { publicUrl, github, devLogin } = auth.options;
+  const { publicUrl, github, microsoft, devLogin } = auth.options;
 
   app.get('/api/me', async (req) => ({
     authEnabled: auth.enabled,
     user: req.user ?? null,
-    loginMethods: [...(github ? ['github'] : []), ...(devLogin ? ['dev'] : [])],
+    loginMethods: [...(github ? ['github'] : []), ...(microsoft ? ['microsoft'] : []), ...(devLogin ? ['dev'] : [])],
     // false면 웹에서는 DB 연결 기능을 끄고 설치형 앱에서만 쓴다
     serverDb,
   }));
@@ -53,6 +53,49 @@ export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: P
       const profileRes = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${token.access_token}`, 'User-Agent': 'erd' } });
       if (!profileRes.ok) throw badRequest('GitHub 사용자 정보를 읽지 못했습니다');
       const user = auth.upsertGithubUser((await profileRes.json()) as { id: number; login: string; name?: string; avatar_url?: string });
+      const back = parseCookies(req.headers.cookie).erd_return ?? '';
+      reply
+        .header('set-cookie', [auth.sessionCookie(auth.createSession(user.id)), 'erd_oauth_state=; Path=/auth; Max-Age=0', 'erd_return=; Path=/auth; Max-Age=0'])
+        .redirect(back.startsWith('/oauth/authorize?') ? `${publicUrl}${back}` : `${publicUrl}/`);
+    });
+  }
+
+  // ── Microsoft 로그인 (개인·회사·학교 계정) ─────────────────────────────
+  if (microsoft) {
+    const tenant = encodeURIComponent(microsoft.tenant || 'common');
+    const redirectUri = `${publicUrl}/auth/microsoft/callback`;
+    const scope = 'openid profile email User.Read';
+    app.get<{ Querystring: { return?: string } }>('/auth/microsoft', async (req, reply) => {
+      const state = randomBytes(16).toString('base64url');
+      const back = req.query.return?.startsWith('/oauth/authorize?') ? req.query.return : '';
+      const params = new URLSearchParams({ client_id: microsoft.clientId, response_type: 'code', redirect_uri: redirectUri, response_mode: 'query', scope, state, prompt: 'select_account' });
+      const secure = publicUrl.startsWith('https://') ? '; Secure' : '';
+      reply
+        .header('set-cookie', [
+          `erd_oauth_state=${state}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600${secure}`,
+          `erd_return=${back ? encodeURIComponent(back) : ''}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=${back ? 600 : 0}${secure}`,
+        ])
+        .redirect(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params}`);
+    });
+
+    app.get<{ Querystring: { code?: string; state?: string; error?: string; error_description?: string } }>('/auth/microsoft/callback', async (req, reply) => {
+      const { code, state, error, error_description } = req.query;
+      // 사용자가 취소했거나 그 회사 관리자가 이 앱을 허용하지 않은 경우
+      if (error) throw badRequest(`Microsoft 로그인을 마치지 못했습니다: ${error_description ?? error}`);
+      const expected = parseCookies(req.headers.cookie).erd_oauth_state;
+      if (!code || !state || state !== expected) throw badRequest('로그인 요청이 올바르지 않습니다. 다시 시도하세요.');
+      const tokenRes = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: microsoft.clientId, client_secret: microsoft.clientSecret, code, redirect_uri: redirectUri, grant_type: 'authorization_code', scope }).toString(),
+      });
+      const token = (await tokenRes.json()) as { access_token?: string; error_description?: string };
+      if (!token.access_token) throw badRequest(`Microsoft 로그인 실패: ${token.error_description?.split('\r\n')[0] ?? '토큰을 받지 못했습니다'}`);
+      const profileRes = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName', { headers: { Authorization: `Bearer ${token.access_token}` } });
+      if (!profileRes.ok) throw badRequest('Microsoft 사용자 정보를 읽지 못했습니다');
+      const profile = (await profileRes.json()) as { id?: string; displayName?: string; mail?: string; userPrincipalName?: string };
+      if (!profile.id) throw badRequest('Microsoft 사용자 정보를 읽지 못했습니다');
+      const user = auth.upsertMicrosoftUser({ id: profile.id, displayName: profile.displayName, mail: profile.mail, userPrincipalName: profile.userPrincipalName });
       const back = parseCookies(req.headers.cookie).erd_return ?? '';
       reply
         .header('set-cookie', [auth.sessionCookie(auth.createSession(user.id)), 'erd_oauth_state=; Path=/auth; Max-Age=0', 'erd_return=; Path=/auth; Max-Age=0'])

@@ -29,6 +29,11 @@ services:
         sync: false
       - key: GITHUB_CLIENT_SECRET
         sync: false
+      # Microsoft 로그인 (Azure 앱 등록 · 웹 리디렉션 URI: <ERD_PUBLIC_URL>/auth/microsoft/callback)
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
       # 관리자 페이지(공지사항·업데이트 소식) 주인 GitHub 계정. 쉼표로 여럿. 다른 관리자는 주인이 관리자 페이지에서 초대
       - key: ERD_ADMIN_GITHUB
         sync: false

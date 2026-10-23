@@ -17,6 +17,20 @@ export function LoginPage({ me, onLoggedIn }: { me: Me; onLoggedIn: () => void }
             GitHub로 로그인
           </a>
         )}
+        {me.loginMethods.includes('microsoft') && (
+          <a className="btn btn-lg btn-microsoft" href="/auth/microsoft">
+            <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            Microsoft로 로그인
+          </a>
+        )}
+        {me.loginMethods.includes('github') && me.loginMethods.includes('microsoft') && (
+          <p className="muted small">GitHub와 Microsoft는 서로 다른 계정입니다. 쓰던 프로젝트가 있는 쪽으로 로그인하세요.</p>
+        )}
         {me.loginMethods.includes('dev') && (
           <form
             className="dev-login"

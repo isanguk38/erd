@@ -120,6 +120,7 @@ export function buildApp(options: AppOptions): ErdApp {
   const auth = new Auth(storage, {
     enabled: options.auth?.enabled ?? false,
     github: options.auth?.github,
+    microsoft: options.auth?.microsoft,
     devLogin: options.auth?.devLogin,
     allowPrivateDb: options.auth?.allowPrivateDb,
     publicUrl,

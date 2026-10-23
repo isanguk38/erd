@@ -6,6 +6,7 @@
 //   ERD_SECRET            DB 비밀번호 암호화·세션 서명 키 (배포 시 필수, 바꾸면 저장된 DB 비밀번호를 못 읽음)
 //   ERD_PUBLIC_URL        외부 주소 (예: https://erd.onrender.com)
 //   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET   GitHub 로그인 (OAuth App 콜백: <ERD_PUBLIC_URL>/auth/github/callback)
+//   MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET   Microsoft 로그인 (Azure 앱 등록, 웹 리디렉션 URI: <ERD_PUBLIC_URL>/auth/microsoft/callback). MICROSOFT_TENANT 기본 common
 //   ERD_ALLOW_PRIVATE_DB  1이면 로그인 모드에서도 내부망 주소의 DB 연결 허용 (기본 금지)
 //   ERD_ADMIN_GITHUB      관리자 페이지 주인 GitHub 계정 (쉼표로 여럿, 아이디 또는 숫자 id). 다른 관리자는 주인이 초대
 //   PORT                  포트 (NODE_ENV=production일 때, Render가 지정)
@@ -23,13 +24,14 @@ const env: Record<string, string | undefined> = Object.fromEntries(
 );
 
 const github = env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } : undefined;
+const microsoft = env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET ? { clientId: env.MICROSOFT_CLIENT_ID, clientSecret: env.MICROSOFT_CLIENT_SECRET, tenant: env.MICROSOFT_TENANT || 'common' } : undefined;
 const devLogin = env.ERD_DEV_LOGIN === '1' && env.NODE_ENV !== 'production';
-const authEnabled = Boolean(github || devLogin);
+const authEnabled = Boolean(github || microsoft || devLogin);
 const publicUrl = (env.ERD_PUBLIC_URL || env.ERD_WEB_URL || 'http://localhost:5173').replace(/\/+$/, '');
 
 /** 설정 값이 들어왔는지만 보여준다 (값 자체는 절대 출력하지 않는다) */
 function settingsReport(): string {
-  const keys = ['NODE_ENV', 'DATABASE_URL', 'ERD_SECRET', 'ERD_PUBLIC_URL', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'ERD_ADMIN_GITHUB'];
+  const keys = ['NODE_ENV', 'DATABASE_URL', 'ERD_SECRET', 'ERD_PUBLIC_URL', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'ERD_ADMIN_GITHUB'];
   return keys.map((k) => `  ${k.padEnd(22)} ${env[k] ? (k === 'NODE_ENV' ? env[k] : '설정됨') : '없음'}`).join('\n');
 }
 
@@ -85,7 +87,7 @@ const { app, mcpToken, auth } = buildApp({
   secret: env.ERD_SECRET,
   mcpToken: env.ERD_MCP_TOKEN,
   webUrl: publicUrl,
-  auth: authEnabled ? { enabled: true, github, devLogin, allowPrivateDb: env.ERD_ALLOW_PRIVATE_DB === '1' } : undefined,
+  auth: authEnabled ? { enabled: true, github, microsoft, devLogin, allowPrivateDb: env.ERD_ALLOW_PRIVATE_DB === '1' } : undefined,
   staticDir: env.NODE_ENV === 'production' || env.ERD_SERVE_WEB === '1' ? staticDir : undefined,
   // 배포 모드에서는 서버가 DB에 접속하지 않는다 (설치형 앱이 사용자 PC에서 처리). ERD_SERVER_DB=1이면 공개된 클라우드 DB에 한해 허용
   serverDb: !authEnabled || env.ERD_SERVER_DB === '1',

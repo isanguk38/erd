@@ -21,6 +21,8 @@ export interface User {
   name: string;
   avatarUrl?: string;
   githubId?: number;
+  /** Microsoft 계정 고유 id (Graph /me의 id) */
+  microsoftId?: string;
   createdAt: string;
 }
 
@@ -30,6 +32,8 @@ export interface AuthOptions {
   /** 로그인 모드 사용 여부 (GitHub 설정이 있거나 개발 로그인을 켜면 true) */
   enabled: boolean;
   github?: { clientId: string; clientSecret: string };
+  /** Microsoft 로그인 (Azure 앱 등록). tenant: common(개인+회사·학교 계정, 기본)·organizations·consumers·테넌트 id */
+  microsoft?: { clientId: string; clientSecret: string; tenant?: string };
   /** 테스트·개발용 이름만으로 로그인 (운영에서는 쓰지 않는다) */
   devLogin?: boolean;
   /** 외부에서 접속하는 주소 (OAuth 콜백, 초대 링크) */
@@ -103,6 +107,25 @@ export class Auth {
       login: profile.login,
       name: profile.name || profile.login,
       avatarUrl: profile.avatar_url,
+    });
+  }
+
+  /**
+   * Microsoft로 로그인한 사용자. 계정 아이디(login)는 이메일 (GitHub 아이디에는 @가 없어 겹치지 않는다).
+   * 같은 사람이 GitHub로도 로그인하면 따로 계정이 생긴다 (계정 합치기는 없음).
+   */
+  upsertMicrosoftUser(profile: { id: string; displayName?: string | null; mail?: string | null; userPrincipalName?: string | null }): User {
+    const existing = this.storage
+      .keys('users/')
+      .map((k) => getJson<User | null>(this.storage, k, null))
+      .find((u) => u?.microsoftId === profile.id);
+    const email = (profile.mail || profile.userPrincipalName || '').trim().toLowerCase();
+    const login = email || `ms-${profile.id.slice(0, 8)}`;
+    return this.saveUser({
+      ...(existing ?? { id: randomUUID(), createdAt: new Date().toISOString() }),
+      microsoftId: profile.id,
+      login,
+      name: profile.displayName?.trim() || login,
     });
   }
 

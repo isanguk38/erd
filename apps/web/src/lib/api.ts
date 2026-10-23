@@ -227,7 +227,7 @@ export type Role = 'owner' | 'editor' | 'viewer';
 export interface Me {
   authEnabled: boolean;
   user: { id: string; login: string; name: string; avatarUrl?: string } | null;
-  loginMethods: ('github' | 'dev')[];
+  loginMethods: ('github' | 'microsoft' | 'dev')[];
   /** false면 서버가 DB에 접속하지 않는다 (배포 웹). DB 연결은 설치형 앱에서만 */
   serverDb?: boolean;
 }

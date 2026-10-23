@@ -34,7 +34,7 @@ function page(reply: FastifyReply, title: string, body: string, status = 200) {
 }
 
 export function registerOAuthRoutes(app: FastifyInstance, auth: Auth, oauth: OAuthStore) {
-  const { publicUrl, github, devLogin } = auth.options;
+  const { publicUrl, github, microsoft, devLogin } = auth.options;
   const resource = `${publicUrl}/mcp`;
 
   // OAuth 토큰 요청은 form(application/x-www-form-urlencoded)으로 온다
@@ -104,6 +104,7 @@ export function registerOAuthRoutes(app: FastifyInstance, auth: Auth, oauth: OAu
     if (!user) {
       const options = [
         github ? `<a class="btn primary" href="/auth/github?return=${encodeURIComponent(here)}">GitHub로 로그인</a>` : '',
+        microsoft ? `<a class="btn primary" href="/auth/microsoft?return=${encodeURIComponent(here)}">Microsoft로 로그인</a>` : '',
         devLogin
           ? `<form method="post" action="/oauth/dev-login" style="margin-top:12px"><input type="hidden" name="return" value="${esc(here)}"><input name="name" placeholder="이름 (개발용 로그인)" required><div class="actions"><button class="primary">로그인</button></div></form>`
           : '',
