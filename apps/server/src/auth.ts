@@ -91,12 +91,14 @@ export class Auth {
     return getJson<User | null>(this.storage, `users/${id}.json`, null);
   }
 
-  /** 가입한 모든 계정 (관리자 페이지에서 관리자로 고를 때) */
+  /** 가입한 모든 계정 (관리자 페이지에서 관리자로 고를 때). users/ 아래에는 계정 말고 사용자별 파일(users/<해시>/templates.json)도 있다 */
   users(): User[] {
     return this.storage
       .keys('users/')
+      .filter((k) => /^users\/[^/]+\.json$/.test(k))
       .map((k) => getJson<User | null>(this.storage, k, null))
-      .filter((u): u is User => Boolean(u));
+      .filter((u): u is User => typeof u?.id === 'string' && typeof u.login === 'string')
+      .map((u) => ({ ...u, name: u.name || u.login, createdAt: u.createdAt ?? '' }));
   }
 
   private saveUser(user: User): User {

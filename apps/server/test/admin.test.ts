@@ -43,6 +43,8 @@ describe('관리자 페이지', () => {
     const owner = await login(app, 'owner');
     for (let i = 1; i <= 12; i++) await login(app, `member${String(i).padStart(2, '0')}`);
     const kim = await login(app, 'kim');
+    // 사용자별 파일(users/<해시>/templates.json)은 계정이 아니다 (운영에서 목록이 깨지던 문제)
+    expect((await kim('PUT', '/api/templates', {})).status).toBe(200);
 
     expect((await kim('GET', '/api/admin/users')).status).toBe(403);
     const first = (await owner('GET', '/api/admin/users?size=5')).body;
