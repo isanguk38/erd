@@ -8,6 +8,7 @@ import { markdownToHtml } from './NoteText';
 // 편집기 라이브러리는 커서 관리자 페이지에서 글을 쓸 때만 불러온다
 const RichEditor = lazy(() => import('./RichEditor').then((m) => ({ default: m.RichEditor })));
 import { UserMenu } from './Toolbar';
+import { Icon } from './ui';
 
 const when = (v?: string) => (v ? new Date(v).toLocaleString() : '');
 const EMPTY: NoticeInput = { kind: 'notice', title: '', body: '', format: 'html', version: '', pinned: false, published: false };
@@ -25,19 +26,22 @@ export function AdminPage() {
   return (
     <div className="admin-page">
       <header className="admin-page__head">
-        <a className="icon-btn back" href="#/" title="프로젝트 목록">←</a>
-        <h1>관리자</h1>
-        {role && <span className="chip-select">{role === 'owner' ? '주인' : '관리자'}</span>}
+        <a className="icon-btn back" href="#/" title="프로젝트 목록" aria-label="프로젝트 목록"><Icon name="back" size={18} /></a>
+        <div className="admin-page__title">
+          <h1>관리자</h1>
+          <span className="muted small">공지사항·업데이트 소식{role === 'owner' ? '과 관리자를' : '을'} 관리합니다</span>
+        </div>
+        {role && <span className={`admin-role${role === 'owner' ? ' owner' : ''}`}><Icon name="shield" size={12} />{role === 'owner' ? '주인' : '관리자'}</span>}
         <span className="spacer" />
         <UserMenu />
       </header>
       {!role ? (
-        <div className="empty-state">{checked ? '관리자만 들어올 수 있습니다. 관리자에게 초대 링크를 받으세요.' : '확인하는 중…'}</div>
+        <div className="empty-state">{checked ? '관리자만 들어올 수 있습니다. 주인 관리자에게 관리자 추가를 요청하세요.' : '확인하는 중…'}</div>
       ) : (
         <>
           <div className="tabs admin-tabs">
-            <button className={tab === 'notices' ? 'active' : ''} onClick={() => setTab('notices')}>소식 (공지·업데이트)</button>
-            {role === 'owner' && <button className={tab === 'admins' ? 'active' : ''} onClick={() => setTab('admins')}>관리자</button>}
+            <button className={tab === 'notices' ? 'active' : ''} onClick={() => setTab('notices')}><Icon name="megaphone" size={14} />소식 (공지·업데이트)</button>
+            {role === 'owner' && <button className={tab === 'admins' ? 'active' : ''} onClick={() => setTab('admins')}><Icon name="users" size={14} />관리자</button>}
           </div>
           {tab === 'notices' ? <NoticesAdmin /> : <AdminsAdmin />}
         </>
@@ -104,7 +108,10 @@ function NoticesAdmin() {
 
       <section className="admin-notices__edit">
         {!editing ? (
-          <div className="empty-state">왼쪽에서 글을 고르거나 "+ 새 글"을 누르세요.</div>
+          <div className="empty-state admin-empty">
+            <span className="admin-empty__icon" aria-hidden="true"><Icon name="note" size={22} /></span>
+            왼쪽에서 글을 고르거나 "+ 새 글"을 누르세요.
+          </div>
         ) : (
           <>
             <div className="form-grid admin-form">
@@ -196,18 +203,22 @@ function AdminsAdmin() {
 
   return (
     <div className="admin-admins">
-      <section>
+      <section className="admin-card">
         <h3>주인</h3>
         <p className="muted small">서버 설정(ERD_ADMIN_GITHUB)에 적은 계정입니다 (GitHub 아이디 또는 Microsoft 이메일). 화면에서는 뺄 수 없습니다.</p>
-        <ul>{(data?.owners.length ? data.owners : ['(로컬 모드: 내 PC 사용자)']).map((o) => <li key={o}><b>{o}</b></li>)}</ul>
+        <ul className="admin-people">{(data?.owners.length ? data.owners : ['(로컬 모드: 내 PC 사용자)']).map((o) => <li key={o}><span className="avatar admin-avatar owner">{o.slice(0, 1).toUpperCase()}</span><b>{o}</b><span className="admin-status on">주인</span></li>)}</ul>
       </section>
-      <section>
-        <h3>관리자</h3>
+      <section className="admin-card">
+        <h3>관리자{data && data.admins.length > 0 && <span className="home-count">{data.admins.length}</span>}</h3>
         {data && data.admins.length === 0 && <p className="muted small">추가한 관리자가 없습니다. 아래 가입한 계정에서 고르세요.</p>}
-        <ul>
+        <ul className="admin-people">
           {data?.admins.map((a) => (
             <li key={a.userId}>
-              <b>{a.name}</b> <span className="muted">{a.login.includes('@') ? a.login : `@${a.login}`} · {when(a.addedAt)} 추가 ({a.addedBy})</span>
+              <span className="avatar admin-avatar">{a.name.slice(0, 1)}</span>
+              <span className="admin-people__who">
+                <b>{a.name}</b>
+                <span className="muted small">{a.login.includes('@') ? a.login : `@${a.login}`} · {when(a.addedAt)} 추가 ({a.addedBy})</span>
+              </span>
               <button
                 className="btn btn-sm btn-danger"
                 onClick={async () => {
@@ -258,10 +269,13 @@ function UserPicker({ onAdded }: { onAdded: () => void }) {
   useEffect(() => void load(), [query, page]);
 
   return (
-    <section className="admin-users">
+    <section className="admin-card admin-users">
       <h3>가입한 계정에서 추가</h3>
       <p className="muted small">ERD에 한 번이라도 로그인한 계정입니다. 골라서 바로 관리자로 추가합니다.</p>
-      <input className="admin-users__search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·아이디·이메일로 검색" />
+      <span className="admin-users__searchbox">
+        <Icon name="search" size={14} />
+        <input className="admin-users__search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·아이디·이메일로 검색" />
+      </span>
       {error && <div className="error-box">{error}</div>}
       {data && (
         <>

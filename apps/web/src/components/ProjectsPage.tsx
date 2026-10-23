@@ -8,6 +8,7 @@ import { DB_ORDER, dbLabel } from '../lib/dbInfo';
 import { DesktopUpdateButton } from './DesktopUpdate';
 import { NoticesPanel } from './NoticesPanel';
 import { useAdminRole } from '../lib/notices';
+import { Icon } from './ui';
 
 type SortKey = 'recent' | 'name';
 const SORT_KEY = 'erd.projectSort';
@@ -17,6 +18,20 @@ function readSort(): SortKey {
   } catch {
     return 'recent';
   }
+}
+
+/** 수정 시각을 "3분 전·어제·10월 3일"처럼 */
+function ago(iso?: string): string {
+  if (!iso) return '';
+  const t = new Date(iso);
+  const min = Math.floor((Date.now() - t.getTime()) / 60000);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분 전`;
+  if (min < 24 * 60) return `${Math.floor(min / 60)}시간 전`;
+  const days = Math.floor(min / (24 * 60));
+  if (days === 1) return '어제';
+  if (days < 7) return `${days}일 전`;
+  return t.toLocaleDateString(undefined, { year: t.getFullYear() === new Date().getFullYear() ? undefined : 'numeric', month: 'long', day: 'numeric' });
 }
 
 /** 검색어 비교: 대소문자·띄어쓰기 무시 */
@@ -82,20 +97,28 @@ export function ProjectsPage() {
   };
 
   return (
-    <div className="projects-layout">
+    <div className="projects-layout home">
     <div className="projects-page">
       <header className="projects-page__head">
         <div className="projects-page__title">
-          <h1>ERD</h1>
-          <DesktopUpdateButton />
-          {adminRole && <a className="btn btn-ghost btn-sm admin-link" href="#/admin" title="공지사항·업데이트 소식 쓰기">관리자 페이지</a>}
-          <UserMenu />
+          <div className="home-brand">
+            <span className="home-logo" aria-hidden="true"><Icon name="table" size={18} /></span>
+            <div>
+              <h1>ERD</h1>
+              <p className="muted">함께 그리고, DB와 바로 동기화하고, AI와 같이 설계하는 ERD</p>
+            </div>
+          </div>
+          <div className="home-actions">
+            <DesktopUpdateButton />
+            {adminRole && (
+              <a className="btn btn-ghost btn-sm admin-link" href="#/admin" title="공지사항·업데이트 소식 쓰기">
+                <Icon name="shield" size={14} />
+                관리자 페이지
+              </a>
+            )}
+            <UserMenu />
+          </div>
         </div>
-        <p className="muted">함께 그리고, DB와 바로 동기화하고, AI와 같이 설계하는 ERD</p>
-        <label className="inline-field">
-          내 이름 (함께 작업할 때 표시)
-          <input value={userName} onChange={(e) => useStore.getState().setUserName(e.target.value)} placeholder="예: 홍길동" />
-        </label>
       </header>
 
       {legacy && (
@@ -108,70 +131,103 @@ export function ProjectsPage() {
         </div>
       )}
 
-      <form
-        className="new-project"
-        onSubmit={(e) => {
-          e.preventDefault();
-          create({ name: name.trim() || '새 프로젝트', dialect });
-        }}
-      >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="새 프로젝트 이름" />
-        <select value={dialect} onChange={(e) => setDialect(e.target.value as DialectId)}>
-          {DB_ORDER.map((d) => <option key={d} value={d}>{dbLabel(d)}</option>)}
-        </select>
-        <button className="btn btn-primary" type="submit">만들기</button>
-      </form>
+      <section className="home-card home-create">
+        <div className="home-create__head">
+          <h2>새 프로젝트</h2>
+          <label className="inline-field home-name">
+            함께 작업할 때 내 이름
+            <input value={userName} onChange={(e) => useStore.getState().setUserName(e.target.value)} placeholder="예: 홍길동" />
+          </label>
+        </div>
+        <form
+          className="new-project"
+          onSubmit={(e) => {
+            e.preventDefault();
+            create({ name: name.trim() || '새 프로젝트', dialect });
+          }}
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="프로젝트 이름 (예: 쇼핑몰 주문 관리)" />
+          <select value={dialect} onChange={(e) => setDialect(e.target.value as DialectId)} aria-label="DB 종류">
+            {DB_ORDER.map((d) => <option key={d} value={d}>{dbLabel(d)}</option>)}
+          </select>
+          <button className="btn btn-primary" type="submit"><Icon name="plus" size={15} />만들기</button>
+        </form>
+      </section>
 
       {error && <div className="error-box">{error}</div>}
-      {projects && projects.length === 0 && <div className="empty-state">프로젝트가 없습니다. 새로 만들거나, 만든 뒤 "DB에서 가져오기"로 기존 DB를 불러오세요.</div>}
-      {projects && projects.length > 0 && (
-        <div className="project-search">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              // 결과가 하나면 Enter로 바로 연다
-              if (e.key === 'Enter' && shown.length === 1) location.hash = `#/p/${shown[0].id}`;
-              if (e.key === 'Escape') setQuery('');
-            }}
-            placeholder={`프로젝트 검색 (이름·DB 종류) · ${projects.length}개`}
-            aria-label="프로젝트 검색"
-          />
-          <select value={sort} onChange={(e) => changeSort(e.target.value as SortKey)} aria-label="정렬">
-            <option value="recent">최근 수정순</option>
-            <option value="name">이름순</option>
-          </select>
-          {query.trim() && <span className="muted small">{shown.length}개</span>}
-        </div>
-      )}
-      {projects && projects.length > 0 && query.trim() && shown.length === 0 && (
-        <div className="empty-state">"{query.trim()}"에 맞는 프로젝트가 없습니다.</div>
-      )}
-      <ul className="project-list">
-        {shown.map((p) => (
-          <li key={p.id}>
-            <a href={`#/p/${p.id}`}>
-              <b>{highlight(p.name, query)}</b>
-              <span className="muted small">
-                {dbLabel(p.dialect)} · 테이블 {p.tableCount ?? 0}개 · {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ''}
-                {p.role && p.role !== 'owner' && ` · ${p.role === 'editor' ? '편집' : '보기'} 권한으로 참여`}
+      <section className="home-projects">
+        <div className="home-projects__head">
+          <h2>내 프로젝트{projects && projects.length > 0 && <span className="home-count">{projects.length}</span>}</h2>
+          {projects && projects.length > 0 && (
+            <div className="project-search">
+              <span className="project-search__box">
+                <Icon name="search" size={14} />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // 결과가 하나면 Enter로 바로 연다
+                    if (e.key === 'Enter' && shown.length === 1) location.hash = `#/p/${shown[0].id}`;
+                    if (e.key === 'Escape') setQuery('');
+                  }}
+                  placeholder="이름·DB 종류로 검색"
+                  aria-label="프로젝트 검색"
+                />
               </span>
-            </a>
-            {(!p.role || p.role === 'owner') && <button
-              className="icon-btn danger"
-              title="삭제"
-              onClick={async () => {
-                if (!confirm(`"${p.name}" 프로젝트를 삭제할까요? 버전과 제안도 함께 지워지며 되돌릴 수 없습니다.`)) return;
-                await projectApi.remove(p.id);
-                load();
-              }}
-            >
-              ×
-            </button>}
-          </li>
-        ))}
-      </ul>
+              <select value={sort} onChange={(e) => changeSort(e.target.value as SortKey)} aria-label="정렬">
+                <option value="recent">최근 수정순</option>
+                <option value="name">이름순</option>
+              </select>
+              {query.trim() && <span className="muted small">{shown.length}개</span>}
+            </div>
+          )}
+        </div>
+        {!projects && !error && <div className="home-loading muted small">불러오는 중…</div>}
+        {projects && projects.length === 0 && (
+          <div className="empty-state home-empty">
+            <span className="home-empty__icon" aria-hidden="true"><Icon name="table" size={22} /></span>
+            <b>아직 프로젝트가 없습니다</b>
+            <span>위에서 새로 만들거나, 만든 뒤 "DB에서 가져오기"로 기존 DB를 불러오세요.</span>
+          </div>
+        )}
+        {projects && projects.length > 0 && query.trim() && shown.length === 0 && (
+          <div className="empty-state">"{query.trim()}"에 맞는 프로젝트가 없습니다.</div>
+        )}
+        <ul className="project-list">
+          {shown.map((p) => (
+            <li key={p.id} className={`db-${p.dialect}`}>
+              <a href={`#/p/${p.id}`}>
+                <span className="project-card__mark" aria-hidden="true">{p.name.trim().slice(0, 1).toUpperCase() || 'E'}</span>
+                <span className="project-card__text">
+                  <b>{highlight(p.name, query)}</b>
+                  <span className="muted small">
+                    <span className="project-card__db">{dbLabel(p.dialect)}</span>
+                    <span className="project-card__meta">
+                      <Icon name="table" size={12} /> 테이블 {p.tableCount ?? 0}
+                      <span className="dot" />
+                      <span title={p.updatedAt ? new Date(p.updatedAt).toLocaleString() : undefined}>{ago(p.updatedAt)}</span>
+                      {p.role && p.role !== 'owner' && <span className="project-card__role">{p.role === 'editor' ? '편집 참여' : '보기 참여'}</span>}
+                    </span>
+                  </span>
+                </span>
+              </a>
+              {(!p.role || p.role === 'owner') && <button
+                className="icon-btn danger project-card__delete"
+                title="삭제"
+                aria-label={`${p.name} 삭제`}
+                onClick={async () => {
+                  if (!confirm(`"${p.name}" 프로젝트를 삭제할까요? 버전과 제안도 함께 지워지며 되돌릴 수 없습니다.`)) return;
+                  await projectApi.remove(p.id);
+                  load();
+                }}
+              >
+                <Icon name="trash" size={15} />
+              </button>}
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
     <NoticesPanel />
     </div>

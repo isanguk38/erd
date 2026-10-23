@@ -35,6 +35,11 @@ const PATHS: Record<string, string> = {
   alignRight: 'M4 6h16M10 10h10M4 14h16M10 18h10',
   alignJustify: 'M4 6h16M4 10h16M4 14h16M4 18h16',
   book: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  table: 'M4 5h16v14H4zM4 10h16M10 10v9',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7.5M22 21v-1a6 6 0 0 0-4-5.6',
+  megaphone: 'M3 10v4h4l7 5V5L7 10zM18 8a5 5 0 0 1 0 8',
+  shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',
 };
 
 export function Icon({ name, size = 16 }: { name: keyof typeof PATHS | string; size?: number }) {
