@@ -111,13 +111,32 @@ export function RichEditor({ value, onChange }: { value: string; onChange: (html
 }
 
 function Toolbar({ editor }: { editor: Editor }) {
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  // 이모지 판은 화면 기준 위치(편집 칸 밖으로 나가도 잘리지 않게, 오른쪽 끝이면 왼쪽으로 당김)
+  const [emojiAt, setEmojiAt] = useState<{ top: number; left: number } | null>(null);
+  const emojiOpen = emojiAt !== null;
   const emojiRef = useRef<HTMLDivElement>(null);
+  const toggleEmoji = () => {
+    if (emojiOpen) return setEmojiAt(null);
+    const r = emojiRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = 9 * 30 + 8 * 2 + 14; // 9칸 + 간격 + 안쪽 여백·테두리
+    setEmojiAt({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
+  };
+  const setEmojiOpen = (open: boolean) => !open && setEmojiAt(null);
   useEffect(() => {
     if (!emojiOpen) return;
     const close = (e: MouseEvent) => !emojiRef.current?.contains(e.target as Node) && setEmojiOpen(false);
+    // 스크롤·창 크기가 바뀌면 위치가 어긋나니 닫는다
+    const dismiss = () => setEmojiOpen(false);
     document.addEventListener('pointerdown', close, true);
-    return () => document.removeEventListener('pointerdown', close, true);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    return () => {
+      document.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emojiOpen]);
   const chain = () => editor.chain().focus();
   const btn = (label: ReactNode, title: string, run: () => void, active = false, className = '') => (
@@ -175,9 +194,9 @@ function Toolbar({ editor }: { editor: Editor }) {
       {btn('🔗', '링크', link, editor.isActive('link'))}
       {btn('🖼', '이미지 (주소)', image)}
       <span className="md-emoji" ref={emojiRef}>
-        {btn('😀', '이모지', () => setEmojiOpen(!emojiOpen))}
-        {emojiOpen && (
-          <span className="md-emoji__menu" role="menu">
+        {btn('😀', '이모지', toggleEmoji)}
+        {emojiAt && (
+          <span className="md-emoji__menu" role="menu" style={{ top: emojiAt.top, left: emojiAt.left }}>
             {EMOJIS.map((e) => (
               <button key={e} type="button" onMouseDown={(ev) => ev.preventDefault()} onClick={() => { chain().insertContent(e).run(); setEmojiOpen(false); }}>{e}</button>
             ))}

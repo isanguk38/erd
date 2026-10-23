@@ -1358,7 +1358,7 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .md-tool.i { font-style: italic; font-family: Georgia, serif; }
 .md-tool.s { text-decoration: line-through; }
 .md-emoji { position: relative; }
-.md-emoji__menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; display: grid; grid-template-columns: repeat(9, 30px); gap: 2px; padding: 6px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15); }
+.md-emoji__menu { position: fixed; z-index: 1000; display: grid; grid-template-columns: repeat(9, 30px); gap: 2px; padding: 6px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15); }
 .md-emoji__menu button { width: 30px; height: 30px; border: none; background: none; border-radius: 6px; cursor: pointer; font-size: 17px; }
 .md-emoji__menu button:hover { background: var(--accent-soft); }
 /* 글쓰기 칸은 넓게: 관리자 페이지 편집 쪽 폭을 더 */
