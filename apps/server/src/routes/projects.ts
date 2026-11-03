@@ -61,7 +61,8 @@ import { buildDefinitionXlsx } from '@erd/core/excel';
 import { getConnector } from '@erd/db';
 import type { ConnectionStore } from '../connections';
 import type { Origin, ProjectStore } from '../projects';
-import { DESKTOP_ONLY_MESSAGE, type Auth } from '../auth';
+import { DESKTOP_ONLY_MESSAGE, type Auth, type Role } from '../auth';
+import type { GroupStore } from '../groups';
 import { cleanDbLog, scrubSecret } from '../dbLog';
 
 const DIALECTS = Object.keys(dialects) as DialectId[];
@@ -88,6 +89,7 @@ export function registerProjectRoutes(
   executeLog: (entry: object) => void,
   auth: Auth,
   serverDb = true,
+  groups?: GroupStore,
 ) {
   const desktopOnly = () => Object.assign(new Error(DESKTOP_ONLY_MESSAGE), { statusCode: 403 });
   /**
@@ -242,19 +244,39 @@ export function registerProjectRoutes(
   });
 
   // ── 프로젝트 ─────────────────────────────
+  // 그룹 경로: 소유자의 그룹. 공유받은 사람에게는 경로 이름과 소유자 이름만 (같은 그룹의 다른 프로젝트는 목록에 없음)
+  const withGroup = <T extends { id: string; role: Role | null }>(p: T) => {
+    const groupPath = groups?.pathOf(p.id) ?? [];
+    const shared = p.role !== 'owner' && groupPath.length > 0;
+    const owner = shared ? auth.user(auth.access(p.id).ownerId) : null;
+    return { ...p, groupId: groupPath.at(-1)?.id ?? null, groupPath, ...(shared ? { groupOwner: owner?.name ?? owner?.login ?? '다른 사용자' } : {}) };
+  };
+
   app.get('/api/projects', async (req) =>
     store
       .list()
       .map((p) => ({ ...p, role: auth.role(p.id, req.user.id) }))
-      .filter((p) => p.role !== null),
+      .filter((p) => p.role !== null)
+      .map(withGroup),
   );
 
-  app.post<{ Body: { name?: string; dialect?: DialectId; schema?: Schema } }>('/api/projects', async (req) => {
+  app.post<{ Body: { name?: string; dialect?: DialectId; schema?: Schema; groupId?: string | null } }>('/api/projects', async (req) => {
     const dialect = req.body?.dialect ?? 'mysql';
     if (!DIALECTS.includes(dialect)) throw badRequest('DB 종류가 올바르지 않습니다');
+    const groupId = req.body?.groupId || null;
+    // 넣을 그룹이 내 그룹인지 먼저 확인 (프로젝트만 생기고 그룹에 못 들어가는 일이 없게)
+    if (groupId && groups?.get(groupId)?.ownerId !== req.user.id) throw Object.assign(new Error('그룹을 찾을 수 없습니다'), { statusCode: 404 });
     const project = store.create(req.body?.name?.trim() || '새 프로젝트', dialect, req.body?.schema ?? emptySchema());
     auth.initProject(project.id, req.user.id);
-    return { ...project, role: 'owner' };
+    if (groupId) groups?.place(project.id, groupId, req.user.id);
+    return withGroup({ ...project, role: 'owner' as Role });
+  });
+
+  /** 프로젝트를 그룹으로 옮기기 (소유자만, 내 그룹으로만. null이면 맨 위) */
+  app.put<{ Params: { id: string }; Body: { groupId?: string | null } }>('/api/projects/:id/group', async (req) => {
+    if (!groups) throw badRequest('그룹을 쓸 수 없습니다');
+    groups.place(req.params.id, req.body?.groupId || null, req.user.id);
+    return withGroup({ ...store.list().find((p) => p.id === req.params.id)!, role: 'owner' as Role });
   });
 
   app.get<{ Params: { id: string } }>('/api/projects/:id', async (req) => ({ ...store.get(req.params.id), role: auth.role(req.params.id, req.user.id) }));
@@ -311,6 +333,7 @@ export function registerProjectRoutes(
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req) => {
     store.remove(req.params.id);
+    groups?.forget(req.params.id);
     return { ok: true };
   });
 

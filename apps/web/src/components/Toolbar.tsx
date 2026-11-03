@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
+import { projectListHref } from './ProjectGroups';
 import { addToArea, areaSchema, getDialect, type ColumnTemplate } from '@erd/core';
 import { addTableWithTemplate, useTemplates } from '../lib/templates';
 import { useLintCount, useReviewPending } from './LintPanel';
@@ -208,7 +209,7 @@ export function Toolbar({ onOpen }: { onOpen: (dialog: DialogName) => void }) {
     <header className="toolbar">
       {/* 위: 이 프로젝트(이름·DB·표기) · 검색 · 함께 일하기(사람·댓글) · 프로젝트 전체(버전·추출) · AI·공유 · 화면·도움말 · 내 계정 */}
       <div className="topbar">
-        <a className="icon-btn back" href="#/" title="프로젝트 목록">
+        <a className="icon-btn back" href={projectListHref()} title="프로젝트 목록">
           <Icon name="back" size={18} />
         </a>
         <img className="app-logo" src="/favicon.svg" alt="" />

@@ -1600,3 +1600,56 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
   .admin-card { padding: 16px; }
   .admin-page .admin-users__table th:nth-child(3), .admin-page .admin-users__table td:nth-child(3) { display: none; }
 }
+
+/* ── 메인: 프로젝트 그룹 (폴더·경로·옮기기) ── */
+.group-trail { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: -4px 0 -6px; font-size: 13px; }
+.group-trail__step { display: inline-flex; align-items: center; gap: 2px; }
+.group-trail__sep { color: var(--border-strong); padding: 0 2px; }
+.group-trail__item { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px dashed transparent; border-radius: 8px; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.group-trail__item:hover { background: var(--soft); color: var(--text); }
+.group-trail__item.current { color: var(--text); font-weight: 700; }
+.group-shared { margin-left: 8px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: #0369a1; background: color-mix(in srgb, #0ea5e9 12%, transparent); }
+.home-create__where { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); }
+.home .home-newgroup { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; font-weight: 600; white-space: nowrap; }
+.group-new { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); color: var(--accent); }
+.projects-layout.home .group-new input { flex: 1; min-width: 0; height: 34px; }
+.group-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.group-card { position: relative; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 1px 2px rgb(15 23 42 / 0.04); transition: border-color .15s, box-shadow .15s, transform .15s; }
+.group-card:hover { border-color: color-mix(in srgb, #f59e0b 50%, var(--border)); box-shadow: 0 12px 28px -16px rgb(15 23 42 / 0.35); transform: translateY(-1px); }
+.group-card > a { display: flex; align-items: center; gap: 12px; padding: 14px 44px 14px 16px; text-decoration: none; color: inherit; }
+.group-card__icon { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 11px; color: #d97706; background: color-mix(in srgb, #f59e0b 14%, transparent); border: 1px solid color-mix(in srgb, #f59e0b 26%, transparent); }
+.group-card.shared .group-card__icon { color: #0284c7; background: color-mix(in srgb, #0ea5e9 12%, transparent); border-color: color-mix(in srgb, #0ea5e9 24%, transparent); }
+.group-card__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.group-card__text > b { font-size: 14.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-card__menu { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); }
+.group-card__menu > .btn { width: 30px; height: 30px; padding: 0; justify-content: center; border-color: transparent; background: none; }
+.group-card__menu > .btn:hover:not(:disabled) { background: var(--soft); }
+.group-card__menu .dropdown__menu { right: 0; left: auto; min-width: 190px; }
+/* 메뉴를 연 카드는 아래 카드(프로젝트 목록)보다 위에 (떠오르는 효과가 메뉴를 카드 안에 가두지 않게) */
+.group-card:hover, .group-card:focus-within, .group-card:has(.dropdown__menu) { z-index: 20; }
+.group-card__rename { display: flex; gap: 8px; padding: 12px; }
+.projects-layout.home .group-card__rename input { flex: 1; min-width: 0; height: 34px; }
+/* 끌어서 놓을 곳 */
+.group-card.drop-on, .group-trail__item.drop-on { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); box-shadow: var(--ring); }
+.home .project-list li[draggable='true'] { cursor: grab; }
+/* 프로젝트 카드: 옮기기·삭제 단추 (마우스를 올리면) */
+.project-card__actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
+.home .project-list li:hover .project-card__actions, .project-card__actions:focus-within { opacity: 1; }
+.project-card__actions .icon-btn { width: 28px; height: 28px; border-radius: 8px; }
+.project-card__actions .icon-btn:hover { background: var(--soft); }
+.project-card__actions .project-card__delete { position: static; opacity: 1; }
+.project-card__actions .project-card__delete:hover { background: var(--danger-soft); }
+@media (hover: none) { .project-card__actions { opacity: .75; } }
+.home .project-list a { padding-right: 76px; }
+.project-card__path { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 옮길 곳 고르기 */
+.group-pick { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow: auto; }
+.group-pick button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.group-pick button svg { color: #d97706; flex: none; }
+.group-pick button:first-child svg { color: var(--muted); }
+.group-pick button:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.group-pick button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); font-weight: 600; }
+.group-pick button .muted { margin-left: auto; }
+@media (max-width: 640px) {
+  .home .home-newgroup { flex: none; }
+}

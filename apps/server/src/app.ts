@@ -8,6 +8,8 @@ import { getConnector, validateChecks, type ConnectionConfig } from '@erd/db';
 import { ConnectionStore, toConfig, type ConnectionInput } from './connections';
 import { ProjectStore } from './projects';
 import { registerProjectRoutes } from './routes/projects';
+import { registerGroupRoutes } from './routes/groups';
+import { GroupStore } from './groups';
 import { registerAuthRoutes, requiredRole } from './routes/auth';
 import { registerTemplateRoutes } from './routes/templates';
 import { registerDesktopRoutes } from './routes/desktop';
@@ -130,6 +132,7 @@ export function buildApp(options: AppOptions): ErdApp {
   const serverDb = options.serverDb ?? !auth.enabled;
   const dbJobs = new DbJobQueue(options.dbJobPickupMs);
   const projects = new ProjectStore(storage);
+  const groups = new GroupStore(storage);
   const mcpToken = loadMcpToken(storage, options.mcpToken);
   const adminOwners = (options.adminOwners ?? []).map((s) => s.trim().replace(/^@/, '')).filter(Boolean);
   const admins = new AdminStore(storage, adminOwners, !auth.enabled);
@@ -257,7 +260,8 @@ export function buildApp(options: AppOptions): ErdApp {
     return n ? { notes: n.body, format: n.format ?? 'markdown' } : null;
   });
   registerAdminRoutes(app, admins, notices, auth, { publicUrl, owners: adminOwners });
-  registerProjectRoutes(app, projects, store, writeLog, auth, serverDb);
+  registerProjectRoutes(app, projects, store, writeLog, auth, serverDb, groups);
+  registerGroupRoutes(app, groups, projects);
   // AI가 요청한 DB 작업은 사용자의 앱이 가져가 처리한다 (웹 서비스는 DB에 직접 접속하지 않음)
   registerDbJobRoutes(app, dbJobs, auth);
   registerMcpRoute(app, { auth, localToken: mcpToken, webUrl: publicUrl });

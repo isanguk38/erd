@@ -171,6 +171,7 @@ export function registerAuthRoutes(app: FastifyInstance, auth: Auth, projects: P
 export function requiredRole(method: string, routeUrl: string): Role {
   const owner = [
     'DELETE /api/projects/:id',
+    'PUT /api/projects/:id/group',
     'POST /api/projects/:id/shares',
     'DELETE /api/projects/:id/shares/:token',
     'PATCH /api/projects/:id/members/:userId',

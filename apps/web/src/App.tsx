@@ -68,7 +68,7 @@ const storage = {
   },
 };
 
-/** 주소: #/ → 프로젝트 목록, #/p/<id> → 편집기, #/join/<token> → 초대 링크 */
+/** 주소: #/ → 프로젝트 목록, #/g/<id> → 그 그룹의 목록, #/p/<id> → 편집기, #/join/<token> → 초대 링크 */
 function useHash(): string {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
@@ -135,7 +135,7 @@ export function App() {
   const projectId = hash.match(/^#\/p\/([a-zA-Z0-9-]+)/)?.[1];
   // AI가 요청한 DB 작업은 DB에 접속할 수 있는 앱(설치형 앱·로컬 모드)이 처리한다
   const runner = desktop || me.serverDb !== false ? <AiDbJobRunner /> : null;
-  if (!projectId) return <>{runner}<ProjectsPage /></>;
+  if (!projectId) return <>{runner}<ProjectsPage groupId={hash.match(/^#\/g\/([a-zA-Z0-9-]+)/)?.[1] ?? null} /></>;
   return <>{runner}<Editor key={projectId} projectId={projectId} /></>;
 }
 

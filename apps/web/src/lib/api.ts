@@ -99,7 +99,31 @@ export interface ProjectInfo {
   tableCount: number;
   createdAt: string;
   updatedAt: string;
+  /** 들어 있는 그룹 (소유자의 그룹, 없으면 맨 위) */
+  groupId?: string | null;
+  /** 그룹 경로 (맨 위 → 바로 위 그룹) */
+  groupPath?: { id: string; name: string }[];
+  /** 공유받은 프로젝트면 그 그룹 주인 이름 */
+  groupOwner?: string;
 }
+
+/** 프로젝트 그룹 (폴더, 그룹 안에 하위 그룹) */
+export interface GroupInfo {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const groupApi = {
+  list: () => request<GroupInfo[]>('GET', '/api/groups'),
+  create: (name: string, parentId: string | null) => request<GroupInfo>('POST', '/api/groups', { name, parentId }),
+  update: (id: string, patch: { name?: string; parentId?: string | null }) => request<GroupInfo>('PATCH', `/api/groups/${id}`, patch),
+  remove: (id: string) => request<{ ok: true }>('DELETE', `/api/groups/${id}`),
+  /** 프로젝트를 그룹으로 옮기기 (null이면 맨 위) */
+  place: (projectId: string, groupId: string | null) => request<ProjectInfo>('PUT', `/api/projects/${projectId}/group`, { groupId }),
+};
 
 export interface VersionInfo {
   id: string;
@@ -173,7 +197,7 @@ export const projectApi = {
   get: (id: string) => request<{ meta: { name: string; dialect: DialectId; dbConnectionId?: string | null; aiMode?: 'apply' | 'propose' }; schema: Schema }>('GET', `/api/projects/${id}`),
   /** 그 프로젝트의 표준 용어 사전 (없으면 null) */
   dictionary: (id: string) => request<{ dictionary: Dictionary | null }>('GET', `/api/projects/${id}/dictionary`),
-  create: (body: { name: string; dialect: DialectId; schema?: Schema }) => request<ProjectInfo>('POST', '/api/projects', body),
+  create: (body: { name: string; dialect: DialectId; schema?: Schema; groupId?: string | null }) => request<ProjectInfo>('POST', '/api/projects', body),
   remove: (id: string) => request<{ ok: true }>('DELETE', `/api/projects/${id}`),
   update: (id: string, patch: { aiMode?: 'apply' | 'propose'; aiAllowDbExecute?: boolean }) => request('PATCH', `/api/projects/${id}`, patch),
 
