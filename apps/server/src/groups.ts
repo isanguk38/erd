@@ -11,6 +11,8 @@ export interface Group {
   name: string;
   /** 위 그룹 (없으면 맨 위) */
   parentId: string | null;
+  /** 폴더 색 (#rrggbb, 없으면 기본색) */
+  color?: string;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -19,6 +21,7 @@ export interface Group {
 export interface GroupPathItem {
   id: string;
   name: string;
+  color?: string;
 }
 
 const groupKey = (id: string) => `groups/${id}.json`;
@@ -61,28 +64,41 @@ export class GroupStore {
     return n;
   }
 
+  /** 색: #rrggbb, null·빈 값이면 기본색으로 */
+  private cleanColor(color: unknown): string | undefined {
+    if (color === null || color === '') return undefined;
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) throw fail('색은 #rrggbb 형식이어야 합니다');
+    return color.toLowerCase();
+  }
+
   private depth(id: string | null): number {
     let d = 0;
     for (let g = id ? this.get(id) : null; g; g = g.parentId ? this.get(g.parentId) : null) d++;
     return d;
   }
 
-  create(input: { name?: unknown; parentId?: unknown }, ownerId: string): Group {
+  create(input: { name?: unknown; parentId?: unknown; color?: unknown }, ownerId: string): Group {
     const parentId = typeof input.parentId === 'string' && input.parentId ? this.mine(input.parentId, ownerId).id : null;
     if (this.depth(parentId) >= MAX_DEPTH) throw fail(`그룹은 ${MAX_DEPTH}단계까지 만들 수 있습니다`);
     const name = this.cleanName(input.name);
     if (this.list(ownerId).some((g) => g.parentId === parentId && g.name === name)) throw fail(`같은 곳에 "${name}" 그룹이 이미 있습니다`);
     const now = new Date().toISOString();
-    const group: Group = { id: randomUUID(), name, parentId, ownerId, createdAt: now, updatedAt: now };
+    const color = input.color === undefined ? undefined : this.cleanColor(input.color);
+    const group: Group = { id: randomUUID(), name, parentId, ...(color ? { color } : {}), ownerId, createdAt: now, updatedAt: now };
     putJson(this.storage, groupKey(group.id), group);
     return group;
   }
 
   /** 이름 바꾸기·옮기기 (자기 자신이나 하위 그룹 안으로는 못 옮김) */
-  update(id: string, input: { name?: unknown; parentId?: unknown }, ownerId: string): Group {
+  update(id: string, input: { name?: unknown; parentId?: unknown; color?: unknown }, ownerId: string): Group {
     const g = this.mine(id, ownerId);
     const next = { ...g };
     if (input.name !== undefined) next.name = this.cleanName(input.name);
+    if (input.color !== undefined) {
+      const color = this.cleanColor(input.color);
+      if (color) next.color = color;
+      else delete next.color;
+    }
     if (input.parentId !== undefined) {
       const parentId = typeof input.parentId === 'string' && input.parentId ? this.mine(input.parentId, ownerId).id : null;
       for (let p = parentId ? this.get(parentId) : null; p; p = p.parentId ? this.get(p.parentId) : null) {
@@ -137,7 +153,7 @@ export class GroupStore {
   pathOf(projectId: string): GroupPathItem[] {
     const path: GroupPathItem[] = [];
     for (let g = this.get(this.groupOf(projectId) ?? ''); g && path.length < MAX_DEPTH + 1; g = g.parentId ? this.get(g.parentId) : null) {
-      path.unshift({ id: g.id, name: g.name });
+      path.unshift({ id: g.id, name: g.name, ...(g.color ? { color: g.color } : {}) });
     }
     return path;
   }

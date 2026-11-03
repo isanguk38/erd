@@ -6,6 +6,7 @@ export { registerErdTools, httpApi, type ErdApi, type ToolOptions } from './tool
 const INSTRUCTIONS = [
   'ERD(데이터베이스 설계도) 도구입니다.',
   '작업 순서: list_projects로 프로젝트를 찾고, get_schema로 지금 구조를 확인한 뒤, edit_schema로 고칩니다.',
+  '프로젝트는 그룹(폴더, "회사 / 쇼핑몰"처럼 하위 그룹도)에 들어 있을 수 있습니다. list_projects의 group에 경로가 나오고, 사용자가 그룹을 말하면 create_project의 group으로 그 그룹 안에 만듭니다 (그룹은 사용자가 ERD 메인 화면에서 만듭니다).',
   'FK는 addRelation으로 만들면 자식 테이블에 FK 컬럼이 자동으로 생깁니다. 외래키 이름은 겹치지 않게 자동으로 정해집니다 (fk_자식_부모, 이미 있으면 fk_자식_FK컬럼). check_design에 "외래키 이름 겹침"이 나오면 updateRelation(newName)으로 안내한 이름으로 바꿉니다.',
   '테이블과 컬럼에는 한글 논리명(logicalName)도 함께 넣어 주세요.',
   'DB로 내보내기(db_push): 사용자의 ERD 앱이 DB에 접속해 실행합니다 (앱이 켜져 있어야 함). DB 실행은 되돌리기 어려워 프로젝트 AI 모드와 상관없이 항상 사용자가 앱에서 SQL을 보고 승인해야 실행됩니다 (승인을 기다리면 db_job_result로 결과 확인). 가져오기(db_pull)는 AI 모드를 따릅니다. 테이블·타입 삭제(DROP)는 사용자가 원할 때만 include_drop=true로 넣습니다. 실패하면 결과의 failedStatements.diagnosis(원인·조치·누가 고칠지)를 보고, AI가 고칠 수 있는 것은 edit_schema로 고친 뒤 다시 db_push하고, 사람이 해야 하는 것(데이터 정리·DB 확장·권한)은 사용자에게 알립니다.',

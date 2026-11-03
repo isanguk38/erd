@@ -98,6 +98,21 @@ describe('프로젝트 그룹', () => {
     expect((await a('PUT', `/api/projects/${shared.id}/group`, { groupId: mine.id })).status).toBe(404);
   });
 
+  it('그룹 색: #rrggbb로 정하고, 지우면 기본색, 공유받은 사람의 경로에도 색', async () => {
+    const { app } = setup();
+    const a = await login(app, 'alice');
+    const b = await login(app, 'bob');
+    const g = (await a('POST', '/api/groups', { name: '회사', color: '#2563EB' })).body;
+    expect(g.color).toBe('#2563eb');
+    expect((await a('PATCH', `/api/groups/${g.id}`, { color: 'blue' })).body.error).toMatch(/#rrggbb/);
+    expect((await a('PATCH', `/api/groups/${g.id}`, { color: '#16a34a' })).body.color).toBe('#16a34a');
+    const p = (await a('POST', '/api/projects', { name: '주문', groupId: g.id })).body;
+    const share = (await a('POST', `/api/projects/${p.id}/shares`, { role: 'viewer' })).body;
+    await b('POST', `/api/join/${share.token}`);
+    expect((await b('GET', '/api/projects')).body[0].groupPath).toEqual([{ id: g.id, name: '회사', color: '#16a34a' }]);
+    expect((await a('PATCH', `/api/groups/${g.id}`, { color: null })).body).not.toHaveProperty('color');
+  });
+
   it('로컬 모드(로그인 없음)에서도 쓸 수 있다', async () => {
     const { app } = setup(false);
     const g = (await app.inject({ method: 'POST', url: '/api/groups', payload: { name: '회사' } })).json();

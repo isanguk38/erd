@@ -6,8 +6,8 @@ import type { ProjectStore } from '../projects';
 
 export function registerGroupRoutes(app: FastifyInstance, groups: GroupStore, projects: ProjectStore) {
   app.get('/api/groups', async (req) => groups.list(req.user.id));
-  app.post<{ Body: { name?: string; parentId?: string | null } }>('/api/groups', async (req) => groups.create(req.body ?? {}, req.user.id));
-  app.patch<{ Params: { gid: string }; Body: { name?: string; parentId?: string | null } }>('/api/groups/:gid', async (req) =>
+  app.post<{ Body: { name?: string; parentId?: string | null; color?: string | null } }>('/api/groups', async (req) => groups.create(req.body ?? {}, req.user.id));
+  app.patch<{ Params: { gid: string }; Body: { name?: string; parentId?: string | null; color?: string | null } }>('/api/groups/:gid', async (req) =>
     groups.update(req.params.gid, req.body ?? {}, req.user.id),
   );
   app.delete<{ Params: { gid: string } }>('/api/groups/:gid', async (req) => {

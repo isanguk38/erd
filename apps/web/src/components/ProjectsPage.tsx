@@ -9,7 +9,7 @@ import { DesktopUpdateButton } from './DesktopUpdate';
 import { NoticesPanel } from './NoticesPanel';
 import { useAdminRole } from '../lib/notices';
 import { Dropdown, Icon } from './ui';
-import { buildGroupNodes, groupTrail, LAST_GROUP_KEY, MoveDialog } from './ProjectGroups';
+import { buildGroupNodes, GroupColorDialog, groupColorStyle, groupTrail, LAST_GROUP_KEY, MoveDialog } from './ProjectGroups';
 
 type SortKey = 'recent' | 'name';
 const SORT_KEY = 'erd.projectSort';
@@ -71,6 +71,7 @@ export function ProjectsPage({ groupId = null }: { groupId?: string | null }) {
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [moving, setMoving] = useState<{ kind: 'project' | 'group'; id: string; name: string; current: string | null } | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
+  const [coloring, setColoring] = useState<{ id: string; name: string; color?: string } | null>(null);
   const adminRole = useAdminRole();
   const changeSort = (next: SortKey) => {
     setSort(next);
@@ -326,7 +327,8 @@ export function ProjectsPage({ groupId = null }: { groupId?: string | null }) {
               return (
                 <li
                   key={g.id}
-                  className={`group-card${g.sharedBy ? ' shared' : ''}${dropClass(g.id)}`}
+                  className={`group-card${g.sharedBy ? ' shared' : ''}${g.color ? ' colored' : ''}${dropClass(g.id)}`}
+                  style={groupColorStyle(g.color)}
                   draggable={mine && renaming?.id !== g.id}
                   onDragStart={(e) => e.dataTransfer.setData(DRAG_GROUP, g.id)}
                   {...(mine ? dropProps(g.id) : {})}
@@ -363,6 +365,7 @@ export function ProjectsPage({ groupId = null }: { groupId?: string | null }) {
                       title="그룹 메뉴"
                       items={[
                         { label: '이름 바꾸기', icon: 'edit', onClick: () => setRenaming({ id: g.id, name: g.name }) },
+                        { label: '색 바꾸기', icon: 'palette', onClick: () => setColoring({ id: g.id, name: g.name, color: g.color }) },
                         { label: '다른 그룹으로 옮기기', icon: 'move', onClick: () => setMoving({ kind: 'group', id: g.id, name: g.name, current: g.parentId }) },
                         {
                           label: '그룹 삭제',
@@ -446,6 +449,17 @@ export function ProjectsPage({ groupId = null }: { groupId?: string | null }) {
           ))}
         </ul>
       </section>
+      {coloring && (
+        <GroupColorDialog
+          name={coloring.name}
+          color={coloring.color}
+          onSave={async (color) => {
+            await groupApi.update(coloring.id, { color });
+            await load();
+          }}
+          onClose={() => setColoring(null)}
+        />
+      )}
       {moving && (
         <MoveDialog
           title={`"${moving.name}" 옮기기`}

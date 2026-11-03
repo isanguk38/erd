@@ -102,7 +102,7 @@ export interface ProjectInfo {
   /** 들어 있는 그룹 (소유자의 그룹, 없으면 맨 위) */
   groupId?: string | null;
   /** 그룹 경로 (맨 위 → 바로 위 그룹) */
-  groupPath?: { id: string; name: string }[];
+  groupPath?: { id: string; name: string; color?: string }[];
   /** 공유받은 프로젝트면 그 그룹 주인 이름 */
   groupOwner?: string;
 }
@@ -112,6 +112,8 @@ export interface GroupInfo {
   id: string;
   name: string;
   parentId: string | null;
+  /** 폴더 색 (#rrggbb, 없으면 기본색) */
+  color?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,7 +121,7 @@ export interface GroupInfo {
 export const groupApi = {
   list: () => request<GroupInfo[]>('GET', '/api/groups'),
   create: (name: string, parentId: string | null) => request<GroupInfo>('POST', '/api/groups', { name, parentId }),
-  update: (id: string, patch: { name?: string; parentId?: string | null }) => request<GroupInfo>('PATCH', `/api/groups/${id}`, patch),
+  update: (id: string, patch: { name?: string; parentId?: string | null; color?: string | null }) => request<GroupInfo>('PATCH', `/api/groups/${id}`, patch),
   remove: (id: string) => request<{ ok: true }>('DELETE', `/api/groups/${id}`),
   /** 프로젝트를 그룹으로 옮기기 (null이면 맨 위) */
   place: (projectId: string, groupId: string | null) => request<ProjectInfo>('PUT', `/api/projects/${projectId}/group`, { groupId }),

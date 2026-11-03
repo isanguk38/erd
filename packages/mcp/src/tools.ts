@@ -20,7 +20,19 @@ export interface ToolOptions {
   canWriteFiles: boolean;
 }
 
-interface ProjectInfo { id: string; name: string; dialect: string; tableCount: number; updatedAt: string }
+interface ProjectInfo { id: string; name: string; dialect: string; tableCount: number; updatedAt: string; role?: string | null; groupPath?: { id: string; name: string }[]; groupOwner?: string }
+interface GroupInfo { id: string; name: string; parentId: string | null }
+
+/** 그룹 경로를 "회사 / 쇼핑몰"처럼 (맨 위면 없음) */
+const groupText = (p: ProjectInfo) => (p.groupPath?.length ? p.groupPath.map((g) => g.name).join(' / ') : undefined);
+
+/** 내 그룹을 "회사 / 쇼핑몰" 경로로 찾기 (앞뒤 공백·/ 주변 띄어쓰기 무시) */
+function findGroup(groups: GroupInfo[], path: string): GroupInfo | undefined {
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const full = (g: GroupInfo): string => (g.parentId && byId.get(g.parentId) ? `${full(byId.get(g.parentId)!)}/${g.name}` : g.name);
+  const want = path.split('/').map((x) => x.trim()).filter(Boolean).join('/');
+  return groups.find((g) => full(g) === want) ?? groups.find((g) => g.id === path.trim());
+}
 
 const referentialAction = z.enum(['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']);
 
@@ -314,20 +326,45 @@ export function registerErdTools(server: McpServer, api: ErdApi, options: ToolOp
 
   server.registerTool(
     'list_projects',
-    { title: 'ERD 프로젝트 목록', description: 'ERD 프로젝트 목록을 보여준다.', inputSchema: {}, annotations: { readOnlyHint: true } },
-    safe(async () => text(await api.request('GET', '/api/projects'))),
+    {
+      title: 'ERD 프로젝트 목록',
+      description: 'ERD 프로젝트 목록을 보여준다. group은 프로젝트가 들어 있는 그룹(폴더) 경로("회사 / 쇼핑몰", 맨 위면 없음). 공유받은 프로젝트는 groupOwner에 그 그룹 주인이 나온다.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    safe(async () => {
+      const list = await api.request<ProjectInfo[]>('GET', '/api/projects');
+      return text(
+        list.map(({ groupPath, ...p }) => {
+          const group = groupText({ ...p, groupPath });
+          return group ? { ...p, group } : p;
+        }),
+      );
+    }),
   );
 
   server.registerTool(
     'create_project',
     {
       title: 'ERD 프로젝트 만들기',
-      description: '빈 ERD 프로젝트를 만든다.',
-      inputSchema: { name: z.string(), dialect: dialectArg.optional() },
+      description: '빈 ERD 프로젝트를 만든다. group을 주면 그 그룹(폴더) 안에 만든다 (예: "회사 / 쇼핑몰", 이미 있는 내 그룹만. list_projects의 group 경로와 같은 표기).',
+      inputSchema: { name: z.string(), dialect: dialectArg.optional(), group: z.string().optional().describe('넣을 그룹 경로 (예: "회사 / 쇼핑몰"). 생략하면 맨 위') },
     },
-    safe(async ({ name, dialect }: { name: string; dialect?: string }) => {
-      const p = await api.request<ProjectInfo>('POST', '/api/projects', { name, dialect: dialect ?? 'mysql' });
-      return text({ ...p, url: link(p.id) });
+    safe(async ({ name, dialect, group }: { name: string; dialect?: string; group?: string }) => {
+      let groupId: string | undefined;
+      if (group?.trim()) {
+        const groups = await api.request<GroupInfo[]>('GET', '/api/groups');
+        const found = findGroup(groups, group);
+        if (!found) {
+          const byId = new Map(groups.map((g) => [g.id, g]));
+          const full = (g: GroupInfo): string => (g.parentId && byId.get(g.parentId) ? `${full(byId.get(g.parentId)!)} / ${g.name}` : g.name);
+          throw new Error(`"${group}" 그룹이 없습니다. 있는 그룹: ${groups.map(full).sort((x, y) => x.localeCompare(y, 'ko')).join(', ') || '(없음 — 그룹은 ERD 메인 화면에서 만듭니다)'}`);
+        }
+        groupId = found.id;
+      }
+      const { groupPath, ...p } = await api.request<ProjectInfo>('POST', '/api/projects', { name, dialect: dialect ?? 'mysql', ...(groupId ? { groupId } : {}) });
+      const where = groupText({ ...p, groupPath });
+      return text({ ...p, ...(where ? { group: where } : {}), url: link(p.id) });
     }),
   );
 

@@ -485,6 +485,28 @@ describe('MCP', () => {
     expect(list.map((p: { name: string }) => p.name)).toEqual(['remote']);
     await client.close();
   });
+  it('그룹: 목록에 그룹 경로, 그룹 안에 프로젝트 만들기, 없는 그룹이면 있는 그룹을 알려 준다', async () => {
+    const { erd, url } = await start();
+    const company = (await erd.app.inject({ method: 'POST', url: '/api/groups', payload: { name: '회사' } })).json();
+    await erd.app.inject({ method: 'POST', url: '/api/groups', payload: { name: '쇼핑몰', parentId: company.id } });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createErdMcpServer(httpApi(url), { canWriteFiles: false });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    const call = async (name: string, args: Record<string, unknown>) => textOf(await client.callTool({ name, arguments: args }));
+
+    const created = JSON.parse(await call('create_project', { name: '주문', group: '회사/ 쇼핑몰' }));
+    expect(created).toMatchObject({ name: '주문', group: '회사 / 쇼핑몰' });
+    expect(created).not.toHaveProperty('groupPath');
+    await call('create_project', { name: '맨 위' });
+    const list = JSON.parse(await call('list_projects', {}));
+    expect(list.find((p: { name: string }) => p.name === '주문').group).toBe('회사 / 쇼핑몰');
+    expect(list.find((p: { name: string }) => p.name === '맨 위')).not.toHaveProperty('group');
+    expect(await call('create_project', { name: 'x', group: '없는 그룹' })).toMatch(/"없는 그룹" 그룹이 없습니다\. 있는 그룹: 회사, 회사 \/ 쇼핑몰/);
+    await client.close();
+  });
+
   it('DB 작업 오류: 화면이 남긴 실패 기록을 AI가 읽고, 실패한 SQL에 나온 테이블 정의를 함께 받는다', async () => {
     const { erd, url } = await start();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
