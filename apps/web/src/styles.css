@@ -1661,3 +1661,97 @@ body.area-picking .area-tab[data-area-tab]:not(.active) { outline: 1.5px dashed 
 .group-color .muted { margin: 0; }
 /* 그룹의 "기본"은 주황 폴더 (테이블 기본색인 테마 색이 아니라) */
 .group-color .color-chip--default { background: #f59e0b !important; }
+
+/* ── 다듬기: 메인·관리자 화면을 조용하게 ──
+   바탕·카드·글자는 회색 단계와 얇은 선으로, 색은 뜻이 있는 곳에만 (DB 종류 점, 사용자가 고른 그룹 색, 주요 단추 하나).
+   빛 번짐·색 그림자·떠오르는 효과·알록달록한 배지는 쓰지 않는다 */
+.projects-layout.home, .admin-page {
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  --line: color-mix(in srgb, var(--text) 9%, transparent);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.projects-layout.home { background: none; }
+.projects-layout.home .btn-primary, .admin-page .btn-primary { box-shadow: none; }
+.home-logo { width: 40px; height: 40px; filter: none; }
+.home .projects-page__head h1, .admin-page__head h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.home h2 { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.home-count { min-width: 0; height: auto; padding: 0; background: none; color: var(--muted); font-weight: 400; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* 카드: 그림자·떠오름 대신 얇은 선, 마우스를 올리면 선만 진하게 */
+.home-card { border-color: var(--line); border-radius: 12px; box-shadow: var(--surface-shadow); }
+.home .project-list, .group-list { gap: 8px; }
+.home .project-list li, .group-card { border-color: var(--line); border-radius: 12px; box-shadow: none; transform: none; transition: border-color 160ms var(--ease), background-color 160ms var(--ease); }
+.home .project-list li:hover, .group-card:hover { border-color: var(--border-strong); box-shadow: none; transform: none; }
+.home .project-list a { gap: 0; padding: 16px 76px 16px 20px; }
+.project-card__text { gap: 6px; }
+.project-card__text > b, .group-card__text > b { font-size: 15px; font-weight: 500; }
+/* DB 종류: 색은 점 하나에만 (프로젝트 카드의 표시) */
+.project-card__db { display: inline-flex; align-items: center; gap: 6px; padding: 0; border-radius: 0; background: none; color: var(--text); font-size: 12px; font-weight: 500; opacity: 0.8; }
+.db-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--db); flex: none; }
+.project-card__text > .muted { gap: 8px; }
+.project-card__meta { font-variant-numeric: tabular-nums; }
+.project-card__role { margin-left: 4px; padding: 0; background: none; color: var(--muted); font-size: 12px; }
+.project-card__role::before { content: '·'; margin-right: 6px; }
+.project-card__path { font-size: 12px; }
+
+/* 그룹 폴더: 사용자가 고른 색은 아이콘에만, 바탕은 연하게 */
+.group-card > a { padding: 16px 44px 16px 16px; }
+.group-card__icon { width: 36px; height: 36px; border: none; border-radius: 8px; background: color-mix(in srgb, var(--gc, #f59e0b) 10%, transparent); }
+.group-card.shared:not(.colored) .group-card__icon { border: none; }
+.group-card__text { gap: 4px; }
+.group-card__text .muted { font-variant-numeric: tabular-nums; }
+.home-create__where { margin-left: 8px; padding: 0; background: none; color: var(--muted); font-weight: 400; font-size: 13px; }
+.home-create__where::before { content: '→'; margin-right: 2px; }
+.group-shared { padding: 0; background: none; color: var(--muted); font-weight: 400; font-size: 12px; }
+
+/* 새 소식: 배지 대신 점과 글자 */
+.home .notices-panel { padding: 16px 12px 8px; border-color: var(--line); border-radius: 12px; box-shadow: var(--surface-shadow); }
+.home .notices-panel__head { gap: 8px; margin: 0 8px 8px; }
+.notices-panel__unseen { min-width: 0; height: auto; padding: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.home .notices-panel .notice-list { gap: 0; }
+.home .notices-panel .notice-item { border-radius: 8px; }
+.home .notices-panel .notice-item.pinned, .home .notices-panel .notice-item.pinned.open { background: none; }
+.home .notices-panel .notice-item__head { grid-template-columns: auto 1fr auto; grid-template-areas: 'title new chev' 'excerpt excerpt chev' 'kind kind chev'; row-gap: 4px; column-gap: 8px; padding: 12px 8px; border-radius: 8px; }
+.home .notices-panel .notice-item + .notice-item { border-top: 1px solid var(--line); border-radius: 0; }
+.home .notices-panel .notice-item__head:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.home .notices-panel .notice-item__title { font-size: 14px; font-weight: 500; line-height: 20px; }
+.home .notices-panel .notice-item__excerpt { font-size: 13px; line-height: 20px; }
+.home .notices-panel .notice-item__date { display: none; }
+.home .notices-panel .notice-item__chev { opacity: 0.5; }
+.home .notices-panel .notice-item__head:hover .notice-item__chev { opacity: 1; color: var(--muted); }
+/* 종류: 작은 점 + 글자, 날짜는 같은 줄에 */
+.home .notice-kind, .admin-page .notice-kind, .notice-reader-modal .notice-kind { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0; border: none; border-radius: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; }
+.home .notice-kind::before, .admin-page .notice-kind::before, .notice-reader-modal .notice-kind::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--k, var(--muted)); }
+.notice-kind.kind-notice { --k: #d97706; }
+.notice-kind.kind-web { --k: #2563eb; }
+.notice-kind.kind-app { --k: #059669; }
+.home .notices-panel .notice-kind::after { content: attr(data-date); }
+.notice-new { grid-area: new; align-self: center; width: 8px; height: 8px; padding: 0; border-radius: 50%; background: var(--accent); }
+.notice-pin { display: inline-flex; vertical-align: -1px; margin-right: 4px; color: var(--muted); }
+/* 읽기 창 */
+.notice-reader__meta .notice-kind { padding: 0; }
+.notice-reader__pinned { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.notice-reader__title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* 관리자 */
+.admin-role { margin-left: 8px; padding: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 400; letter-spacing: 0; }
+.admin-role.owner { background: none; color: var(--muted); }
+.admin-page .admin-notices__list > .btn-primary { font-weight: 500; }
+.admin-page .admin-notice-row { padding: 12px 16px; border-color: var(--line); box-shadow: none; transition: border-color 160ms var(--ease); }
+.admin-page .admin-notice-row:hover { border-color: var(--border-strong); box-shadow: none; }
+.admin-page .admin-notice-row.active { border-color: var(--accent); box-shadow: none; background: var(--panel); }
+.admin-page .admin-notice-row__title { grid-area: title; font-weight: 500; }
+/* 글 목록 줄: 첫 줄 제목·상태, 둘째 줄 종류·날짜·쓴 사람 */
+.admin-page .admin-notice-row { grid-template-columns: auto 1fr auto; grid-template-areas: 'title title status' 'kind meta meta'; column-gap: 8px; row-gap: 4px; }
+.admin-page .admin-notice-row .notice-kind { grid-area: kind; }
+.admin-page .admin-notice-row .admin-status { grid-area: status; justify-self: end; align-self: start; }
+.admin-page .admin-notice-row .muted { grid-area: meta; grid-column: auto; font-size: 12px; }
+.admin-page .admin-notice-row .muted::before { content: '·'; margin-right: 8px; }
+.admin-page .admin-status { display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; font-size: 12px; font-weight: 400; color: var(--muted); }
+.admin-page .admin-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+.admin-page .admin-status.on::before { background: #16a34a; }
+.admin-page .admin-notices__edit, .admin-card { border-color: var(--line); border-radius: 12px; box-shadow: var(--surface-shadow); }
+.admin-page .admin-admins h3 { font-size: 15px; font-weight: 600; }
+.admin-avatar, .admin-avatar.owner { background: #475569; }
+.admin-page .admin-provider { padding: 0; border: none; border-radius: 0; color: var(--muted); font-weight: 400; font-size: 12px; }
+.admin-page .admin-provider.p-github, .admin-page .admin-provider.p-microsoft { color: var(--muted); border: none; }

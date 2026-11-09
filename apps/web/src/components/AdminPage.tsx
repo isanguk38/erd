@@ -28,10 +28,12 @@ export function AdminPage() {
       <header className="admin-page__head">
         <a className="icon-btn back" href="#/" title="프로젝트 목록" aria-label="프로젝트 목록"><Icon name="back" size={18} /></a>
         <div className="admin-page__title">
-          <h1>관리자</h1>
+          <h1>
+            관리자
+            {role && <span className="admin-role">{role === 'owner' ? '주인' : '관리자'}</span>}
+          </h1>
           <span className="muted small">공지사항·업데이트 소식{role === 'owner' ? '과 관리자를' : '을'} 관리합니다</span>
         </div>
-        {role && <span className={`admin-role${role === 'owner' ? ' owner' : ''}`}><Icon name="shield" size={12} />{role === 'owner' ? '주인' : '관리자'}</span>}
         <span className="spacer" />
         <UserMenu />
       </header>
@@ -96,7 +98,7 @@ function NoticesAdmin() {
               <li key={n.id}>
                 <button className={`admin-notice-row${editing?.id === n.id ? ' active' : ''}`} onClick={() => pick(n)}>
                   <span className={`notice-kind kind-${n.kind}`}>{n.kind === 'app' && n.version ? `앱 ${n.version}` : NOTICE_KIND_LABEL[n.kind]}</span>
-                  <span className="admin-notice-row__title">{n.pinned && '📌 '}{n.title}</span>
+                  <span className="admin-notice-row__title">{n.pinned && <span className="notice-pin" title="위에 고정"><Icon name="pin" size={12} /></span>}{n.title}</span>
                   <span className={`admin-status ${n.published ? 'on' : 'off'}`}>{n.published ? '게시' : '임시'}</span>
                   <span className="muted small">{when(n.publishedAt ?? n.updatedAt)} · {n.updatedBy}</span>
                 </button>

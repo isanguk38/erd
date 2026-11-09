@@ -406,13 +406,12 @@ export function ProjectsPage({ groupId = null }: { groupId?: string | null }) {
           {shown.map((p) => (
             <li key={p.id} className={`db-${p.dialect}`} draggable={owns(p)} onDragStart={(e) => e.dataTransfer.setData(DRAG_PROJECT, p.id)}>
               <a href={`#/p/${p.id}`}>
-                <span className="project-card__mark" aria-hidden="true">{p.name.trim().slice(0, 1).toUpperCase() || 'E'}</span>
                 <span className="project-card__text">
                   <b>{highlight(p.name, query)}</b>
                   <span className="muted small">
-                    <span className="project-card__db">{dbLabel(p.dialect)}</span>
+                    <span className="project-card__db"><span className="db-dot" aria-hidden="true" />{dbLabel(p.dialect)}</span>
                     <span className="project-card__meta">
-                      <Icon name="table" size={12} /> 테이블 {p.tableCount ?? 0}
+                      테이블 {p.tableCount ?? 0}
                       <span className="dot" />
                       <span title={p.updatedAt ? new Date(p.updatedAt).toLocaleString() : undefined}>{ago(p.updatedAt)}</span>
                       {p.role && p.role !== 'owner' && <span className="project-card__role">{p.role === 'editor' ? '편집 참여' : '보기 참여'}</span>}

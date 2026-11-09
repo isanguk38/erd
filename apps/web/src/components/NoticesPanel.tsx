@@ -48,9 +48,12 @@ function NoticeList({ list, compact, seen, onSeen, onOpen }: { list: NoticeItem[
       {list.map((n) => (
         <li key={n.id} className={`notice-item kind-${n.kind}${n.pinned ? ' pinned' : ''}${open === n.id ? ' open' : ''}`}>
           <button className="notice-item__head" onClick={() => toggle(n)} aria-expanded={open === n.id}>
-            <span className={`notice-kind kind-${n.kind}`}>{kindText(n)}</span>
-            <span className="notice-item__title">{n.pinned && '📌 '}{n.title}</span>
-            {!seen.has(n.id) && <span className="notice-new">NEW</span>}
+            <span className={`notice-kind kind-${n.kind}`} data-date={`· ${date(n.publishedAt)}`}>{kindText(n)}</span>
+            <span className="notice-item__title">
+              {n.pinned && <span className="notice-pin" title="위에 고정"><Icon name="pin" size={12} /></span>}
+              {n.title}
+            </span>
+            {!seen.has(n.id) && <span className="notice-new" title="읽지 않은 글"><span className="sr-only">새 글</span></span>}
             <span className="notice-item__date">{date(n.publishedAt)}</span>
             {onOpen && <ExcerptLine n={n} />}
             <span className="notice-item__chev" aria-hidden="true"><Icon name="chevron" size={14} /></span>
@@ -90,7 +93,7 @@ function NoticeReader({ list, id, onPick, onClose }: { list: NoticeItem[]; id: s
       <article className={`notice-reader kind-${n.kind}`}>
         <div className="notice-reader__meta">
           <span className={`notice-kind kind-${n.kind}`}>{kindText(n)}</span>
-          {n.pinned && <span className="muted small">📌 고정</span>}
+          {n.pinned && <span className="notice-reader__pinned"><Icon name="pin" size={12} />고정</span>}
           <span className="muted small">{date(n.publishedAt)}</span>
         </div>
         <h3 className="notice-reader__title">{n.title}</h3>
@@ -109,9 +112,8 @@ export function NoticesPanel() {
   return (
     <aside className="notices-panel" aria-label="새 소식">
       <div className="notices-panel__head">
-        <span className="notices-panel__icon" aria-hidden="true"><Icon name="megaphone" size={15} /></span>
         <h2>새 소식</h2>
-        {unseen > 0 && <span className="notices-panel__unseen">{unseen}</span>}
+        {unseen > 0 && <span className="notices-panel__unseen" title="읽지 않은 글">{unseen}</span>}
         {unseen > 0 && (
           <button className="btn btn-ghost btn-sm" onClick={() => onSeen(list!.map((n) => n.id))} title="모두 읽음으로 표시">
             모두 읽음
